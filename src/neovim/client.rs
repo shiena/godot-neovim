@@ -88,9 +88,48 @@ impl NeovimClient {
         godot::global::godot_print!("[godot-neovim] Neovim stopped");
     }
 
-    /// Get current mode
-    pub fn get_mode(&self) -> String {
-        self.runtime.block_on(self.handler.get_mode())
+    /// Get current mode from Neovim directly
+    /// Returns (mode, blocking) tuple
+    pub fn get_mode(&self) -> (String, bool) {
+        let neovim_arc = self.neovim.clone();
+
+        self.runtime.block_on(async {
+            let nvim_lock = neovim_arc.lock().await;
+            if let Some(neovim) = nvim_lock.as_ref() {
+                // Use nvim_get_mode API to get current mode
+                match neovim.get_mode().await {
+                    Ok(mode_info) => {
+                        // mode_info is a Vec<(Value, Value)> with "mode" and "blocking" keys
+                        let mut mode = "n".to_string();
+                        let mut blocking = false;
+                        for (key, value) in mode_info {
+                            if let rmpv::Value::String(k) = &key {
+                                match k.as_str() {
+                                    Some("mode") => {
+                                        if let rmpv::Value::String(v) = value {
+                                            mode = v.as_str().unwrap_or("n").to_string();
+                                        }
+                                    }
+                                    Some("blocking") => {
+                                        if let rmpv::Value::Boolean(b) = value {
+                                            blocking = b;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        (mode, blocking)
+                    }
+                    Err(e) => {
+                        godot::global::godot_error!("[godot-neovim] Failed to get mode: {}", e);
+                        ("n".to_string(), false)
+                    }
+                }
+            } else {
+                ("n".to_string(), false)
+            }
+        })
     }
 
     /// Send keys to Neovim

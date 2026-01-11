@@ -56,6 +56,14 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Connect to settings changed signal
         self.connect_settings_signals();
 
+        // Try to find and sync current editor (in case a script is already open)
+        self.find_current_code_edit();
+        if self.current_editor.is_some() {
+            godot_print!("[godot-neovim] Found existing CodeEdit, syncing initial buffer");
+            self.reposition_mode_label();
+            self.sync_buffer_to_neovim();
+        }
+
         godot_print!("[godot-neovim] Plugin initialized successfully");
     }
 
@@ -87,9 +95,19 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
+        // Check if Neovim is connected
+        if self.neovim.is_none() {
+            return;
+        }
+
         // Forward key to Neovim
         if let Some(keys) = self.key_event_to_nvim_string(&key_event) {
             self.send_keys(&keys);
+
+            // Consume the event to prevent Godot's default handling
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
         }
     }
 }
@@ -98,19 +116,62 @@ impl IEditorPlugin for GodotNeovimPlugin {
 impl GodotNeovimPlugin {
     fn create_mode_label(&mut self) {
         let mut label = Label::new_alloc();
-        label.set_text("NORMAL");
+        label.set_text(" NORMAL ");
         label.set_name("NeovimModeLabel");
 
         // Style the label
         label.add_theme_color_override("font_color", Color::from_rgb(0.0, 1.0, 0.5));
 
-        // Get editor interface and add label to script editor
+        // Find the status bar in CodeEdit and add label there
+        if let Some(code_edit) = &self.current_editor {
+            if let Some(status_bar) = self.find_status_bar(code_edit.clone().upcast()) {
+                status_bar.clone().add_child(&label);
+                // Move to the beginning of status bar
+                let mut status_bar_mut = status_bar;
+                status_bar_mut.move_child(&label, 0);
+                self.mode_label = Some(label);
+                return;
+            }
+        }
+
+        // Fallback: add to script editor
         let editor = EditorInterface::singleton();
         if let Some(mut script_editor) = editor.get_script_editor() {
             script_editor.add_child(&label);
         }
 
         self.mode_label = Some(label);
+    }
+
+    fn find_status_bar(&self, node: Gd<Control>) -> Option<Gd<Control>> {
+        // The status bar is an HBoxContainer inside CodeTextEditor (sibling of CodeEdit)
+        // CodeTextEditor > CodeEdit (node)
+        //                > HBoxContainer (status bar with line/column info)
+
+        // Get parent (should be CodeTextEditor)
+        let Some(parent) = node.get_parent() else {
+            return None;
+        };
+
+        let parent_class = parent.get_class().to_string();
+        godot_print!("[godot-neovim] CodeEdit parent: {} ({})", parent.get_name(), parent_class);
+
+        // Search siblings for HBoxContainer (status bar)
+        let child_count = parent.get_child_count();
+        for i in 0..child_count {
+            if let Some(child) = parent.get_child(i) {
+                let class_name = child.get_class().to_string();
+                if class_name == "HBoxContainer" {
+                    if let Ok(control) = child.try_cast::<Control>() {
+                        godot_print!("[godot-neovim] Found HBoxContainer status bar");
+                        return Some(control);
+                    }
+                }
+            }
+        }
+
+        godot_print!("[godot-neovim] Status bar not found");
+        None
     }
 
     fn connect_script_editor_signals(&mut self) {
@@ -143,23 +204,58 @@ impl GodotNeovimPlugin {
     fn on_script_changed(&mut self, _script: Gd<godot::classes::Script>) {
         godot_print!("[godot-neovim] Script changed");
         self.find_current_code_edit();
+        self.reposition_mode_label();
         self.sync_buffer_to_neovim();
+    }
+
+    fn reposition_mode_label(&mut self) {
+        let Some(ref label) = self.mode_label else {
+            return;
+        };
+
+        // Check if label needs to be moved to status bar
+        if let Some(code_edit) = &self.current_editor {
+            if let Some(mut status_bar) = self.find_status_bar(code_edit.clone().upcast()) {
+                // Check if already in this status bar
+                if let Some(mut parent) = label.get_parent() {
+                    if parent.instance_id() == status_bar.instance_id() {
+                        return; // Already in correct position
+                    }
+                    // Remove from current parent
+                    parent.remove_child(label);
+                }
+
+                // Add to status bar
+                status_bar.add_child(label);
+                status_bar.move_child(label, 0);
+                godot_print!("[godot-neovim] Mode label moved to status bar");
+            }
+        }
     }
 
     fn find_current_code_edit(&mut self) {
         let editor = EditorInterface::singleton();
         if let Some(script_editor) = editor.get_script_editor() {
-            // Find CodeEdit in the script editor
-            if let Some(code_edit) = self.find_code_edit_recursive(script_editor.upcast::<Control>()) {
+            // Try to find the currently focused CodeEdit first
+            if let Some(code_edit) = self.find_focused_code_edit(script_editor.clone().upcast::<Control>()) {
+                godot_print!("[godot-neovim] Found focused CodeEdit");
+                self.current_editor = Some(code_edit);
+                return;
+            }
+            // Fallback: find visible CodeEdit
+            if let Some(code_edit) = self.find_visible_code_edit(script_editor.upcast::<Control>()) {
+                godot_print!("[godot-neovim] Found visible CodeEdit");
                 self.current_editor = Some(code_edit);
             }
         }
     }
 
-    fn find_code_edit_recursive(&self, node: Gd<Control>) -> Option<Gd<CodeEdit>> {
-        // Check if this node is a CodeEdit
+    fn find_focused_code_edit(&self, node: Gd<Control>) -> Option<Gd<CodeEdit>> {
+        // Check if this node is a focused CodeEdit
         if let Ok(code_edit) = node.clone().try_cast::<CodeEdit>() {
-            return Some(code_edit);
+            if code_edit.has_focus() {
+                return Some(code_edit);
+            }
         }
 
         // Search children
@@ -167,7 +263,30 @@ impl GodotNeovimPlugin {
         for i in 0..count {
             if let Some(child) = node.get_child(i) {
                 if let Ok(control) = child.try_cast::<Control>() {
-                    if let Some(code_edit) = self.find_code_edit_recursive(control) {
+                    if let Some(code_edit) = self.find_focused_code_edit(control) {
+                        return Some(code_edit);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn find_visible_code_edit(&self, node: Gd<Control>) -> Option<Gd<CodeEdit>> {
+        // Check if this node is a visible CodeEdit
+        if let Ok(code_edit) = node.clone().try_cast::<CodeEdit>() {
+            if code_edit.is_visible_in_tree() {
+                return Some(code_edit);
+            }
+        }
+
+        // Search children
+        let count = node.get_child_count();
+        for i in 0..count {
+            if let Some(child) = node.get_child(i) {
+                if let Ok(control) = child.try_cast::<Control>() {
+                    if let Some(code_edit) = self.find_visible_code_edit(control) {
                         return Some(code_edit);
                     }
                 }
@@ -179,14 +298,17 @@ impl GodotNeovimPlugin {
 
     fn sync_buffer_to_neovim(&mut self) {
         let Some(ref editor) = self.current_editor else {
+            godot_print!("[godot-neovim] sync_buffer_to_neovim: No current editor");
             return;
         };
 
         let Some(ref neovim) = self.neovim else {
+            godot_print!("[godot-neovim] sync_buffer_to_neovim: No neovim");
             return;
         };
 
         let Ok(client) = neovim.lock() else {
+            godot_print!("[godot-neovim] sync_buffer_to_neovim: Failed to lock");
             return;
         };
 
@@ -194,9 +316,16 @@ impl GodotNeovimPlugin {
         let text = editor.get_text().to_string();
         let lines: Vec<String> = text.lines().map(String::from).collect();
 
+        godot_print!("[godot-neovim] Syncing {} lines to Neovim", lines.len());
+        if !lines.is_empty() {
+            godot_print!("[godot-neovim] First line: '{}'", lines[0].chars().take(50).collect::<String>());
+        }
+
         // Set buffer content in Neovim
         if let Err(e) = client.set_buffer_lines(0, -1, lines) {
             godot_error!("[godot-neovim] Failed to sync buffer: {}", e);
+        } else {
+            godot_print!("[godot-neovim] Buffer synced to Neovim successfully");
         }
     }
 
@@ -282,38 +411,84 @@ impl GodotNeovimPlugin {
     }
 
     fn send_keys(&mut self, keys: &str) {
-        // Get mode and buffer data first
-        let (mode, lines, cursor) = {
-            let Some(ref neovim) = self.neovim else {
-                return;
-            };
-
-            let Ok(client) = neovim.lock() else {
-                return;
-            };
-
-            if let Err(e) = client.input(keys) {
-                godot_error!("[godot-neovim] Failed to send keys: {}", e);
-                return;
-            }
-
-            let mode = client.get_mode();
-            let lines = client.get_buffer_lines(0, -1).ok();
-            let cursor = client.get_cursor().ok();
-
-            (mode, lines, cursor)
+        let Some(ref neovim) = self.neovim else {
+            return;
         };
 
-        // Update mode display
-        self.update_mode_display(&mode);
+        let Ok(client) = neovim.try_lock() else {
+            godot_warn!("[godot-neovim] Mutex busy, dropping key: {}", keys);
+            return;
+        };
 
-        // Sync buffer back to Godot
+        // Send input to Neovim
+        if let Err(e) = client.input(keys) {
+            godot_error!("[godot-neovim] Failed to send keys: {}", e);
+            return;
+        }
+
+        // Get mode after input (includes blocking state)
+        let (mode, blocking) = client.get_mode();
+
+        // If Neovim is waiting for more input (operator-pending), skip sync
+        if blocking {
+            return;
+        }
+
+        // Only get buffer if in insert mode or editing command
+        let needs_buffer_sync = mode == "i" || self.is_editing_key(keys);
+
+        let lines = if needs_buffer_sync {
+            client.get_buffer_lines(0, -1).ok()
+        } else {
+            None
+        };
+
+        // Get cursor position
+        let cursor = client.get_cursor().ok();
+
+        // Release lock before updating UI
+        drop(client);
+
+        // Update mode display with cursor position
+        self.update_mode_display_with_cursor(&mode, cursor);
+
+        // Sync buffer if needed, otherwise just sync cursor
         if let Some(lines) = lines {
             self.sync_buffer_from_neovim(lines, cursor);
+        } else {
+            self.sync_cursor_from_neovim(cursor);
+        }
+    }
+
+    fn is_editing_key(&self, keys: &str) -> bool {
+        // Keys that modify buffer content
+        matches!(keys,
+            "x" | "X" | "d" | "D" | "c" | "C" | "s" | "S" |
+            "p" | "P" | "o" | "O" | "r" | "R" |
+            "u" | "<C-r>" | // undo/redo
+            "." | // repeat
+            "J" | // join lines
+            "~" | // toggle case
+            "<CR>" | "<BS>" | "<Del>" | "<Tab>"
+        )
+    }
+
+    fn sync_cursor_from_neovim(&mut self, cursor: Option<(i64, i64)>) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        if let Some((line, col)) = cursor {
+            editor.set_caret_line((line - 1) as i32);
+            editor.set_caret_column(col as i32);
         }
     }
 
     fn update_mode_display(&mut self, mode: &str) {
+        self.update_mode_display_with_cursor(mode, None);
+    }
+
+    fn update_mode_display_with_cursor(&mut self, mode: &str, cursor: Option<(i64, i64)>) {
         let mode_text = match mode {
             "n" | "normal" => "NORMAL",
             "i" | "insert" => "INSERT",
@@ -326,8 +501,15 @@ impl GodotNeovimPlugin {
             _ => mode,
         };
 
+        // Format: "NORMAL 123:45" (line:col)
+        let display_text = if let Some((line, col)) = cursor {
+            format!("{} {}:{}", mode_text, line, col)
+        } else {
+            mode_text.to_string()
+        };
+
         if let Some(ref mut label) = self.mode_label {
-            label.set_text(mode_text);
+            label.set_text(&display_text);
 
             // Change color based on mode
             let color = match mode {
@@ -344,15 +526,26 @@ impl GodotNeovimPlugin {
 
     fn sync_buffer_from_neovim(&mut self, lines: Vec<String>, cursor: Option<(i64, i64)>) {
         let Some(ref mut editor) = self.current_editor else {
+            godot_print!("[godot-neovim] No current editor for buffer sync");
             return;
         };
 
+        godot_print!("[godot-neovim] Syncing buffer from Neovim: {} lines", lines.len());
+        if !lines.is_empty() {
+            godot_print!("[godot-neovim] First line from Neovim: '{}'", lines[0].chars().take(50).collect::<String>());
+            if lines.len() > 1 {
+                godot_print!("[godot-neovim] Last line from Neovim: '{}'", lines[lines.len()-1].chars().take(50).collect::<String>());
+            }
+        }
+
         // Update Godot editor
         let text = lines.join("\n");
+        godot_print!("[godot-neovim] Setting text ({} chars)", text.len());
         editor.set_text(&text);
 
         // Update cursor position
         if let Some((line, col)) = cursor {
+            godot_print!("[godot-neovim] Setting cursor to line {}, col {}", line, col);
             editor.set_caret_line((line - 1) as i32); // Neovim is 1-indexed
             editor.set_caret_column(col as i32);
         }

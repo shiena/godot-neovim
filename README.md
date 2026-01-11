@@ -9,10 +9,25 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 ## Features
 
 - Real Neovim backend (not just keybinding emulation)
-- Mode indicator (NORMAL, INSERT, VISUAL, etc.)
-- Buffer synchronization between Godot and Neovim
+- Mode indicator with cursor position (e.g., `NORMAL 123:45`)
+- Cursor synchronization between Godot and Neovim
+- Support for count prefixes (e.g., `4j`, `10gg`)
+- Support for operator-pending commands (e.g., `gg`, `dd`, `yy`)
 - Configurable Neovim executable path via Editor Settings
 - Path validation on startup and settings change
+
+### Current Status
+
+This plugin is in early development. The following features are implemented:
+
+- ✅ Normal mode navigation (`h`, `j`, `k`, `l`, `gg`, `G`, `w`, `b`, etc.)
+- ✅ Mode switching (`i`, `a`, `o`, `v`, etc.)
+- ✅ Mode indicator display with line:column
+- ✅ Cursor position synchronization
+- 🚧 Insert mode text input (in progress)
+- 🚧 Buffer synchronization (in progress)
+- ⬜ Visual mode selection display
+- ⬜ Command-line mode
 
 ## Requirements
 
