@@ -1,13 +1,7 @@
 use godot::classes::{EditorInterface, EditorSettings};
 use godot::prelude::*;
 use std::path::Path;
-use std::process::Command;
-
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+use std::process::{Command, Output};
 
 const SETTING_NEOVIM_PATH: &str = "godot_neovim/neovim_executable_path";
 
@@ -117,13 +111,7 @@ pub fn validate_neovim_path(path: &str) -> ValidationResult {
     }
 
     // Try to execute nvim --version to validate
-    let mut cmd = Command::new(path);
-    cmd.arg("--version");
-
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-
-    match cmd.output() {
+    match run_nvim_version(path) {
         Ok(output) => {
             if output.status.success() {
                 let version_output = String::from_utf8_lossy(&output.stdout);
@@ -219,5 +207,24 @@ pub fn on_settings_changed(settings: &Gd<EditorSettings>) {
                 }
             }
         }
+    }
+}
+
+/// Run nvim --version with platform-specific settings
+fn run_nvim_version(path: &str) -> std::io::Result<Output> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        Command::new(path)
+            .arg("--version")
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Command::new(path).arg("--version").output()
     }
 }
