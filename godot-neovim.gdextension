@@ -1,0 +1,15 @@
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.3
+compatibility_maximum = 4.5
+reloadable = true
+
+[libraries]
+linux.debug.x86_64 = "res://addons/godot-neovim/libgodot_neovim.so"
+linux.release.x86_64 = "res://addons/godot-neovim/libgodot_neovim.so"
+windows.debug.x86_64 = "res://addons/godot-neovim/godot_neovim.dll"
+windows.release.x86_64 = "res://addons/godot-neovim/godot_neovim.dll"
+macos.debug = "res://addons/godot-neovim/libgodot_neovim.dylib"
+macos.release = "res://addons/godot-neovim/libgodot_neovim.dylib"
+macos.debug.arm64 = "res://addons/godot-neovim/libgodot_neovim.dylib"
+macos.release.arm64 = "res://addons/godot-neovim/libgodot_neovim.dylib"
