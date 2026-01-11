@@ -8,6 +8,9 @@ use tokio::process::Command;
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 type Writer = nvim_rs::compat::tokio::Compat<tokio::process::ChildStdin>;
 
 /// Manages connection to Neovim process
@@ -51,11 +54,7 @@ impl NeovimClient {
         godot::global::godot_print!("[godot-neovim] Starting Neovim: {}", nvim_path);
 
         self.runtime.block_on(async {
-            let mut cmd = Command::new(&nvim_path);
-            cmd.args(["--embed", "--headless"])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
+            let mut cmd = create_nvim_command(&nvim_path);
 
             let (neovim, _io_handler, _child) = create::new_child_cmd(&mut cmd, handler).await?;
 
@@ -237,5 +236,31 @@ impl Default for NeovimClient {
 impl Drop for NeovimClient {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+/// Create Neovim command with platform-specific settings
+fn create_nvim_command(nvim_path: &str) -> Command {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut std_cmd = std::process::Command::new(nvim_path);
+        std_cmd
+            .args(["--embed", "--headless"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .creation_flags(CREATE_NO_WINDOW);
+        Command::from(std_cmd)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut cmd = Command::new(nvim_path);
+        cmd.args(["--embed", "--headless"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        cmd
     }
 }

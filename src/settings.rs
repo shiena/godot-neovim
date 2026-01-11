@@ -3,6 +3,12 @@ use godot::prelude::*;
 use std::path::Path;
 use std::process::Command;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 const SETTING_NEOVIM_PATH: &str = "godot_neovim/neovim_executable_path";
 
 /// Result of validating Neovim executable path
@@ -111,7 +117,13 @@ pub fn validate_neovim_path(path: &str) -> ValidationResult {
     }
 
     // Try to execute nvim --version to validate
-    match Command::new(path).arg("--version").output() {
+    let mut cmd = Command::new(path);
+    cmd.arg("--version");
+
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    match cmd.output() {
         Ok(output) => {
             if output.status.success() {
                 let version_output = String::from_utf8_lossy(&output.stdout);
