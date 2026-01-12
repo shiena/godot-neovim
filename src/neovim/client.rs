@@ -80,18 +80,16 @@ impl NeovimClient {
     /// Poll the runtime to process pending async events (like redraw notifications)
     /// This must be called regularly (e.g., every frame) to receive events
     pub fn poll(&self) {
-        // Check if io_handle is still running
-        if let Some(ref handle) = self.io_handle {
-            if handle.is_finished() {
-                godot::global::godot_error!("[godot-neovim] IO handler has finished unexpectedly!");
-            }
-        }
-
         self.runtime.block_on(async {
             // Give the runtime a chance to process IO events
             // A short sleep allows tokio to poll IO
             tokio::time::sleep(std::time::Duration::from_micros(100)).await;
         });
+    }
+
+    /// Check if IO handler is still running
+    pub fn is_io_running(&self) -> bool {
+        self.io_handle.as_ref().map_or(false, |h| !h.is_finished())
     }
 
     /// Update the Neovim executable path

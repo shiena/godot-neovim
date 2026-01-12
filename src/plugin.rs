@@ -124,7 +124,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
             let is_ctrl_bracket = key_event.is_ctrl_pressed() && key_event.get_keycode() == Key::BRACKETLEFT;
 
             if is_escape || is_ctrl_bracket {
-                self.send_keys("<Esc>");
+                self.send_escape();
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
                 }
@@ -496,6 +496,34 @@ impl GodotNeovimPlugin {
                 self.sync_buffer_to_neovim();
             }
         }
+    }
+
+    /// Send Escape to Neovim and force mode to normal
+    fn send_escape(&mut self) {
+        godot_print!("[godot-neovim] send_escape");
+
+        let Some(ref neovim) = self.neovim else {
+            return;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            return;
+        };
+
+        // Send Escape to Neovim
+        if let Err(e) = client.input("<Esc>") {
+            godot_error!("[godot-neovim] Failed to send Escape: {}", e);
+            return;
+        }
+
+        // Release lock
+        drop(client);
+
+        // Force mode to normal (ESC always returns to normal mode)
+        self.current_mode = "n".to_string();
+        self.update_mode_display_with_cursor("n", None);
+
+        godot_print!("[godot-neovim] Escaped to normal mode");
     }
 
     /// Send keys to Neovim and update state
