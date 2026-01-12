@@ -287,9 +287,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
-        // Handle ':' for command-line mode
-        // Key::COLON for direct colon key, or Shift+Semicolon on US keyboards
-        if keycode == Key::COLON || (keycode == Key::SEMICOLON && key_event.is_shift_pressed()) {
+        // Handle ':' for command-line mode (use unicode for cross-keyboard support)
+        let unicode_char = char::from_u32(key_event.get_unicode());
+        if unicode_char == Some(':') {
             self.open_command_line();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -297,11 +297,8 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
-        // Handle '*' for search forward word under cursor
-        // Key::ASTERISK for direct key, or Shift+8 on US keyboards
-        if keycode == Key::ASTERISK
-            || (keycode == Key::KEY_8 && key_event.is_shift_pressed())
-        {
+        // Handle '*' for search forward word under cursor (use unicode for JIS keyboard support)
+        if unicode_char == Some('*') {
             self.search_word_forward();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -310,10 +307,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
         }
 
         // Handle '#' for search backward word under cursor
-        // Key::NUMBERSIGN for direct key, or Shift+3 on US keyboards
-        if keycode == Key::NUMBERSIGN
-            || (keycode == Key::KEY_3 && key_event.is_shift_pressed())
-        {
+        if unicode_char == Some('#') {
             self.search_word_backward();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -394,9 +388,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
         }
 
         // Handle '%' for matching bracket
-        if keycode == Key::PERCENT
-            || (keycode == Key::KEY_5 && key_event.is_shift_pressed())
-        {
+        if unicode_char == Some('%') {
             self.jump_to_matching_bracket();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -405,7 +397,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
         }
 
         // Handle '0' for go to start of line
-        if keycode == Key::KEY_0 && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+        if unicode_char == Some('0') && !key_event.is_ctrl_pressed() {
             self.move_to_line_start();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -414,9 +406,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
         }
 
         // Handle '^' for go to first non-blank
-        if keycode == Key::ASCIICIRCUM
-            || (keycode == Key::KEY_6 && key_event.is_shift_pressed())
-        {
+        if unicode_char == Some('^') {
             self.move_to_first_non_blank();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -425,9 +415,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
         }
 
         // Handle '$' for go to end of line
-        if keycode == Key::DOLLAR
-            || (keycode == Key::KEY_4 && key_event.is_shift_pressed())
-        {
+        if unicode_char == Some('$') {
             self.move_to_line_end();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -436,9 +424,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
         }
 
         // Handle '{' for previous paragraph
-        if keycode == Key::BRACELEFT
-            || (keycode == Key::BRACKETLEFT && key_event.is_shift_pressed())
-        {
+        if unicode_char == Some('{') {
             self.move_to_prev_paragraph();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -447,9 +433,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
         }
 
         // Handle '}' for next paragraph
-        if keycode == Key::BRACERIGHT
-            || (keycode == Key::BRACKETRIGHT && key_event.is_shift_pressed())
-        {
+        if unicode_char == Some('}') {
             self.move_to_next_paragraph();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -484,10 +468,8 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
-        // Handle '~' for toggle case
-        if keycode == Key::ASCIITILDE
-            || (keycode == Key::QUOTELEFT && key_event.is_shift_pressed())
-        {
+        // Handle '~' for toggle case (use unicode for keyboard layout independence)
+        if unicode_char == Some('~') {
             self.toggle_case();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -497,9 +479,8 @@ impl IEditorPlugin for GodotNeovimPlugin {
 
         // Handle '>>' for indent (first '>' sets pending, second '>' executes)
         // Handle '<<' for unindent (first '<' sets pending, second '<' executes)
-        if keycode == Key::GREATER
-            || (keycode == Key::PERIOD && key_event.is_shift_pressed())
-        {
+        // Use unicode for keyboard layout independence
+        if unicode_char == Some('>') {
             if self.last_key == ">" {
                 self.indent_line();
                 self.last_key.clear();
@@ -512,9 +493,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
-        if keycode == Key::LESS
-            || (keycode == Key::COMMA && key_event.is_shift_pressed())
-        {
+        if unicode_char == Some('<') {
             if self.last_key == "<" {
                 self.unindent_line();
                 self.last_key.clear();
