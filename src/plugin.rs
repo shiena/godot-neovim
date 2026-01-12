@@ -814,7 +814,10 @@ impl GodotNeovimPlugin {
 
     fn editor_has_focus(&self) -> bool {
         if let Some(ref editor) = self.current_editor {
-            return editor.has_focus();
+            // Check if editor instance is still valid (not freed)
+            if editor.is_instance_valid() {
+                return editor.has_focus();
+            }
         }
         false
     }
@@ -1611,7 +1614,10 @@ impl GodotNeovimPlugin {
     }
 
     /// :q - Close the current script tab by simulating Ctrl+W
-    fn cmd_close(&self) {
+    fn cmd_close(&mut self) {
+        // Clear current editor reference before closing to avoid accessing freed instance
+        self.current_editor = None;
+
         let mut key_event = InputEventKey::new_gd();
         key_event.set_keycode(Key::W);
         key_event.set_ctrl_pressed(true);
