@@ -4,6 +4,26 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 const SETTING_NEOVIM_PATH: &str = "godot_neovim/neovim_executable_path";
+const SETTING_INPUT_MODE: &str = "godot_neovim/input_mode";
+
+/// Input mode for insert mode handling
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InputMode {
+    /// Hybrid mode: Godot handles insert mode natively (IME support)
+    #[default]
+    Hybrid,
+    /// Strict mode: Neovim handles all modes including insert (no IME)
+    Strict,
+}
+
+impl InputMode {
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "strict" => InputMode::Strict,
+            _ => InputMode::Hybrid,
+        }
+    }
+}
 
 /// Result of validating Neovim executable path
 #[derive(Debug, Clone)]
@@ -48,9 +68,28 @@ pub fn initialize_settings() {
 
     settings.add_property_info(&property_info);
 
+    // Add input_mode setting if it doesn't exist
+    if !settings.has_setting(SETTING_INPUT_MODE) {
+        settings.set_setting(SETTING_INPUT_MODE, &Variant::from("hybrid"));
+    }
+
+    // Set initial value for input_mode
+    settings.set_initial_value(SETTING_INPUT_MODE, &Variant::from("hybrid"), false);
+
+    // Add property info for input_mode (dropdown)
+    #[allow(deprecated)]
+    let mut input_mode_info = Dictionary::new();
+    input_mode_info.set("name", SETTING_INPUT_MODE);
+    input_mode_info.set("type", VariantType::STRING.ord());
+    input_mode_info.set("hint", godot::global::PropertyHint::ENUM.ord());
+    input_mode_info.set("hint_string", "hybrid,strict");
+
+    settings.add_property_info(&input_mode_info);
+
     crate::verbose_print!(
-        "[godot-neovim] Settings initialized. Neovim path: {}",
-        get_neovim_path()
+        "[godot-neovim] Settings initialized. Neovim path: {}, Input mode: {:?}",
+        get_neovim_path(),
+        get_input_mode()
     );
 }
 
@@ -96,6 +135,23 @@ pub fn get_neovim_path() -> String {
     }
 
     get_default_neovim_path().to_string()
+}
+
+/// Get the configured input mode
+pub fn get_input_mode() -> InputMode {
+    let editor = EditorInterface::singleton();
+    let Some(settings) = editor.get_editor_settings() else {
+        return InputMode::default();
+    };
+
+    if settings.has_setting(SETTING_INPUT_MODE) {
+        let value = settings.get_setting(SETTING_INPUT_MODE);
+        if let Ok(mode_str) = value.try_to::<GString>() {
+            return InputMode::from_str(&mode_str.to_string());
+        }
+    }
+
+    InputMode::default()
 }
 
 /// Validate the Neovim executable path

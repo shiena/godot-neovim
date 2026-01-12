@@ -222,9 +222,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
             }
         }
 
-        // In insert mode, let Godot handle most keys natively
+        // In insert mode, behavior depends on input mode setting
         if self.is_insert_mode() {
-            // Intercept Escape or Ctrl+[ to exit insert mode
+            // Intercept Escape or Ctrl+[ to exit insert mode (always)
             let is_escape = key_event.get_keycode() == Key::ESCAPE;
             let is_ctrl_bracket =
                 key_event.is_ctrl_pressed() && key_event.get_keycode() == Key::BRACKETLEFT;
@@ -237,7 +237,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
                 return;
             }
 
-            // Ctrl+B in insert mode: exit insert and enter visual block mode
+            // Ctrl+B in insert mode: exit insert and enter visual block mode (always)
             let is_ctrl_b = key_event.is_ctrl_pressed() && key_event.get_keycode() == Key::B;
             if is_ctrl_b {
                 // First sync buffer and exit insert mode
@@ -253,7 +253,21 @@ impl IEditorPlugin for GodotNeovimPlugin {
                 return;
             }
 
-            // Let Godot handle other keys in insert mode
+            // Check input mode setting
+            let input_mode = settings::get_input_mode();
+            if input_mode == settings::InputMode::Hybrid {
+                // Hybrid mode: Let Godot handle other keys in insert mode (IME support)
+                return;
+            }
+
+            // Strict mode: Send keys to Neovim
+            let nvim_key = self.key_event_to_nvim_notation(&key_event);
+            if !nvim_key.is_empty() {
+                self.send_keys_insert_mode(&nvim_key);
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+            }
             return;
         }
 
@@ -931,6 +945,119 @@ impl GodotNeovimPlugin {
         matches!(mode, "v" | "V" | "\x16" | "^V" | "CTRL-V")
     }
 
+    /// Convert Godot key event to Neovim notation for insert mode (strict mode)
+    fn key_event_to_nvim_notation(&self, key_event: &Gd<InputEventKey>) -> String {
+        let keycode = key_event.get_keycode();
+        let unicode = key_event.get_unicode();
+        let ctrl = key_event.is_ctrl_pressed();
+        let alt = key_event.is_alt_pressed();
+        let shift = key_event.is_shift_pressed();
+
+        // Handle special keys
+        let special = match keycode {
+            Key::BACKSPACE => Some("<BS>"),
+            Key::TAB => Some("<Tab>"),
+            Key::ENTER => Some("<CR>"),
+            Key::DELETE => Some("<Del>"),
+            Key::HOME => Some("<Home>"),
+            Key::END => Some("<End>"),
+            Key::PAGEUP => Some("<PageUp>"),
+            Key::PAGEDOWN => Some("<PageDown>"),
+            Key::UP => Some("<Up>"),
+            Key::DOWN => Some("<Down>"),
+            Key::LEFT => Some("<Left>"),
+            Key::RIGHT => Some("<Right>"),
+            Key::F1 => Some("<F1>"),
+            Key::F2 => Some("<F2>"),
+            Key::F3 => Some("<F3>"),
+            Key::F4 => Some("<F4>"),
+            Key::F5 => Some("<F5>"),
+            Key::F6 => Some("<F6>"),
+            Key::F7 => Some("<F7>"),
+            Key::F8 => Some("<F8>"),
+            Key::F9 => Some("<F9>"),
+            Key::F10 => Some("<F10>"),
+            Key::F11 => Some("<F11>"),
+            Key::F12 => Some("<F12>"),
+            _ => None,
+        };
+
+        if let Some(key_str) = special {
+            // Add modifiers to special keys
+            if ctrl || alt || shift {
+                let mut modifiers = String::new();
+                if ctrl {
+                    modifiers.push_str("C-");
+                }
+                if alt {
+                    modifiers.push_str("A-");
+                }
+                if shift {
+                    modifiers.push_str("S-");
+                }
+                // Convert <Key> to <C-A-S-Key>
+                let inner = &key_str[1..key_str.len() - 1];
+                return format!("<{}{}>", modifiers, inner);
+            }
+            return key_str.to_string();
+        }
+
+        // Handle printable characters
+        if unicode > 0 {
+            if let Some(c) = char::from_u32(unicode) {
+                // Ctrl+letter combinations
+                if ctrl && !alt {
+                    let base_char = c.to_ascii_lowercase();
+                    if base_char.is_ascii_alphabetic() {
+                        return format!("<C-{}>", base_char);
+                    }
+                }
+                // Alt combinations
+                if alt && !ctrl {
+                    return format!("<A-{}>", c);
+                }
+                // Ctrl+Alt combinations
+                if ctrl && alt {
+                    return format!("<C-A-{}>", c);
+                }
+                // Regular character (shift is already applied in unicode)
+                return c.to_string();
+            }
+        }
+
+        String::new()
+    }
+
+    /// Send keys to Neovim in insert mode and sync buffer (strict mode)
+    fn send_keys_insert_mode(&mut self, keys: &str) {
+        crate::verbose_print!("[godot-neovim] send_keys_insert_mode: {}", keys);
+
+        let Some(ref neovim) = self.neovim else {
+            return;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            godot_warn!("[godot-neovim] Mutex busy, dropping key: {}", keys);
+            return;
+        };
+
+        // Send input to Neovim
+        if let Err(e) = client.input(keys) {
+            godot_error!("[godot-neovim] Failed to send keys: {}", e);
+            return;
+        }
+
+        // Get buffer and cursor from Neovim
+        let lines = client.get_buffer_lines(0, -1).unwrap_or_default();
+        let cursor = client.get_cursor().ok();
+
+        // Release lock before syncing
+        drop(client);
+
+        // Sync buffer from Neovim to Godot
+        self.sync_buffer_from_neovim(lines, cursor);
+    }
+
     /// Process pending updates from Neovim redraw events
     fn process_neovim_updates(&mut self) {
         let Some(ref neovim) = self.neovim else {
@@ -1091,10 +1218,24 @@ impl GodotNeovimPlugin {
         }
         crate::verbose_print!("[godot-neovim] Key sent successfully");
 
-        // Query mode - if blocking (operator-pending), skip sync
+        // Query mode - if blocking (operator-pending or insert mode), handle specially
         let (mode, blocking) = client.get_mode();
 
+        // Track old mode for visual mode transitions before updating
+        let old_mode = self.current_mode.clone();
+
+        // Always update current_mode so is_insert_mode() works correctly
+        self.current_mode = mode.clone();
+
         if blocking {
+            // Insert mode is "blocking" but we should update mode display
+            if mode == "i" {
+                crate::verbose_print!("[godot-neovim] Entered insert mode");
+                drop(client);
+                self.update_mode_display_with_cursor(&mode, None);
+                return true;
+            }
+            // True operator-pending (like waiting for motion after 'd')
             crate::verbose_print!("[godot-neovim] Operator pending, skipping sync");
             return false;
         }
@@ -1116,11 +1257,7 @@ impl GodotNeovimPlugin {
         // Release lock before updating UI
         drop(client);
 
-        // Track old mode for visual mode transitions
-        let old_mode = self.current_mode.clone();
-
-        // Update state
-        self.current_mode = mode.clone();
+        // Update cursor state
         self.current_cursor = (cursor.0 - 1, cursor.1); // Convert to 0-indexed
 
         // Sync buffer from Neovim to Godot
