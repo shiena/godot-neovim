@@ -1510,6 +1510,16 @@ impl GodotNeovimPlugin {
                     self.send_keys("<C-v>");
                     true
                 }
+                "t" => {
+                    // gt - go to next tab
+                    self.next_script_tab();
+                    true
+                }
+                "T" => {
+                    // gT - go to previous tab
+                    self.prev_script_tab();
+                    true
+                }
                 _ => false,
             };
 
@@ -1816,6 +1826,27 @@ impl GodotNeovimPlugin {
         key_event.set_pressed(true);
         Input::singleton().parse_input_event(&key_event);
         crate::verbose_print!("[godot-neovim] :q - Close triggered (Ctrl+W)");
+    }
+
+    /// gt - Go to next script tab by simulating Ctrl+Tab
+    fn next_script_tab(&self) {
+        let mut key_event = InputEventKey::new_gd();
+        key_event.set_keycode(Key::TAB);
+        key_event.set_ctrl_pressed(true);
+        key_event.set_pressed(true);
+        Input::singleton().parse_input_event(&key_event);
+        crate::verbose_print!("[godot-neovim] gt - Next tab (Ctrl+Tab)");
+    }
+
+    /// gT - Go to previous script tab by simulating Ctrl+Shift+Tab
+    fn prev_script_tab(&self) {
+        let mut key_event = InputEventKey::new_gd();
+        key_event.set_keycode(Key::TAB);
+        key_event.set_ctrl_pressed(true);
+        key_event.set_shift_pressed(true);
+        key_event.set_pressed(true);
+        Input::singleton().parse_input_event(&key_event);
+        crate::verbose_print!("[godot-neovim] gT - Previous tab (Ctrl+Shift+Tab)");
     }
 
     /// :qa/:qall - Close all script tabs
