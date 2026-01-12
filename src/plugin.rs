@@ -1610,9 +1610,14 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] :w - Save triggered (Ctrl+S)");
     }
 
-    /// :q - Close (does nothing in Godot editor context, just shows message)
+    /// :q - Close the current script tab by simulating Ctrl+W
     fn cmd_close(&self) {
-        crate::verbose_print!("[godot-neovim] :q - Close requested (no-op in editor)");
+        let mut key_event = InputEventKey::new_gd();
+        key_event.set_keycode(Key::W);
+        key_event.set_ctrl_pressed(true);
+        key_event.set_pressed(true);
+        Input::singleton().parse_input_event(&key_event);
+        crate::verbose_print!("[godot-neovim] :q - Close triggered (Ctrl+W)");
     }
 
     /// :s/old/new/g or :%s/old/new/g - Substitute
