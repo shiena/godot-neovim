@@ -110,7 +110,7 @@ impl NeovimClient {
         let neovim_arc = self.neovim.clone();
         let nvim_path = self.nvim_path.clone();
 
-        godot::global::godot_print!("[godot-neovim] Starting Neovim: {}", nvim_path);
+        crate::verbose_print!("[godot-neovim] Starting Neovim: {}", nvim_path);
 
         let io_handle = self.runtime.block_on(async {
             let mut cmd = create_nvim_command(&nvim_path);
@@ -126,18 +126,18 @@ impl NeovimClient {
                 .await
                 .map_err(|e| format!("Failed to attach UI: {}", e))?;
 
-            godot::global::godot_print!("[godot-neovim] UI attached successfully");
+            crate::verbose_print!("[godot-neovim] UI attached successfully");
 
             let mut nvim_lock = neovim_arc.lock().await;
             *nvim_lock = Some(neovim);
 
-            godot::global::godot_print!("[godot-neovim] Neovim started successfully");
+            crate::verbose_print!("[godot-neovim] Neovim started successfully");
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(io_handler)
         })?;
 
         self.io_handle = Some(io_handle);
 
-        godot::global::godot_print!("[godot-neovim] IO handler spawned, has_updates={}", self.has_updates.load(std::sync::atomic::Ordering::SeqCst));
+        crate::verbose_print!("[godot-neovim] IO handler spawned, has_updates={}", self.has_updates.load(std::sync::atomic::Ordering::SeqCst));
 
         Ok(())
     }
@@ -151,7 +151,7 @@ impl NeovimClient {
                 let _ = neovim.command("qa!").await;
             }
         });
-        godot::global::godot_print!("[godot-neovim] Neovim stopped");
+        crate::verbose_print!("[godot-neovim] Neovim stopped");
     }
 
     /// Get current mode from Neovim directly with timeout

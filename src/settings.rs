@@ -48,7 +48,7 @@ pub fn initialize_settings() {
 
     settings.add_property_info(&property_info);
 
-    godot_print!(
+    crate::verbose_print!(
         "[godot-neovim] Settings initialized. Neovim path: {}",
         get_neovim_path()
     );
@@ -148,7 +148,7 @@ pub fn validate_current_path() -> ValidationResult {
 
     match &result {
         ValidationResult::Valid { version } => {
-            godot_print!("[godot-neovim] Neovim validated: {}", version);
+            crate::verbose_print!("[godot-neovim] Neovim validated: {}", version);
         }
         ValidationResult::NotFound => {
             godot_error!(
@@ -184,7 +184,7 @@ pub fn on_settings_changed(settings: &Gd<EditorSettings>) {
 
             match &result {
                 ValidationResult::Valid { version } => {
-                    godot_print!("[godot-neovim] Neovim path validated: {}", version);
+                    crate::verbose_print!("[godot-neovim] Neovim path validated: {}", version);
                 }
                 ValidationResult::NotFound => {
                     godot_warn!(

@@ -27,7 +27,7 @@ pub struct GodotNeovimPlugin {
 #[godot_api]
 impl IEditorPlugin for GodotNeovimPlugin {
     fn enter_tree(&mut self) {
-        godot_print!("[godot-neovim] Plugin entering tree");
+        crate::verbose_print!("[godot-neovim] Plugin entering tree");
 
         // Initialize settings first
         settings::initialize_settings();
@@ -65,7 +65,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Try to find and sync current editor (in case a script is already open)
         self.find_current_code_edit();
         if self.current_editor.is_some() {
-            godot_print!("[godot-neovim] Found existing CodeEdit, syncing initial buffer");
+            crate::verbose_print!("[godot-neovim] Found existing CodeEdit, syncing initial buffer");
             self.reposition_mode_label();
             self.sync_buffer_to_neovim();
         }
@@ -73,11 +73,11 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Enable process() to be called every frame for checking redraw events
         self.base_mut().set_process(true);
 
-        godot_print!("[godot-neovim] Plugin initialized successfully");
+        crate::verbose_print!("[godot-neovim] Plugin initialized successfully");
     }
 
     fn exit_tree(&mut self) {
-        godot_print!("[godot-neovim] Plugin exiting tree");
+        crate::verbose_print!("[godot-neovim] Plugin exiting tree");
 
         // Cleanup mode label
         if let Some(mut label) = self.mode_label.take() {
@@ -111,11 +111,11 @@ impl IEditorPlugin for GodotNeovimPlugin {
 
         // Check if Neovim is connected
         if self.neovim.is_none() {
-            godot_print!("[godot-neovim] input: No neovim");
+            crate::verbose_print!("[godot-neovim] input: No neovim");
             return;
         }
 
-        godot_print!("[godot-neovim] input: mode={}, key={:?}", self.current_mode, key_event.get_keycode());
+        crate::verbose_print!("[godot-neovim] input: mode={}, key={:?}", self.current_mode, key_event.get_keycode());
 
         // In insert mode, let Godot handle most keys natively
         if self.is_insert_mode() {
@@ -181,7 +181,7 @@ impl GodotNeovimPlugin {
         };
 
         let parent_class = parent.get_class().to_string();
-        godot_print!("[godot-neovim] CodeEdit parent: {} ({})", parent.get_name(), parent_class);
+        crate::verbose_print!("[godot-neovim] CodeEdit parent: {} ({})", parent.get_name(), parent_class);
 
         // Search siblings for HBoxContainer (status bar)
         let child_count = parent.get_child_count();
@@ -190,14 +190,14 @@ impl GodotNeovimPlugin {
                 let class_name = child.get_class().to_string();
                 if class_name == "HBoxContainer" {
                     if let Ok(control) = child.try_cast::<Control>() {
-                        godot_print!("[godot-neovim] Found HBoxContainer status bar");
+                        crate::verbose_print!("[godot-neovim] Found HBoxContainer status bar");
                         return Some(control);
                     }
                 }
             }
         }
 
-        godot_print!("[godot-neovim] Status bar not found");
+        crate::verbose_print!("[godot-neovim] Status bar not found");
         None
     }
 
@@ -229,7 +229,7 @@ impl GodotNeovimPlugin {
 
     #[func]
     fn on_script_changed(&mut self, _script: Gd<godot::classes::Script>) {
-        godot_print!("[godot-neovim] Script changed");
+        crate::verbose_print!("[godot-neovim] Script changed");
         self.find_current_code_edit();
         self.reposition_mode_label();
         self.sync_buffer_to_neovim();
@@ -267,7 +267,7 @@ impl GodotNeovimPlugin {
                 // Add to status bar
                 status_bar.add_child(label);
                 status_bar.move_child(label, 0);
-                godot_print!("[godot-neovim] Mode label moved to status bar");
+                crate::verbose_print!("[godot-neovim] Mode label moved to status bar");
             }
         }
     }
@@ -277,13 +277,13 @@ impl GodotNeovimPlugin {
         if let Some(script_editor) = editor.get_script_editor() {
             // Try to find the currently focused CodeEdit first
             if let Some(code_edit) = self.find_focused_code_edit(script_editor.clone().upcast::<Control>()) {
-                godot_print!("[godot-neovim] Found focused CodeEdit");
+                crate::verbose_print!("[godot-neovim] Found focused CodeEdit");
                 self.current_editor = Some(code_edit);
                 return;
             }
             // Fallback: find visible CodeEdit
             if let Some(code_edit) = self.find_visible_code_edit(script_editor.upcast::<Control>()) {
-                godot_print!("[godot-neovim] Found visible CodeEdit");
+                crate::verbose_print!("[godot-neovim] Found visible CodeEdit");
                 self.current_editor = Some(code_edit);
             }
         }
@@ -337,17 +337,17 @@ impl GodotNeovimPlugin {
 
     fn sync_buffer_to_neovim(&mut self) {
         let Some(ref editor) = self.current_editor else {
-            godot_print!("[godot-neovim] sync_buffer_to_neovim: No current editor");
+            crate::verbose_print!("[godot-neovim] sync_buffer_to_neovim: No current editor");
             return;
         };
 
         let Some(ref neovim) = self.neovim else {
-            godot_print!("[godot-neovim] sync_buffer_to_neovim: No neovim");
+            crate::verbose_print!("[godot-neovim] sync_buffer_to_neovim: No neovim");
             return;
         };
 
         let Ok(client) = neovim.lock() else {
-            godot_print!("[godot-neovim] sync_buffer_to_neovim: Failed to lock");
+            crate::verbose_print!("[godot-neovim] sync_buffer_to_neovim: Failed to lock");
             return;
         };
 
@@ -355,16 +355,16 @@ impl GodotNeovimPlugin {
         let text = editor.get_text().to_string();
         let lines: Vec<String> = text.lines().map(String::from).collect();
 
-        godot_print!("[godot-neovim] Syncing {} lines to Neovim", lines.len());
+        crate::verbose_print!("[godot-neovim] Syncing {} lines to Neovim", lines.len());
         if !lines.is_empty() {
-            godot_print!("[godot-neovim] First line: '{}'", lines[0].chars().take(50).collect::<String>());
+            crate::verbose_print!("[godot-neovim] First line: '{}'", lines[0].chars().take(50).collect::<String>());
         }
 
         // Set buffer content in Neovim
         if let Err(e) = client.set_buffer_lines(0, -1, lines) {
             godot_error!("[godot-neovim] Failed to sync buffer: {}", e);
         } else {
-            godot_print!("[godot-neovim] Buffer synced to Neovim successfully");
+            crate::verbose_print!("[godot-neovim] Buffer synced to Neovim successfully");
         }
     }
 
@@ -474,7 +474,7 @@ impl GodotNeovimPlugin {
 
         // Check if there are pending updates
         if let Some((mode, cursor)) = client.take_state() {
-            godot_print!("[godot-neovim] Got update: mode={}, cursor=({}, {})", mode, cursor.0, cursor.1);
+            crate::verbose_print!("[godot-neovim] Got update: mode={}, cursor=({}, {})", mode, cursor.0, cursor.1);
 
             // Release lock before updating UI
             drop(client);
@@ -500,7 +500,7 @@ impl GodotNeovimPlugin {
 
     /// Send Escape to Neovim and force mode to normal
     fn send_escape(&mut self) {
-        godot_print!("[godot-neovim] send_escape");
+        crate::verbose_print!("[godot-neovim] send_escape");
 
         let Some(ref neovim) = self.neovim else {
             return;
@@ -523,15 +523,15 @@ impl GodotNeovimPlugin {
         self.current_mode = "n".to_string();
         self.update_mode_display_with_cursor("n", None);
 
-        godot_print!("[godot-neovim] Escaped to normal mode");
+        crate::verbose_print!("[godot-neovim] Escaped to normal mode");
     }
 
     /// Send keys to Neovim and update state
     fn send_keys(&mut self, keys: &str) {
-        godot_print!("[godot-neovim] send_keys: {}", keys);
+        crate::verbose_print!("[godot-neovim] send_keys: {}", keys);
 
         let Some(ref neovim) = self.neovim else {
-            godot_print!("[godot-neovim] No neovim");
+            crate::verbose_print!("[godot-neovim] No neovim");
             return;
         };
 
@@ -545,20 +545,20 @@ impl GodotNeovimPlugin {
             godot_error!("[godot-neovim] Failed to send keys: {}", e);
             return;
         }
-        godot_print!("[godot-neovim] Key sent successfully");
+        crate::verbose_print!("[godot-neovim] Key sent successfully");
 
         // Query mode - if blocking (operator-pending), skip cursor sync
         let (mode, blocking) = client.get_mode();
 
         if blocking {
-            godot_print!("[godot-neovim] Operator pending, skipping sync");
+            crate::verbose_print!("[godot-neovim] Operator pending, skipping sync");
             return;
         }
 
         // Query cursor
         let cursor = client.get_cursor().unwrap_or((1, 0));
 
-        godot_print!("[godot-neovim] After key: mode={}, cursor=({}, {})", mode, cursor.0, cursor.1);
+        crate::verbose_print!("[godot-neovim] After key: mode={}, cursor=({}, {})", mode, cursor.0, cursor.1);
 
         // Release lock before updating UI
         drop(client);
@@ -577,12 +577,12 @@ impl GodotNeovimPlugin {
     /// Sync cursor from grid position (0-indexed)
     fn sync_cursor_from_grid(&mut self, cursor: (i64, i64)) {
         let Some(ref mut editor) = self.current_editor else {
-            godot_print!("[godot-neovim] sync_cursor_from_grid: No current editor");
+            crate::verbose_print!("[godot-neovim] sync_cursor_from_grid: No current editor");
             return;
         };
 
         let (row, col) = cursor;
-        godot_print!("[godot-neovim] sync_cursor_from_grid: Setting cursor to row={}, col={}", row, col);
+        crate::verbose_print!("[godot-neovim] sync_cursor_from_grid: Setting cursor to row={}, col={}", row, col);
         editor.set_caret_line(row as i32);
         editor.set_caret_column(col as i32);
     }
@@ -640,26 +640,26 @@ impl GodotNeovimPlugin {
 
     fn sync_buffer_from_neovim(&mut self, lines: Vec<String>, cursor: Option<(i64, i64)>) {
         let Some(ref mut editor) = self.current_editor else {
-            godot_print!("[godot-neovim] No current editor for buffer sync");
+            crate::verbose_print!("[godot-neovim] No current editor for buffer sync");
             return;
         };
 
-        godot_print!("[godot-neovim] Syncing buffer from Neovim: {} lines", lines.len());
+        crate::verbose_print!("[godot-neovim] Syncing buffer from Neovim: {} lines", lines.len());
         if !lines.is_empty() {
-            godot_print!("[godot-neovim] First line from Neovim: '{}'", lines[0].chars().take(50).collect::<String>());
+            crate::verbose_print!("[godot-neovim] First line from Neovim: '{}'", lines[0].chars().take(50).collect::<String>());
             if lines.len() > 1 {
-                godot_print!("[godot-neovim] Last line from Neovim: '{}'", lines[lines.len()-1].chars().take(50).collect::<String>());
+                crate::verbose_print!("[godot-neovim] Last line from Neovim: '{}'", lines[lines.len()-1].chars().take(50).collect::<String>());
             }
         }
 
         // Update Godot editor
         let text = lines.join("\n");
-        godot_print!("[godot-neovim] Setting text ({} chars)", text.len());
+        crate::verbose_print!("[godot-neovim] Setting text ({} chars)", text.len());
         editor.set_text(&text);
 
         // Update cursor position
         if let Some((line, col)) = cursor {
-            godot_print!("[godot-neovim] Setting cursor to line {}, col {}", line, col);
+            crate::verbose_print!("[godot-neovim] Setting cursor to line {}, col {}", line, col);
             editor.set_caret_line((line - 1) as i32); // Neovim is 1-indexed
             editor.set_caret_column(col as i32);
         }
