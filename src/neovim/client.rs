@@ -409,10 +409,13 @@ impl NeovimClient {
                 if let Some(neovim) = nvim_lock.as_ref() {
                     // Get &modified option
                     let modified = neovim
-                        .call_function("getbufvar", vec![
-                            rmpv::Value::from(0), // current buffer
-                            rmpv::Value::from("&modified"),
-                        ])
+                        .call_function(
+                            "getbufvar",
+                            vec![
+                                rmpv::Value::from(0), // current buffer
+                                rmpv::Value::from("&modified"),
+                            ],
+                        )
                         .await
                         .ok()?;
                     // Returns 1 if modified, 0 if not

@@ -110,10 +110,15 @@ impl IEditorPlugin for GodotNeovimPlugin {
     fn exit_tree(&mut self) {
         crate::verbose_print!("[godot-neovim] Plugin exiting tree");
 
-        // Cleanup mode label
+        // Cleanup mode label (check if still valid before freeing)
         if let Some(mut label) = self.mode_label.take() {
-            label.queue_free();
+            if label.is_instance_valid() {
+                label.queue_free();
+            }
         }
+
+        // Clear current editor reference
+        self.current_editor = None;
 
         // Neovim client will be stopped when dropped
         self.neovim = None;
@@ -1629,8 +1634,9 @@ impl GodotNeovimPlugin {
 
     /// :qa/:qall - Close all script tabs
     fn cmd_close_all(&mut self) {
-        // Clear current editor reference
+        // Clear references before closing to avoid accessing freed instances
         self.current_editor = None;
+        self.mode_label = None;
 
         // Get the number of open scripts
         let editor = EditorInterface::singleton();
@@ -1832,7 +1838,13 @@ impl GodotNeovimPlugin {
         for line_idx in (0..=current_line).rev() {
             let line_text = editor.get_line(line_idx).to_string();
 
-            if let Some(found) = self.find_word_in_line_backward(&line_text, &word, current_line, line_idx, current_col) {
+            if let Some(found) = self.find_word_in_line_backward(
+                &line_text,
+                &word,
+                current_line,
+                line_idx,
+                current_col,
+            ) {
                 self.move_cursor_to(line_idx, found as i32);
                 return;
             }
@@ -1846,7 +1858,8 @@ impl GodotNeovimPlugin {
                 // Find last occurrence
                 let mut last = found;
                 let mut search_from = found + 1;
-                while let Some(next) = self.find_word_in_line(&line_text, &word, search_from, true) {
+                while let Some(next) = self.find_word_in_line(&line_text, &word, search_from, true)
+                {
                     if line_idx == current_line && next >= current_col {
                         break;
                     }
@@ -1862,7 +1875,13 @@ impl GodotNeovimPlugin {
     }
 
     /// Find word boundary match in line starting from given position
-    fn find_word_in_line(&self, line: &str, word: &str, start: usize, forward: bool) -> Option<usize> {
+    fn find_word_in_line(
+        &self,
+        line: &str,
+        word: &str,
+        start: usize,
+        forward: bool,
+    ) -> Option<usize> {
         let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
         let chars: Vec<char> = line.chars().collect();
         let word_chars: Vec<char> = word.chars().collect();
@@ -1905,7 +1924,14 @@ impl GodotNeovimPlugin {
     }
 
     /// Find word in line for backward search, handling current line specially
-    fn find_word_in_line_backward(&self, line: &str, word: &str, current_line: i32, line_idx: i32, current_col: usize) -> Option<usize> {
+    fn find_word_in_line_backward(
+        &self,
+        line: &str,
+        word: &str,
+        current_line: i32,
+        line_idx: i32,
+        current_col: usize,
+    ) -> Option<usize> {
         let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
         let chars: Vec<char> = line.chars().collect();
         let word_chars: Vec<char> = word.chars().collect();
@@ -2053,7 +2079,13 @@ impl GodotNeovimPlugin {
         for line_idx in (0..=current_line).rev() {
             let line_text = editor.get_line(line_idx).to_string();
 
-            if let Some(found) = self.find_word_in_line_backward(&line_text, word, current_line, line_idx, current_col) {
+            if let Some(found) = self.find_word_in_line_backward(
+                &line_text,
+                word,
+                current_line,
+                line_idx,
+                current_col,
+            ) {
                 self.move_cursor_to(line_idx, found as i32);
                 return;
             }
@@ -2091,8 +2123,8 @@ impl GodotNeovimPlugin {
         let chars: Vec<char> = line_text.chars().collect();
 
         // Search for character after cursor
-        for i in (col_idx + 1)..chars.len() {
-            if chars[i] == c {
+        for (i, &ch) in chars.iter().enumerate().skip(col_idx + 1) {
+            if ch == c {
                 let target_col = if till { i - 1 } else { i };
                 self.move_cursor_to(line_idx, target_col as i32);
 
@@ -2233,7 +2265,7 @@ impl GodotNeovimPlugin {
             }
         } else {
             // Search backward
-            let mut line = line_idx as i32;
+            let mut line = line_idx;
             let mut col = col_idx as i32 - 1;
 
             while line >= 0 {
@@ -2293,7 +2325,10 @@ impl GodotNeovimPlugin {
             .unwrap_or(0);
 
         self.move_cursor_to(line_idx, first_non_blank as i32);
-        crate::verbose_print!("[godot-neovim] ^: Moved to first non-blank at col {}", first_non_blank);
+        crate::verbose_print!(
+            "[godot-neovim] ^: Moved to first non-blank at col {}",
+            first_non_blank
+        );
     }
 
     /// Move to end of line ($ command)
@@ -2309,7 +2344,10 @@ impl GodotNeovimPlugin {
         // Vim's $ goes to last character, not past it
         let target_col = if line_len > 0 { line_len - 1 } else { 0 };
         self.move_cursor_to(line_idx, target_col as i32);
-        crate::verbose_print!("[godot-neovim] $: Moved to end of line at col {}", target_col);
+        crate::verbose_print!(
+            "[godot-neovim] $: Moved to end of line at col {}",
+            target_col
+        );
     }
 
     /// Move to previous paragraph ({ command)
@@ -2519,14 +2557,14 @@ impl GodotNeovimPlugin {
         let line_text = editor.get_line(line_idx).to_string();
 
         // Remove leading whitespace (one level)
-        let new_line = if line_text.starts_with('\t') {
-            line_text[1..].to_string()
-        } else if line_text.starts_with("    ") {
-            line_text[4..].to_string()
-        } else if line_text.starts_with("  ") {
-            line_text[2..].to_string()
-        } else if line_text.starts_with(' ') {
-            line_text[1..].to_string()
+        let new_line = if let Some(stripped) = line_text.strip_prefix('\t') {
+            stripped.to_string()
+        } else if let Some(stripped) = line_text.strip_prefix("    ") {
+            stripped.to_string()
+        } else if let Some(stripped) = line_text.strip_prefix("  ") {
+            stripped.to_string()
+        } else if let Some(stripped) = line_text.strip_prefix(' ') {
+            stripped.to_string()
         } else {
             line_text
         };
@@ -2599,7 +2637,11 @@ impl GodotNeovimPlugin {
         editor.set_caret_column(join_col as i32);
 
         self.sync_buffer_to_neovim();
-        crate::verbose_print!("[godot-neovim] J: Joined lines {} and {}", line_idx + 1, line_idx + 2);
+        crate::verbose_print!(
+            "[godot-neovim] J: Joined lines {} and {}",
+            line_idx + 1,
+            line_idx + 2
+        );
     }
 
     /// Move half page down (Ctrl+D command)

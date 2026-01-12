@@ -2,6 +2,8 @@
 
 Godot editor plugin that uses Neovim as the backend for script editing.
 
+Inspired by [vscode-neovim](https://github.com/vscode-neovim/vscode-neovim).
+
 ## Overview
 
 godot-neovim integrates Neovim into Godot's script editor, allowing you to use the full power of Neovim for editing GDScript and other files within Godot. Unlike simple vim keybinding emulators, this plugin runs an actual Neovim process and synchronizes the buffer between Godot and Neovim.
@@ -205,7 +207,8 @@ Once the plugin is enabled:
 | Command | Description |
 |---------|-------------|
 | `:w` | Save file |
-| `:q` | Close (no-op in editor) |
+| `:q` | Close current script tab |
+| `:qa`, `:qall` | Close all script tabs |
 | `:wq`, `:x` | Save and close |
 | `:%s/old/new/g` | Substitute all occurrences |
 
