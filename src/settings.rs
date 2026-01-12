@@ -5,6 +5,7 @@ use std::process::{Command, Output};
 
 const SETTING_NEOVIM_PATH: &str = "godot_neovim/neovim_executable_path";
 const SETTING_INPUT_MODE: &str = "godot_neovim/input_mode";
+const SETTING_NEOVIM_CLEAN: &str = "godot_neovim/neovim_clean";
 
 /// Input mode for insert mode handling
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -86,10 +87,27 @@ pub fn initialize_settings() {
 
     settings.add_property_info(&input_mode_info);
 
+    // Add neovim_clean setting if it doesn't exist
+    if !settings.has_setting(SETTING_NEOVIM_CLEAN) {
+        settings.set_setting(SETTING_NEOVIM_CLEAN, &Variant::from(false));
+    }
+
+    // Set initial value for neovim_clean
+    settings.set_initial_value(SETTING_NEOVIM_CLEAN, &Variant::from(false), false);
+
+    // Add property info for neovim_clean (checkbox)
+    #[allow(deprecated)]
+    let mut clean_info = Dictionary::new();
+    clean_info.set("name", SETTING_NEOVIM_CLEAN);
+    clean_info.set("type", VariantType::BOOL.ord());
+
+    settings.add_property_info(&clean_info);
+
     crate::verbose_print!(
-        "[godot-neovim] Settings initialized. Neovim path: {}, Input mode: {:?}",
+        "[godot-neovim] Settings initialized. Neovim path: {}, Input mode: {:?}, Clean: {}",
         get_neovim_path(),
-        get_input_mode()
+        get_input_mode(),
+        get_neovim_clean()
     );
 }
 
@@ -152,6 +170,23 @@ pub fn get_input_mode() -> InputMode {
     }
 
     InputMode::default()
+}
+
+/// Get the configured neovim clean mode
+pub fn get_neovim_clean() -> bool {
+    let editor = EditorInterface::singleton();
+    let Some(settings) = editor.get_editor_settings() else {
+        return false;
+    };
+
+    if settings.has_setting(SETTING_NEOVIM_CLEAN) {
+        let value = settings.get_setting(SETTING_NEOVIM_CLEAN);
+        if let Ok(clean) = value.try_to::<bool>() {
+            return clean;
+        }
+    }
+
+    false
 }
 
 /// Validate the Neovim executable path

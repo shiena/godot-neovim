@@ -20,6 +20,8 @@ pub struct NeovimClient {
     neovim: Arc<Mutex<Option<Neovim<Writer>>>>,
     handler: NeovimHandler,
     nvim_path: String,
+    /// Start Neovim with --clean flag (no plugins or user config)
+    clean: bool,
     /// Shared state from handler (mode, cursor position)
     state: Arc<Mutex<NeovimState>>,
     /// Flag indicating new updates from redraw events
@@ -35,6 +37,7 @@ impl NeovimClient {
         // This ensures io_handler is processed during block_on calls
         let runtime = Builder::new_current_thread().enable_all().build()?;
         let nvim_path = settings::get_neovim_path();
+        let clean = settings::get_neovim_clean();
         let handler = NeovimHandler::new();
         let state = handler.get_state();
         let has_updates = handler.get_updates_flag();
@@ -43,6 +46,7 @@ impl NeovimClient {
             neovim: Arc::new(Mutex::new(None)),
             handler,
             nvim_path,
+            clean,
             state,
             has_updates,
             io_handle: None,
@@ -107,11 +111,16 @@ impl NeovimClient {
         let handler = self.handler.clone();
         let neovim_arc = self.neovim.clone();
         let nvim_path = self.nvim_path.clone();
+        let clean = self.clean;
 
-        crate::verbose_print!("[godot-neovim] Starting Neovim: {}", nvim_path);
+        crate::verbose_print!(
+            "[godot-neovim] Starting Neovim: {} (clean={})",
+            nvim_path,
+            clean
+        );
 
         let io_handle = self.runtime.block_on(async {
-            let mut cmd = create_nvim_command(&nvim_path);
+            let mut cmd = create_nvim_command(&nvim_path, clean);
 
             let (neovim, io_handler, _child) = create::new_child_cmd(&mut cmd, handler).await?;
 
@@ -462,13 +471,18 @@ impl Drop for NeovimClient {
 }
 
 /// Create Neovim command with platform-specific settings
-fn create_nvim_command(nvim_path: &str) -> Command {
+fn create_nvim_command(nvim_path: &str, clean: bool) -> Command {
+    let mut args = vec!["--embed", "--headless"];
+    if clean {
+        args.push("--clean");
+    }
+
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         let mut std_cmd = std::process::Command::new(nvim_path);
         std_cmd
-            .args(["--embed", "--headless"])
+            .args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -479,7 +493,7 @@ fn create_nvim_command(nvim_path: &str) -> Command {
     #[cfg(not(target_os = "windows"))]
     {
         let mut cmd = Command::new(nvim_path);
-        cmd.args(["--embed", "--headless"])
+        cmd.args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

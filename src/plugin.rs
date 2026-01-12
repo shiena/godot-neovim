@@ -1,5 +1,6 @@
 use crate::neovim::NeovimClient;
 use crate::settings;
+use godot::classes::text_edit::CaretType;
 use godot::classes::{
     CodeEdit, Control, EditorInterface, EditorPlugin, IEditorPlugin, Input, InputEventKey, Label,
 };
@@ -1374,6 +1375,16 @@ impl GodotNeovimPlugin {
                 _ => Color::from_rgb(0.8, 0.8, 0.8),              // Gray
             };
             label.add_theme_color_override("font_color", color);
+        }
+
+        // Update caret type based on mode
+        // Normal mode: block cursor, Insert mode: line cursor
+        if let Some(ref mut editor) = self.current_editor {
+            let caret_type = match mode {
+                "i" | "insert" | "R" | "replace" => CaretType::LINE,
+                _ => CaretType::BLOCK,
+            };
+            editor.set_caret_type(caret_type);
         }
     }
 
