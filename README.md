@@ -277,11 +277,26 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 
 ### Roadmap
 
-Implementation candidates (in priority order):
+#### Implementation Candidates
+
+Features requiring plugin-side implementation (in priority order):
 
 1. **Macros** - `q{a-z}` to record, `@{a-z}` to replay, `@@` to repeat last macro
 2. **Marks** - `m{a-z}` to set mark, `'{a-z}` to jump to mark line, `` `{a-z} `` to jump to exact position
 3. **Named Registers** - `"{a-z}` to specify register for yank/paste operations
+4. **Command History** - Up/Down arrows in command-line mode to browse history
+5. **Case Operators** - `g~`, `gu`, `gU` + motion for case conversion
+
+#### Likely Already Working (Testing Needed)
+
+These features may already work through Neovim backend:
+
+| Category | Commands |
+|----------|----------|
+| Motions | `ge`, `gj`, `gk`, `g0`, `g$`, `(`, `)`, `[[`, `]]` |
+| Text Objects | `is`, `as` (sentence), `ip`, `ap` (paragraph), `it`, `at` (tag) |
+| Operators | `C`, `D`, `Y`, `s`, `S`, `gJ` |
+| Line Range | `:1,10d`, `:g/pattern/d`, `:.,$s/old/new/g` |
 
 ## Architecture
 
