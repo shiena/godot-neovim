@@ -26,10 +26,10 @@ This plugin is in early development. The following features are implemented:
 - ✅ Mode switching (`i`, `a`, `o`, `v`, `Escape`, `Ctrl+[`, etc.)
 - ✅ Mode indicator display with line:column
 - ✅ Cursor position synchronization (Neovim ↔ Godot)
-- ✅ Buffer synchronization (Godot → Neovim on script open and insert mode exit)
+- ✅ Buffer synchronization (Godot ↔ Neovim, bidirectional)
 - ✅ Operator-pending commands with timeout handling (`gg`, `dd`, `yy`, etc.)
 - ✅ Insert mode with Godot native input (IME, auto-completion support)
-- ⬜ Buffer synchronization (Neovim → Godot for normal mode edits)
+- ✅ Normal mode edits reflected in Godot (`dd`, `yy`, `p`, etc.)
 - ⬜ Visual mode selection display
 - ⬜ Command-line mode
 

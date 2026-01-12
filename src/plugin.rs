@@ -615,7 +615,7 @@ impl GodotNeovimPlugin {
         }
         crate::verbose_print!("[godot-neovim] Key sent successfully");
 
-        // Query mode - if blocking (operator-pending), skip cursor sync
+        // Query mode - if blocking (operator-pending), skip sync
         let (mode, blocking) = client.get_mode();
 
         if blocking {
@@ -626,11 +626,15 @@ impl GodotNeovimPlugin {
         // Query cursor
         let cursor = client.get_cursor().unwrap_or((1, 0));
 
+        // Get buffer content from Neovim
+        let buffer_lines = client.get_buffer_lines(0, -1).ok();
+
         crate::verbose_print!(
-            "[godot-neovim] After key: mode={}, cursor=({}, {})",
+            "[godot-neovim] After key: mode={}, cursor=({}, {}), lines={:?}",
             mode,
             cursor.0,
-            cursor.1
+            cursor.1,
+            buffer_lines.as_ref().map(|l| l.len())
         );
 
         // Release lock before updating UI
@@ -640,11 +644,13 @@ impl GodotNeovimPlugin {
         self.current_mode = mode.clone();
         self.current_cursor = (cursor.0 - 1, cursor.1); // Convert to 0-indexed
 
+        // Sync buffer from Neovim to Godot
+        if let Some(lines) = buffer_lines {
+            self.sync_buffer_from_neovim(lines, Some(cursor));
+        }
+
         // Update mode display
         self.update_mode_display_with_cursor(&mode, Some(cursor));
-
-        // Sync cursor to Godot editor
-        self.sync_cursor_from_grid((cursor.0 - 1, cursor.1));
     }
 
     /// Update cursor position from Godot editor and refresh display
