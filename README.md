@@ -15,6 +15,7 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 - Support for operator-pending commands (e.g., `gg`, `dd`, `yy`)
 - Insert mode with Godot native input (IME support, auto-completion)
 - Ctrl+[ as Escape alternative (terminal standard)
+- Ctrl+B for visual block mode (works from both normal and insert mode)
 - Configurable Neovim executable path via Editor Settings
 - Path validation on startup and settings change
 
@@ -30,7 +31,7 @@ This plugin is in early development. The following features are implemented:
 - ✅ Operator-pending commands with timeout handling (`gg`, `dd`, `yy`, etc.)
 - ✅ Insert mode with Godot native input (IME, auto-completion support)
 - ✅ Normal mode edits reflected in Godot (`dd`, `yy`, `p`, etc.)
-- ⬜ Visual mode selection display
+- ✅ Visual mode selection display (`v`, `V`)
 - ⬜ Command-line mode
 
 ## Requirements

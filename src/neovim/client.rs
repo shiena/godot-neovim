@@ -353,6 +353,51 @@ impl NeovimClient {
             }
         })
     }
+
+    /// Get visual selection range
+    /// Returns ((start_line, start_col), (end_line, end_col)) - 0-indexed
+    /// Returns None if not in visual mode or failed to get selection
+    pub fn get_visual_selection(&self) -> Option<((i64, i64), (i64, i64))> {
+        let neovim_arc = self.neovim.clone();
+
+        self.runtime.block_on(async {
+            let result = tokio::time::timeout(std::time::Duration::from_millis(50), async {
+                let nvim_lock = neovim_arc.lock().await;
+                let neovim = nvim_lock.as_ref()?;
+
+                // Get visual start position using getpos("v")
+                let visual_start = neovim
+                    .call_function("getpos", vec![rmpv::Value::from("v")])
+                    .await
+                    .ok()?;
+
+                // Get current cursor position using getpos(".")
+                let cursor_pos = neovim
+                    .call_function("getpos", vec![rmpv::Value::from(".")])
+                    .await
+                    .ok()?;
+
+                // Parse positions: [bufnum, lnum, col, off] (1-indexed)
+                let parse_pos = |val: rmpv::Value| -> Option<(i64, i64)> {
+                    let arr = val.as_array()?;
+                    let line = arr.get(1)?.as_i64()? - 1; // Convert to 0-indexed
+                    let col = arr.get(2)?.as_i64()? - 1; // Convert to 0-indexed
+                    Some((line, col))
+                };
+
+                let start = parse_pos(visual_start)?;
+                let end = parse_pos(cursor_pos)?;
+
+                Some((start, end))
+            })
+            .await;
+
+            match result {
+                Ok(Some(selection)) => Some(selection),
+                _ => None,
+            }
+        })
+    }
 }
 
 impl Default for NeovimClient {

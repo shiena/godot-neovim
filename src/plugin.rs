@@ -137,13 +137,43 @@ impl IEditorPlugin for GodotNeovimPlugin {
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
                 }
+                return;
             }
+
+            // Ctrl+B in insert mode: exit insert and enter visual block mode
+            let is_ctrl_b = key_event.is_ctrl_pressed() && key_event.get_keycode() == Key::B;
+            if is_ctrl_b {
+                // First sync buffer and exit insert mode
+                self.send_escape();
+                // Then enter visual block mode
+                let completed = self.send_keys("<C-v>");
+                if completed {
+                    self.last_key.clear();
+                }
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
+
             // Let Godot handle other keys in insert mode
             return;
         }
 
-        // Handle H/M/L based on Godot's visible area (not Neovim's)
+        // Handle Ctrl+B as visual block mode (alternative to Ctrl+V which Godot intercepts)
         let keycode = key_event.get_keycode();
+        if key_event.is_ctrl_pressed() && keycode == Key::B {
+            let completed = self.send_keys("<C-v>");
+            if completed {
+                self.last_key.clear();
+            }
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle H/M/L based on Godot's visible area (not Neovim's)
         if !key_event.is_ctrl_pressed()
             && !key_event.is_alt_pressed()
             && (keycode == Key::H || keycode == Key::M || keycode == Key::L)
@@ -510,6 +540,11 @@ impl GodotNeovimPlugin {
         self.current_mode == "i"
     }
 
+    /// Check if mode is a visual mode (v, V, or Ctrl+V)
+    fn is_visual_mode(mode: &str) -> bool {
+        matches!(mode, "v" | "V" | "\x16" | "^V" | "CTRL-V")
+    }
+
     /// Process pending updates from Neovim redraw events
     fn process_neovim_updates(&mut self) {
         let Some(ref neovim) = self.neovim else {
@@ -551,6 +586,22 @@ impl GodotNeovimPlugin {
             if old_mode == "i" && mode != "i" {
                 self.sync_buffer_to_neovim();
             }
+
+            // Handle visual mode selection
+            let was_visual = Self::is_visual_mode(&old_mode);
+            let is_visual = Self::is_visual_mode(&mode);
+
+            if is_visual {
+                // Update visual selection display
+                if mode == "V" {
+                    self.update_visual_line_selection();
+                } else {
+                    self.update_visual_selection();
+                }
+            } else if was_visual {
+                // Exiting visual mode - clear selection
+                self.clear_visual_selection();
+            }
         }
     }
 
@@ -581,6 +632,9 @@ impl GodotNeovimPlugin {
 
         // Force mode to normal (ESC always returns to normal mode)
         self.current_mode = "n".to_string();
+
+        // Clear any visual selection
+        self.clear_visual_selection();
 
         // Display cursor position (convert 0-indexed to 1-indexed for display)
         let display_cursor = (self.current_cursor.0 + 1, self.current_cursor.1);
@@ -676,6 +730,9 @@ impl GodotNeovimPlugin {
         // Release lock before updating UI
         drop(client);
 
+        // Track old mode for visual mode transitions
+        let old_mode = self.current_mode.clone();
+
         // Update state
         self.current_mode = mode.clone();
         self.current_cursor = (cursor.0 - 1, cursor.1); // Convert to 0-indexed
@@ -687,6 +744,22 @@ impl GodotNeovimPlugin {
 
         // Update mode display
         self.update_mode_display_with_cursor(&mode, Some(cursor));
+
+        // Handle visual mode selection
+        let was_visual = Self::is_visual_mode(&old_mode);
+        let is_visual = Self::is_visual_mode(&mode);
+
+        if is_visual {
+            // Update visual selection display
+            if mode == "V" {
+                self.update_visual_line_selection();
+            } else {
+                self.update_visual_selection();
+            }
+        } else if was_visual {
+            // Exiting visual mode - clear selection
+            self.clear_visual_selection();
+        }
 
         true
     }
@@ -928,5 +1001,107 @@ impl GodotNeovimPlugin {
         // Sync to Neovim (non-blocking, errors are logged but ignored)
         self.sync_cursor_to_neovim();
         self.update_cursor_from_editor();
+    }
+
+    /// Update visual selection in Godot editor
+    fn update_visual_selection(&mut self) {
+        let Some(ref neovim) = self.neovim else {
+            return;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            return;
+        };
+
+        // Get visual selection from Neovim
+        let Some(((start_line, start_col), (end_line, end_col))) = client.get_visual_selection()
+        else {
+            return;
+        };
+
+        // Release lock before updating UI
+        drop(client);
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        // Normalize selection direction (start should be before end)
+        let (from_line, from_col, to_line, to_col) =
+            if start_line < end_line || (start_line == end_line && start_col <= end_col) {
+                (start_line, start_col, end_line, end_col + 1) // +1 to include cursor char
+            } else {
+                (end_line, end_col, start_line, start_col + 1)
+            };
+
+        crate::verbose_print!(
+            "[godot-neovim] Visual selection: ({}, {}) -> ({}, {})",
+            from_line,
+            from_col,
+            to_line,
+            to_col
+        );
+
+        // Update Godot selection
+        editor.select(
+            from_line as i32,
+            from_col as i32,
+            to_line as i32,
+            to_col as i32,
+        );
+    }
+
+    /// Update visual line selection in Godot editor (V mode - selects entire lines)
+    fn update_visual_line_selection(&mut self) {
+        let Some(ref neovim) = self.neovim else {
+            return;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            return;
+        };
+
+        // Get visual selection from Neovim
+        let Some(((start_line, _), (end_line, _))) = client.get_visual_selection() else {
+            return;
+        };
+
+        // Release lock before updating UI
+        drop(client);
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        // Normalize line order
+        let (from_line, to_line) = if start_line <= end_line {
+            (start_line, end_line)
+        } else {
+            (end_line, start_line)
+        };
+
+        // Get the length of the last line to select entire lines
+        let to_line_text = editor.get_line(to_line as i32);
+        let to_col = to_line_text.len() as i32;
+
+        crate::verbose_print!(
+            "[godot-neovim] Visual line selection: line {} -> {} (col 0 -> {})",
+            from_line,
+            to_line,
+            to_col
+        );
+
+        // Select from start of first line to end of last line
+        editor.select(from_line as i32, 0, to_line as i32, to_col);
+    }
+
+    /// Clear visual selection in Godot editor
+    fn clear_visual_selection(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        editor.deselect();
+        crate::verbose_print!("[godot-neovim] Visual selection cleared");
     }
 }
