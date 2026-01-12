@@ -212,6 +212,35 @@ Once the plugin is enabled:
 | `:wq`, `:x` | Save and close |
 | `:%s/old/new/g` | Substitute all occurrences |
 
+### Limitations
+
+This plugin has architectural limitations due to using Godot's native CodeEdit for text editing.
+
+#### Insert Mode
+
+Insert mode uses Godot's native input system to support IME and auto-completion. As a result, Vim's insert mode commands are **not available**:
+
+| Not Supported | Description |
+|---------------|-------------|
+| `Ctrl+O` | Execute one normal mode command |
+| `Ctrl+W` | Delete word backward |
+| `Ctrl+U` | Delete to start of line |
+| `Ctrl+R` | Insert from register |
+| `Ctrl+A` | Insert previously inserted text |
+| `Ctrl+N/P` | Keyword completion (use Godot's auto-completion instead) |
+
+#### Not Implemented
+
+| Feature | Description |
+|---------|-------------|
+| Text objects | `ciw`, `da"`, `yi(`, etc. |
+| Named registers | `"a`, `"b`, etc. (uses system clipboard only) |
+| Macros | `q`, `@` |
+| Marks | `m`, `'`, `` ` `` |
+| Neovim search | `/` opens Godot's find dialog |
+| Neovim undo | Uses Godot's undo system |
+| Neovim config | `init.lua` and plugins are not loaded |
+
 ## Architecture
 
 ```
