@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v0.1.0)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: godot_neovim.dll
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: libgodot_neovim.so
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: libgodot_neovim.dylib
+            artifact_rename: libgodot_neovim.x86_64.dylib
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: libgodot_neovim.dylib
+            artifact_rename: libgodot_neovim.arm64.dylib
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Rename artifact (macOS)
+        if: matrix.artifact_rename
+        shell: bash
+        run: |
+          mv target/${{ matrix.target }}/release/${{ matrix.artifact_name }} \
+             target/${{ matrix.target }}/release/${{ matrix.artifact_rename }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact_rename || matrix.artifact_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release archive
+        run: |
+          # Copy all libraries to addons/godot-neovim/
+          cp artifacts/x86_64-pc-windows-msvc/* addons/godot-neovim/
+          cp artifacts/x86_64-unknown-linux-gnu/* addons/godot-neovim/
+          cp artifacts/x86_64-apple-darwin/* addons/godot-neovim/
+          cp artifacts/aarch64-apple-darwin/* addons/godot-neovim/
+
+          # Show contents
+          ls -la addons/godot-neovim/
+
+          # Create zip archive
+          zip -r godot-neovim-${{ inputs.version }}.zip addons
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create ${{ inputs.version }} \
+            --title "Release ${{ inputs.version }}" \
+            --generate-notes \
+            godot-neovim-${{ inputs.version }}.zip
