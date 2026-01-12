@@ -98,6 +98,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
             self.reposition_mode_label();
             self.sync_buffer_to_neovim();
             self.update_cursor_from_editor();
+            self.sync_cursor_to_neovim();
         }
 
         // Enable process() to be called every frame for checking redraw events
@@ -687,6 +688,7 @@ impl GodotNeovimPlugin {
         self.reposition_mode_label();
         self.sync_buffer_to_neovim();
         self.update_cursor_from_editor();
+        self.sync_cursor_to_neovim();
     }
 
     fn reposition_mode_label(&mut self) {
