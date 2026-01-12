@@ -1529,6 +1529,29 @@ impl GodotNeovimPlugin {
             }
         }
 
+        // Check for Z-prefixed commands (uppercase Z)
+        if self.last_key == "Z" {
+            let handled = match keys {
+                "Z" => {
+                    // ZZ - save and close
+                    self.cmd_save();
+                    self.cmd_close();
+                    true
+                }
+                "Q" => {
+                    // ZQ - close without saving (Godot may still prompt)
+                    self.cmd_close();
+                    true
+                }
+                _ => false,
+            };
+
+            if handled {
+                self.last_key.clear();
+                return true;
+            }
+        }
+
         false
     }
 
