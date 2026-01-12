@@ -328,24 +328,28 @@ impl NeovimClient {
         })
     }
 
-    /// Set cursor position
+    /// Set cursor position with timeout
     pub fn set_cursor(&self, line: i64, col: i64) -> Result<(), String> {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
-            let nvim_lock = neovim_arc.lock().await;
-            if let Some(neovim) = nvim_lock.as_ref() {
-                let window = neovim
-                    .get_current_win()
-                    .await
-                    .map_err(|e| format!("Failed to get window: {}", e))?;
-                window
-                    .set_cursor((line, col))
-                    .await
-                    .map_err(|e| format!("Failed to set cursor: {}", e))?;
-                Ok(())
-            } else {
-                Err("Neovim not connected".to_string())
+            // Use timeout to avoid blocking
+            let result = tokio::time::timeout(std::time::Duration::from_millis(50), async {
+                let nvim_lock = neovim_arc.lock().await;
+                if let Some(neovim) = nvim_lock.as_ref() {
+                    let window = neovim.get_current_win().await.ok()?;
+                    window.set_cursor((line, col)).await.ok()?;
+                    Some(())
+                } else {
+                    None
+                }
+            })
+            .await;
+
+            match result {
+                Ok(Some(())) => Ok(()),
+                Ok(None) => Err("Failed to set cursor".to_string()),
+                Err(_) => Err("Timeout setting cursor".to_string()),
             }
         })
     }

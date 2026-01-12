@@ -22,6 +22,9 @@ pub struct GodotNeovimPlugin {
     /// Current cursor position (line, col) - 0-indexed from grid
     #[init(val = (0, 0))]
     current_cursor: (i64, i64),
+    /// Last key sent to Neovim (for detecting sequences like zz, zt, zb)
+    #[init(val = String::new())]
+    last_key: String,
 }
 
 #[godot_api]
@@ -139,9 +142,41 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
+        // Handle H/M/L based on Godot's visible area (not Neovim's)
+        let keycode = key_event.get_keycode();
+        if !key_event.is_ctrl_pressed()
+            && !key_event.is_alt_pressed()
+            && (keycode == Key::H || keycode == Key::M || keycode == Key::L)
+            && key_event.is_shift_pressed()
+        {
+            // Shift+h/m/l = H/M/L (uppercase)
+            match keycode {
+                Key::H => self.move_cursor_to_visible_top(),
+                Key::M => self.move_cursor_to_visible_middle(),
+                Key::L => self.move_cursor_to_visible_bottom(),
+                _ => {}
+            }
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
         // Forward key to Neovim (normal/visual/etc modes)
         if let Some(keys) = self.key_event_to_nvim_string(&key_event) {
-            self.send_keys(&keys);
+            let completed = self.send_keys(&keys);
+
+            // Handle scroll commands (zz, zt, zb) only if command completed
+            let scroll_handled = if completed {
+                self.handle_scroll_command(&keys)
+            } else {
+                false
+            };
+
+            // Track last key for sequence detection, unless scroll command was handled
+            if !scroll_handled {
+                self.last_key = keys.clone();
+            }
 
             // Consume the event to prevent Godot's default handling
             if let Some(mut viewport) = self.base().get_viewport() {
@@ -595,23 +630,24 @@ impl GodotNeovimPlugin {
     }
 
     /// Send keys to Neovim and update state
-    fn send_keys(&mut self, keys: &str) {
+    /// Returns true if command completed, false if operator pending
+    fn send_keys(&mut self, keys: &str) -> bool {
         crate::verbose_print!("[godot-neovim] send_keys: {}", keys);
 
         let Some(ref neovim) = self.neovim else {
             crate::verbose_print!("[godot-neovim] No neovim");
-            return;
+            return false;
         };
 
         let Ok(client) = neovim.try_lock() else {
             godot_warn!("[godot-neovim] Mutex busy, dropping key: {}", keys);
-            return;
+            return false;
         };
 
         // Send input to Neovim
         if let Err(e) = client.input(keys) {
             godot_error!("[godot-neovim] Failed to send keys: {}", e);
-            return;
+            return false;
         }
         crate::verbose_print!("[godot-neovim] Key sent successfully");
 
@@ -620,7 +656,7 @@ impl GodotNeovimPlugin {
 
         if blocking {
             crate::verbose_print!("[godot-neovim] Operator pending, skipping sync");
-            return;
+            return false;
         }
 
         // Query cursor
@@ -651,6 +687,8 @@ impl GodotNeovimPlugin {
 
         // Update mode display
         self.update_mode_display_with_cursor(&mode, Some(cursor));
+
+        true
     }
 
     /// Update cursor position from Godot editor and refresh display
@@ -776,5 +814,119 @@ impl GodotNeovimPlugin {
             editor.set_caret_line((line - 1) as i32); // Neovim is 1-indexed
             editor.set_caret_column(col as i32);
         }
+    }
+
+    /// Handle scroll commands (zz, zt, zb) after sending to Neovim
+    /// Returns true if a scroll command was handled
+    fn handle_scroll_command(&mut self, keys: &str) -> bool {
+        // Check for z-prefixed scroll commands
+        if self.last_key == "z" {
+            let handled = match keys {
+                "z" => {
+                    // zz - center viewport on cursor
+                    if let Some(ref mut editor) = self.current_editor {
+                        editor.center_viewport_to_caret();
+                        crate::verbose_print!("[godot-neovim] zz: centered viewport");
+                    }
+                    true
+                }
+                "t" => {
+                    // zt - cursor line at top
+                    if let Some(ref mut editor) = self.current_editor {
+                        let line = editor.get_caret_line();
+                        editor.set_line_as_first_visible(line);
+                        crate::verbose_print!("[godot-neovim] zt: line {} at top", line);
+                    }
+                    true
+                }
+                "b" => {
+                    // zb - cursor line at bottom
+                    if let Some(ref mut editor) = self.current_editor {
+                        let line = editor.get_caret_line();
+                        // Calculate line to set as first visible to put cursor at bottom
+                        let visible_lines = editor.get_visible_line_count();
+                        let first_line = (line - visible_lines + 1).max(0);
+                        editor.set_line_as_first_visible(first_line);
+                        crate::verbose_print!(
+                            "[godot-neovim] zb: line {} at bottom (first={})",
+                            line,
+                            first_line
+                        );
+                    }
+                    true
+                }
+                _ => false,
+            };
+
+            // Clear last_key after handling to prevent re-trigger
+            if handled {
+                self.last_key.clear();
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Move cursor to top of visible area (H command)
+    fn move_cursor_to_visible_top(&mut self) {
+        let target_line = {
+            let Some(ref mut editor) = self.current_editor else {
+                return;
+            };
+            let first_visible = editor.get_first_visible_line();
+            editor.set_caret_line(first_visible);
+            editor.set_caret_column(0);
+            first_visible
+        };
+
+        crate::verbose_print!("[godot-neovim] H: moved to line {}", target_line);
+
+        // Sync to Neovim (non-blocking, errors are logged but ignored)
+        self.sync_cursor_to_neovim();
+        self.update_cursor_from_editor();
+    }
+
+    /// Move cursor to middle of visible area (M command)
+    fn move_cursor_to_visible_middle(&mut self) {
+        let target_line = {
+            let Some(ref mut editor) = self.current_editor else {
+                return;
+            };
+            let first_visible = editor.get_first_visible_line();
+            let visible_lines = editor.get_visible_line_count();
+            let middle_line = first_visible + visible_lines / 2;
+            let line_count = editor.get_line_count();
+            let target = middle_line.min(line_count - 1);
+            editor.set_caret_line(target);
+            editor.set_caret_column(0);
+            target
+        };
+
+        crate::verbose_print!("[godot-neovim] M: moved to line {}", target_line);
+
+        // Sync to Neovim (non-blocking, errors are logged but ignored)
+        self.sync_cursor_to_neovim();
+        self.update_cursor_from_editor();
+    }
+
+    /// Move cursor to bottom of visible area (L command)
+    fn move_cursor_to_visible_bottom(&mut self) {
+        let target_line = {
+            let Some(ref mut editor) = self.current_editor else {
+                return;
+            };
+            let last_visible = editor.get_last_full_visible_line();
+            let line_count = editor.get_line_count();
+            let target = last_visible.min(line_count - 1);
+            editor.set_caret_line(target);
+            editor.set_caret_column(0);
+            target
+        };
+
+        crate::verbose_print!("[godot-neovim] L: moved to line {}", target_line);
+
+        // Sync to Neovim (non-blocking, errors are logged but ignored)
+        self.sync_cursor_to_neovim();
+        self.update_cursor_from_editor();
     }
 }
