@@ -1815,8 +1815,17 @@ impl GodotNeovimPlugin {
                 self.cmd_close();
             }
             _ => {
+                // Check for :e[dit] {file} command
+                if cmd.starts_with("e ") || cmd.starts_with("edit ") {
+                    let file_path = if cmd.starts_with("edit ") {
+                        cmd.strip_prefix("edit ").unwrap_or("").trim()
+                    } else {
+                        cmd.strip_prefix("e ").unwrap_or("").trim()
+                    };
+                    self.cmd_edit(file_path);
+                }
                 // Check for substitution command :%s/old/new/g
-                if cmd.starts_with("%s/") || cmd.starts_with("s/") {
+                else if cmd.starts_with("%s/") || cmd.starts_with("s/") {
                     self.cmd_substitute(cmd);
                 } else {
                     godot_warn!("[godot-neovim] Unknown command: {}", cmd);
@@ -1825,6 +1834,39 @@ impl GodotNeovimPlugin {
         }
 
         self.close_command_line();
+    }
+
+    /// :e[dit] {file} - Open a file in the script editor
+    fn cmd_edit(&self, file_path: &str) {
+        if file_path.is_empty() {
+            godot_warn!("[godot-neovim] :e requires a file path");
+            return;
+        }
+
+        let mut editor = EditorInterface::singleton();
+
+        // Try to load the resource
+        let path = if file_path.starts_with("res://") {
+            file_path.to_string()
+        } else {
+            // Assume relative to res://
+            format!("res://{}", file_path)
+        };
+
+        // Load the resource
+        let resource = godot::classes::ResourceLoader::singleton().load(&path);
+        if let Some(res) = resource {
+            // Try to cast to Script
+            if let Ok(script) = res.try_cast::<godot::classes::Script>() {
+                // Use edit_script to open the script
+                editor.edit_script(&script);
+                crate::verbose_print!("[godot-neovim] :e - Opened script: {}", path);
+            } else {
+                godot_warn!("[godot-neovim] :e - Not a script file: {}", path);
+            }
+        } else {
+            godot_warn!("[godot-neovim] :e - File not found: {}", path);
+        }
     }
 
     /// :w - Save the current file by simulating Ctrl+S
