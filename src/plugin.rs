@@ -3,6 +3,7 @@ use crate::settings;
 use godot::classes::text_edit::CaretType;
 use godot::classes::{
     CodeEdit, Control, EditorInterface, EditorPlugin, IEditorPlugin, Input, InputEventKey, Label,
+    ResourceSaver, TabBar,
 };
 use godot::global::Key;
 use godot::prelude::*;
@@ -605,6 +606,42 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
+        // Handle Z-prefixed commands (ZZ, ZQ) - intercept before forwarding to Neovim
+        if keycode == Key::Z && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            if self.last_key == "Z" {
+                // Second Z - this is ZZ (save and close)
+                self.cmd_save_and_close();
+                self.last_key.clear();
+            } else {
+                // First Z - wait for next key
+                self.last_key = "Z".to_string();
+            }
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle ZQ (Z then Q) - close without saving
+        if keycode == Key::Q
+            && key_event.is_shift_pressed()
+            && !key_event.is_ctrl_pressed()
+            && self.last_key == "Z"
+        {
+            // ZQ - close without saving (discard changes)
+            self.cmd_close_discard();
+            self.last_key.clear();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Clear Z prefix if another key is pressed (not Z or Q)
+        if self.last_key == "Z" && keycode != Key::Z && keycode != Key::Q {
+            self.last_key.clear();
+        }
+
         // Forward key to Neovim (normal/visual/etc modes)
         if let Some(keys) = self.key_event_to_nvim_string(&key_event) {
             let completed = self.send_keys(&keys);
@@ -962,6 +999,19 @@ impl GodotNeovimPlugin {
     /// Check if mode is a visual mode (v, V, or Ctrl+V)
     fn is_visual_mode(mode: &str) -> bool {
         matches!(mode, "v" | "V" | "\x16" | "^V" | "CTRL-V")
+    }
+
+    /// Mark input as handled on the CodeEdit's viewport
+    /// This prevents CodeEdit from processing the input event
+    fn consume_input_on_editor(&self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        // Use CodeEdit's viewport, not the plugin's viewport
+        if let Some(mut viewport) = editor.get_viewport() {
+            viewport.set_input_as_handled();
+        }
     }
 
     /// Convert Godot key event to Neovim notation for insert mode (strict mode)
@@ -1539,8 +1589,8 @@ impl GodotNeovimPlugin {
                     true
                 }
                 "Q" => {
-                    // ZQ - close without saving (Godot may still prompt)
-                    self.cmd_close();
+                    // ZQ - close without saving (discard changes)
+                    self.cmd_close_discard();
                     true
                 }
                 _ => false,
@@ -1872,12 +1922,45 @@ impl GodotNeovimPlugin {
     /// :w - Save the current file by simulating Ctrl+S
     fn cmd_save(&self) {
         // Simulate Ctrl+S to save (avoids re-entrant borrow issues)
-        let mut key_event = InputEventKey::new_gd();
-        key_event.set_keycode(Key::S);
-        key_event.set_ctrl_pressed(true);
-        key_event.set_pressed(true);
-        Input::singleton().parse_input_event(&key_event);
+        let mut key_press = InputEventKey::new_gd();
+        key_press.set_keycode(Key::S);
+        key_press.set_ctrl_pressed(true);
+        key_press.set_pressed(true);
+        Input::singleton().parse_input_event(&key_press);
+
+        // Release the key (must be a new instance to avoid same-frame warning)
+        let mut key_release = InputEventKey::new_gd();
+        key_release.set_keycode(Key::S);
+        key_release.set_ctrl_pressed(true);
+        key_release.set_pressed(false);
+        Input::singleton().parse_input_event(&key_release);
+
         crate::verbose_print!("[godot-neovim] :w - Save triggered (Ctrl+S)");
+    }
+
+    /// ZZ - Save and close (using ResourceSaver for synchronous save)
+    fn cmd_save_and_close(&mut self) {
+        let editor = EditorInterface::singleton();
+        if let Some(mut script_editor) = editor.get_script_editor() {
+            if let Some(current_script) = script_editor.get_current_script() {
+                let path = current_script.get_path();
+                if !path.is_empty() {
+                    // Save the script using ResourceSaver (synchronous)
+                    let result = ResourceSaver::singleton()
+                        .save_ex(&current_script)
+                        .path(&path)
+                        .done();
+                    if result == godot::global::Error::OK {
+                        crate::verbose_print!("[godot-neovim] ZZ - Saved: {}", path);
+                    } else {
+                        godot_warn!("[godot-neovim] ZZ - Failed to save: {}", path);
+                    }
+                }
+            }
+        }
+
+        // Now close the tab
+        self.cmd_close();
     }
 
     /// :q - Close the current script tab by simulating Ctrl+W
@@ -1885,12 +1968,116 @@ impl GodotNeovimPlugin {
         // Clear current editor reference before closing to avoid accessing freed instance
         self.current_editor = None;
 
-        let mut key_event = InputEventKey::new_gd();
-        key_event.set_keycode(Key::W);
-        key_event.set_ctrl_pressed(true);
-        key_event.set_pressed(true);
-        Input::singleton().parse_input_event(&key_event);
+        // Simulate Ctrl+W key press
+        let mut key_press = InputEventKey::new_gd();
+        key_press.set_keycode(Key::W);
+        key_press.set_ctrl_pressed(true);
+        key_press.set_pressed(true);
+        Input::singleton().parse_input_event(&key_press);
+
+        // Release the key
+        let mut key_release = InputEventKey::new_gd();
+        key_release.set_keycode(Key::W);
+        key_release.set_ctrl_pressed(true);
+        key_release.set_pressed(false);
+        Input::singleton().parse_input_event(&key_release);
+
         crate::verbose_print!("[godot-neovim] :q - Close triggered (Ctrl+W)");
+    }
+
+    /// ZQ - Close without saving (discard changes)
+    fn cmd_close_discard(&mut self) {
+        let editor = EditorInterface::singleton();
+        if let Some(mut script_editor) = editor.get_script_editor() {
+            // Reload the script from disk and sync the CodeEdit
+            if let Some(mut current_script) = script_editor.get_current_script() {
+                let path = current_script.get_path();
+                if !path.is_empty() {
+                    // Reload the script from disk
+                    let _ = current_script.reload();
+
+                    // Also update the CodeEdit to match the reloaded script
+                    if let Some(mut code_edit) = self.current_editor.clone() {
+                        let source = current_script.get_source_code();
+                        code_edit.set_text(&source);
+                        // Mark as saved to clear the unsaved state
+                        code_edit.tag_saved_version();
+                        crate::verbose_print!(
+                            "[godot-neovim] ZQ - Synced CodeEdit and tagged as saved: {}",
+                            path
+                        );
+                    }
+                }
+            }
+        }
+
+        // Now close the tab (should not prompt since changes are discarded)
+        self.current_editor = None;
+
+        // Simulate Ctrl+W key press
+        let mut key_press = InputEventKey::new_gd();
+        key_press.set_keycode(Key::W);
+        key_press.set_ctrl_pressed(true);
+        key_press.set_pressed(true);
+        Input::singleton().parse_input_event(&key_press);
+
+        let mut key_release = InputEventKey::new_gd();
+        key_release.set_keycode(Key::W);
+        key_release.set_ctrl_pressed(true);
+        key_release.set_pressed(false);
+        Input::singleton().parse_input_event(&key_release);
+
+        crate::verbose_print!("[godot-neovim] ZQ - Close triggered (discard changes)");
+    }
+
+    /// Find TabBar in the ScriptEditor hierarchy
+    fn find_tab_bar(&self, node: Gd<Control>) -> Option<Gd<TabBar>> {
+        // Check if this node is a TabBar
+        if let Ok(tab_bar) = node.clone().try_cast::<TabBar>() {
+            // Make sure it has tabs (script tabs, not other TabBars)
+            if tab_bar.get_tab_count() > 0 {
+                crate::verbose_print!(
+                    "[godot-neovim] Found TabBar with {} tabs",
+                    tab_bar.get_tab_count()
+                );
+                return Some(tab_bar);
+            }
+        }
+
+        // Search children
+        let count = node.get_child_count();
+        for i in 0..count {
+            if let Some(child) = node.get_child(i) {
+                if let Ok(control) = child.try_cast::<Control>() {
+                    if let Some(tab_bar) = self.find_tab_bar(control) {
+                        return Some(tab_bar);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Debug: Print node hierarchy to find TabBar
+    #[allow(dead_code)]
+    fn debug_print_hierarchy(&self, node: Gd<Control>, depth: i32) {
+        let indent = "  ".repeat(depth as usize);
+        let class_name = node.get_class();
+        let node_name = node.get_name();
+        crate::verbose_print!("{}[{}] {}", indent, class_name, node_name);
+
+        let count = node.get_child_count();
+        for i in 0..count {
+            if let Some(child) = node.get_child(i) {
+                if let Ok(control) = child.try_cast::<Control>() {
+                    if depth < 5 {
+                        // Limit depth to avoid too much output
+                        self.debug_print_hierarchy(control, depth + 1);
+                    }
+                }
+            }
+        }
     }
 
     /// gt - Go to next script tab by simulating Ctrl+Tab

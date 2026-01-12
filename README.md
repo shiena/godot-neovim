@@ -39,7 +39,7 @@ This plugin is in early development. The following features are implemented:
 - ✅ Insert mode with configurable input handling (hybrid/strict modes)
 - ✅ Normal mode edits reflected in Godot (`dd`, `yy`, `p`, etc.)
 - ✅ Visual mode selection display (`v`, `V`)
-- ✅ Command-line mode (`:w`, `:q`, `:%s/old/new/g`)
+- ✅ Command-line mode (`:w`, `:q`, `:wq`, `ZZ`, `ZQ`, `:%s/old/new/g`)
 - ✅ Search word under cursor (`*` forward, `#` backward, `n`/`N` repeat)
 - ✅ Character find (`f`/`F`/`t`/`T`, `;`/`,` repeat)
 - ✅ Line navigation (`0`, `^`, `$`)
@@ -228,6 +228,8 @@ Once the plugin is enabled:
 | `:q` | Close current script tab |
 | `:qa`, `:qall` | Close all script tabs |
 | `:wq`, `:x` | Save and close |
+| `ZZ` | Save and close (normal mode) |
+| `ZQ` | Close without saving (discard changes) |
 | `:%s/old/new/g` | Substitute all occurrences |
 
 ### Limitations
