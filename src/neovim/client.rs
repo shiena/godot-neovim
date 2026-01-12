@@ -398,6 +398,52 @@ impl NeovimClient {
             }
         })
     }
+
+    /// Check if buffer is modified in Neovim
+    pub fn is_buffer_modified(&self) -> bool {
+        let neovim_arc = self.neovim.clone();
+
+        self.runtime.block_on(async {
+            let result = tokio::time::timeout(std::time::Duration::from_millis(50), async {
+                let nvim_lock = neovim_arc.lock().await;
+                if let Some(neovim) = nvim_lock.as_ref() {
+                    // Get &modified option
+                    let modified = neovim
+                        .call_function("getbufvar", vec![
+                            rmpv::Value::from(0), // current buffer
+                            rmpv::Value::from("&modified"),
+                        ])
+                        .await
+                        .ok()?;
+                    // Returns 1 if modified, 0 if not
+                    Some(modified.as_i64().unwrap_or(0) != 0)
+                } else {
+                    None
+                }
+            })
+            .await;
+
+            match result {
+                Ok(Some(modified)) => modified,
+                _ => false,
+            }
+        })
+    }
+
+    /// Set buffer as not modified in Neovim
+    pub fn set_buffer_not_modified(&self) {
+        let neovim_arc = self.neovim.clone();
+
+        self.runtime.block_on(async {
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(50), async {
+                let nvim_lock = neovim_arc.lock().await;
+                if let Some(neovim) = nvim_lock.as_ref() {
+                    let _ = neovim.command("set nomodified").await;
+                }
+            })
+            .await;
+        });
+    }
 }
 
 impl Default for NeovimClient {

@@ -827,6 +827,8 @@ impl GodotNeovimPlugin {
         if let Err(e) = client.set_buffer_lines(0, -1, lines) {
             godot_error!("[godot-neovim] Failed to sync buffer: {}", e);
         } else {
+            // Clear Neovim's modified flag since we synced from Godot
+            client.set_buffer_not_modified();
             crate::verbose_print!("[godot-neovim] Buffer synced to Neovim successfully");
         }
     }
@@ -1246,23 +1248,17 @@ impl GodotNeovimPlugin {
             "[godot-neovim] Syncing buffer from Neovim: {} lines",
             lines.len()
         );
-        if !lines.is_empty() {
-            crate::verbose_print!(
-                "[godot-neovim] First line from Neovim: '{}'",
-                lines[0].chars().take(50).collect::<String>()
-            );
-            if lines.len() > 1 {
-                crate::verbose_print!(
-                    "[godot-neovim] Last line from Neovim: '{}'",
-                    lines[lines.len() - 1].chars().take(50).collect::<String>()
-                );
-            }
-        }
 
-        // Update Godot editor
-        let text = lines.join("\n");
-        crate::verbose_print!("[godot-neovim] Setting text ({} chars)", text.len());
-        editor.set_text(&text);
+        // Update Godot editor only if content changed
+        let new_text = lines.join("\n");
+        let current_text = editor.get_text().to_string();
+
+        if new_text != current_text {
+            crate::verbose_print!("[godot-neovim] Content changed, updating editor");
+            editor.set_text(&new_text);
+        } else {
+            crate::verbose_print!("[godot-neovim] Content unchanged, skipping set_text");
+        }
 
         // Update cursor position
         if let Some((line, col)) = cursor {
