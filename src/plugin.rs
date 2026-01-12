@@ -173,6 +173,19 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
+        // Handle Ctrl+Y/Ctrl+E for viewport scrolling (cursor stays on same line)
+        if key_event.is_ctrl_pressed() && (keycode == Key::Y || keycode == Key::E) {
+            if keycode == Key::Y {
+                self.scroll_viewport_up();
+            } else {
+                self.scroll_viewport_down();
+            }
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
         // Handle H/M/L based on Godot's visible area (not Neovim's)
         if !key_event.is_ctrl_pressed()
             && !key_event.is_alt_pressed()
@@ -1103,5 +1116,39 @@ impl GodotNeovimPlugin {
 
         editor.deselect();
         crate::verbose_print!("[godot-neovim] Visual selection cleared");
+    }
+
+    /// Scroll viewport up by one line (Ctrl+Y) - cursor line stays the same
+    fn scroll_viewport_up(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let first_visible = editor.get_first_visible_line();
+        if first_visible > 0 {
+            editor.set_line_as_first_visible(first_visible - 1);
+            crate::verbose_print!(
+                "[godot-neovim] Ctrl+Y: scrolled up, first_visible={}",
+                first_visible - 1
+            );
+        }
+    }
+
+    /// Scroll viewport down by one line (Ctrl+E) - cursor line stays the same
+    fn scroll_viewport_down(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let first_visible = editor.get_first_visible_line();
+        let line_count = editor.get_line_count();
+
+        if first_visible < line_count - 1 {
+            editor.set_line_as_first_visible(first_visible + 1);
+            crate::verbose_print!(
+                "[godot-neovim] Ctrl+E: scrolled down, first_visible={}",
+                first_visible + 1
+            );
+        }
     }
 }
