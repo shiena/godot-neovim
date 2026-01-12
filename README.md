@@ -17,13 +17,12 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 - Support for operator-pending commands (e.g., `gg`, `dd`, `yy`)
 - Insert mode with Godot native input (IME support, auto-completion)
 - Ctrl+[ as Escape alternative (terminal standard)
-- Ctrl+B for visual block mode (works from both normal and insert mode)
+- Full/half page scrolling (`Ctrl+F`, `Ctrl+B`, `Ctrl+D`, `Ctrl+U`)
 - Word search under cursor (`*`, `#`, `n`, `N`)
 - Character find motions (`f`, `F`, `t`, `T`, `;`, `,`)
 - Line navigation (`0`, `^`, `$`) and paragraph movement (`{`, `}`)
 - Bracket matching (`%`) and go to definition (`gd`)
 - Character editing (`x`, `X`, `r`, `~`) and line operations (`J`, `>>`, `<<`)
-- Half-page scrolling (`Ctrl+D`, `Ctrl+U`)
 - Configurable Neovim executable path via Editor Settings
 - Path validation on startup and settings change
 
@@ -48,7 +47,7 @@ This plugin is in early development. The following features are implemented:
 - ✅ Bracket matching (`%`)
 - ✅ Character editing (`x`, `X`, `r`, `~`)
 - ✅ Line operations (`J` join, `>>` indent, `<<` unindent)
-- ✅ Half-page scrolling (`Ctrl+D`, `Ctrl+U`)
+- ✅ Full/half page scrolling (`Ctrl+F`, `Ctrl+B`, `Ctrl+D`, `Ctrl+U`)
 - ✅ Go to definition (`gd`)
 
 ## Requirements
@@ -151,6 +150,8 @@ Once the plugin is enabled:
 | `{` | Go to previous paragraph |
 | `}` | Go to next paragraph |
 | `%` | Jump to matching bracket |
+| `Ctrl+F` | Full page down |
+| `Ctrl+B` | Full page up |
 | `Ctrl+D` | Half page down |
 | `Ctrl+U` | Half page up |
 | `Ctrl+Y` | Scroll viewport up (cursor stays) |
@@ -198,7 +199,7 @@ Once the plugin is enabled:
 | `i`, `a`, `o`, `O` | Enter insert mode |
 | `v` | Enter visual mode |
 | `V` | Enter visual line mode |
-| `Ctrl+B` | Enter visual block mode |
+| `gv` | Enter visual block mode |
 | `Escape`, `Ctrl+[` | Return to normal mode |
 | `:` | Enter command-line mode |
 

@@ -257,13 +257,28 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
-        // Handle Ctrl+B as visual block mode (alternative to Ctrl+V which Godot intercepts)
+        // Handle Ctrl+B: visual block in visual mode, page up in normal mode
         let keycode = key_event.get_keycode();
         if key_event.is_ctrl_pressed() && keycode == Key::B {
-            let completed = self.send_keys("<C-v>");
-            if completed {
-                self.last_key.clear();
+            if Self::is_visual_mode(&self.current_mode) {
+                // In visual mode: switch to visual block (Ctrl+V alternative since Godot intercepts it)
+                let completed = self.send_keys("<C-v>");
+                if completed {
+                    self.last_key.clear();
+                }
+            } else {
+                // In normal mode: page up
+                self.page_up();
             }
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle Ctrl+F for page down
+        if key_event.is_ctrl_pressed() && keycode == Key::F {
+            self.page_down();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1322,6 +1337,11 @@ impl GodotNeovimPlugin {
                 "d" => {
                     // gd - go to definition (use Godot's built-in)
                     self.go_to_definition();
+                    true
+                }
+                "v" => {
+                    // gv - enter visual block mode (alternative to Ctrl+V)
+                    self.send_keys("<C-v>");
                     true
                 }
                 _ => false,
@@ -2693,6 +2713,55 @@ impl GodotNeovimPlugin {
         self.sync_cursor_to_neovim();
         self.update_cursor_from_editor();
         crate::verbose_print!("[godot-neovim] Ctrl+U: Moved to line {}", target_line + 1);
+    }
+
+    /// Move full page down (Ctrl+F command)
+    fn page_down(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let visible_lines = editor.get_visible_line_count();
+        let current_line = editor.get_caret_line();
+        let line_count = editor.get_line_count();
+
+        let target_line = (current_line + visible_lines).min(line_count - 1);
+        editor.set_caret_line(target_line);
+
+        // Also scroll the viewport
+        let first_visible = editor.get_first_visible_line();
+        let new_first = (first_visible + visible_lines).min(line_count - visible_lines);
+        if new_first > first_visible {
+            editor.set_line_as_first_visible(new_first.max(0));
+        }
+
+        self.sync_cursor_to_neovim();
+        self.update_cursor_from_editor();
+        crate::verbose_print!("[godot-neovim] Ctrl+F: Moved to line {}", target_line + 1);
+    }
+
+    /// Move full page up (Ctrl+B command)
+    fn page_up(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let visible_lines = editor.get_visible_line_count();
+        let current_line = editor.get_caret_line();
+
+        let target_line = (current_line - visible_lines).max(0);
+        editor.set_caret_line(target_line);
+
+        // Also scroll the viewport
+        let first_visible = editor.get_first_visible_line();
+        let new_first = (first_visible - visible_lines).max(0);
+        if new_first < first_visible {
+            editor.set_line_as_first_visible(new_first);
+        }
+
+        self.sync_cursor_to_neovim();
+        self.update_cursor_from_editor();
+        crate::verbose_print!("[godot-neovim] Ctrl+B: Moved to line {}", target_line + 1);
     }
 
     /// Go to definition (gd command) - uses Godot's built-in
