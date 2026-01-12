@@ -79,25 +79,24 @@ This plugin is in early development. The following features are implemented:
    cargo build --release
    ```
 
-3. Copy the built library and configuration files to your Godot project:
+3. Copy the built library to the addons folder:
    ```bash
-   mkdir -p /path/to/your/godot/project/addons/godot-neovim/
-
    # Windows
-   cp target/release/godot_neovim.dll /path/to/your/godot/project/addons/godot-neovim/
+   cp target/release/godot_neovim.dll addons/godot-neovim/
 
    # Linux
-   cp target/release/libgodot_neovim.so /path/to/your/godot/project/addons/godot-neovim/
+   cp target/release/libgodot_neovim.so addons/godot-neovim/
 
    # macOS
-   cp target/release/libgodot_neovim.dylib /path/to/your/godot/project/addons/godot-neovim/
-
-   # Copy configuration files
-   cp godot-neovim.gdextension /path/to/your/godot/project/addons/godot-neovim/
-   cp plugin.cfg /path/to/your/godot/project/addons/godot-neovim/
+   cp target/release/libgodot_neovim.dylib addons/godot-neovim/
    ```
 
-4. Enable the plugin in Godot: `Project > Project Settings > Plugins`
+4. Copy the addons folder to your Godot project:
+   ```bash
+   cp -r addons /path/to/your/godot/project/
+   ```
+
+5. Enable the plugin in Godot: `Project > Project Settings > Plugins`
 
 ## Configuration
 
