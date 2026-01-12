@@ -1585,6 +1585,7 @@ impl GodotNeovimPlugin {
         match cmd {
             "w" => self.cmd_save(),
             "q" => self.cmd_close(),
+            "qa" | "qall" => self.cmd_close_all(),
             "wq" | "x" => {
                 self.cmd_save();
                 self.cmd_close();
@@ -1624,6 +1625,34 @@ impl GodotNeovimPlugin {
         key_event.set_pressed(true);
         Input::singleton().parse_input_event(&key_event);
         crate::verbose_print!("[godot-neovim] :q - Close triggered (Ctrl+W)");
+    }
+
+    /// :qa/:qall - Close all script tabs
+    fn cmd_close_all(&mut self) {
+        // Clear current editor reference
+        self.current_editor = None;
+
+        // Get the number of open scripts
+        let editor = EditorInterface::singleton();
+        let script_count = if let Some(script_editor) = editor.get_script_editor() {
+            script_editor.get_open_scripts().len()
+        } else {
+            0
+        };
+
+        // Close each script by simulating Ctrl+W multiple times
+        for _ in 0..script_count {
+            let mut key_event = InputEventKey::new_gd();
+            key_event.set_keycode(Key::W);
+            key_event.set_ctrl_pressed(true);
+            key_event.set_pressed(true);
+            Input::singleton().parse_input_event(&key_event);
+        }
+
+        crate::verbose_print!(
+            "[godot-neovim] :qa - Close all triggered ({} scripts)",
+            script_count
+        );
     }
 
     /// :s/old/new/g or :%s/old/new/g - Substitute
