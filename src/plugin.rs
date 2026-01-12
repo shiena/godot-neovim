@@ -27,6 +27,30 @@ pub struct GodotNeovimPlugin {
     /// Last key sent to Neovim (for detecting sequences like zz, zt, zb)
     #[init(val = String::new())]
     last_key: String,
+    /// Command line input buffer for ':' commands
+    #[init(val = String::new())]
+    command_buffer: String,
+    /// Flag indicating command-line mode is active
+    #[init(val = false)]
+    command_mode: bool,
+    /// Last searched word (for n/N repeat)
+    #[init(val = String::new())]
+    last_search_word: String,
+    /// Last search direction (true = forward, false = backward)
+    #[init(val = true)]
+    last_search_forward: bool,
+    /// Last find character (for ;/, repeat)
+    #[init(val = None)]
+    last_find_char: Option<char>,
+    /// Last find direction (true = forward f/t, false = backward F/T)
+    #[init(val = true)]
+    last_find_forward: bool,
+    /// Last find was till (t/T) vs on (f/F)
+    #[init(val = false)]
+    last_find_till: bool,
+    /// Pending operator waiting for character input (f, F, t, T, r)
+    #[init(val = None)]
+    pending_char_op: Option<char>,
 }
 
 #[godot_api]
@@ -127,6 +151,71 @@ impl IEditorPlugin for GodotNeovimPlugin {
             key_event.get_keycode()
         );
 
+        // Handle command-line mode input
+        if self.command_mode {
+            let keycode = key_event.get_keycode();
+
+            if keycode == Key::ESCAPE {
+                self.close_command_line();
+            } else if keycode == Key::ENTER {
+                self.execute_command();
+            } else if keycode == Key::BACKSPACE {
+                // Remove last character (but keep the ':')
+                if self.command_buffer.len() > 1 {
+                    self.command_buffer.pop();
+                    self.update_command_display();
+                }
+            } else {
+                // Append character to command buffer
+                let unicode = key_event.get_unicode();
+                if unicode > 0 {
+                    if let Some(c) = char::from_u32(unicode) {
+                        self.command_buffer.push(c);
+                        self.update_command_display();
+                    }
+                }
+            }
+
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle pending character operator (f, F, t, T, r)
+        if let Some(op) = self.pending_char_op {
+            let keycode = key_event.get_keycode();
+
+            // Cancel on Escape
+            if keycode == Key::ESCAPE {
+                self.pending_char_op = None;
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
+
+            // Get the character
+            let unicode = key_event.get_unicode();
+            if unicode > 0 {
+                if let Some(c) = char::from_u32(unicode) {
+                    self.pending_char_op = None;
+                    match op {
+                        'f' => self.find_char_forward(c, false),
+                        'F' => self.find_char_backward(c, false),
+                        't' => self.find_char_forward(c, true),
+                        'T' => self.find_char_backward(c, true),
+                        'r' => self.replace_char(c),
+                        _ => {}
+                    }
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
+            }
+        }
+
         // In insert mode, let Godot handle most keys natively
         if self.is_insert_mode() {
             // Intercept Escape or Ctrl+[ to exit insert mode
@@ -191,6 +280,273 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Handle '/' for search - open Godot's find dialog
         if keycode == Key::SLASH && !key_event.is_ctrl_pressed() && !key_event.is_shift_pressed() {
             self.open_find_dialog();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle ':' for command-line mode
+        // Key::COLON for direct colon key, or Shift+Semicolon on US keyboards
+        if keycode == Key::COLON || (keycode == Key::SEMICOLON && key_event.is_shift_pressed()) {
+            self.open_command_line();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '*' for search forward word under cursor
+        // Key::ASTERISK for direct key, or Shift+8 on US keyboards
+        if keycode == Key::ASTERISK
+            || (keycode == Key::KEY_8 && key_event.is_shift_pressed())
+        {
+            self.search_word_forward();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '#' for search backward word under cursor
+        // Key::NUMBERSIGN for direct key, or Shift+3 on US keyboards
+        if keycode == Key::NUMBERSIGN
+            || (keycode == Key::KEY_3 && key_event.is_shift_pressed())
+        {
+            self.search_word_backward();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'n' for repeat search forward
+        if keycode == Key::N && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.repeat_search(true);
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'N' for repeat search backward
+        if keycode == Key::N && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.repeat_search(false);
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'f' for find char forward
+        if keycode == Key::F && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.pending_char_op = Some('f');
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'F' for find char backward
+        if keycode == Key::F && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.pending_char_op = Some('F');
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 't' for till char forward
+        if keycode == Key::T && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.pending_char_op = Some('t');
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'T' for till char backward
+        if keycode == Key::T && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.pending_char_op = Some('T');
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle ';' for repeat find char same direction
+        if keycode == Key::SEMICOLON && !key_event.is_shift_pressed() {
+            self.repeat_find_char(true);
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle ',' for repeat find char opposite direction
+        if keycode == Key::COMMA && !key_event.is_shift_pressed() {
+            self.repeat_find_char(false);
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '%' for matching bracket
+        if keycode == Key::PERCENT
+            || (keycode == Key::KEY_5 && key_event.is_shift_pressed())
+        {
+            self.jump_to_matching_bracket();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '0' for go to start of line
+        if keycode == Key::KEY_0 && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.move_to_line_start();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '^' for go to first non-blank
+        if keycode == Key::ASCIICIRCUM
+            || (keycode == Key::KEY_6 && key_event.is_shift_pressed())
+        {
+            self.move_to_first_non_blank();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '$' for go to end of line
+        if keycode == Key::DOLLAR
+            || (keycode == Key::KEY_4 && key_event.is_shift_pressed())
+        {
+            self.move_to_line_end();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '{' for previous paragraph
+        if keycode == Key::BRACELEFT
+            || (keycode == Key::BRACKETLEFT && key_event.is_shift_pressed())
+        {
+            self.move_to_prev_paragraph();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '}' for next paragraph
+        if keycode == Key::BRACERIGHT
+            || (keycode == Key::BRACKETRIGHT && key_event.is_shift_pressed())
+        {
+            self.move_to_next_paragraph();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'x' for delete char under cursor
+        if keycode == Key::X && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.delete_char_forward();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'X' for delete char before cursor
+        if keycode == Key::X && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.delete_char_backward();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'r' for replace char
+        if keycode == Key::R && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.pending_char_op = Some('r');
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '~' for toggle case
+        if keycode == Key::ASCIITILDE
+            || (keycode == Key::QUOTELEFT && key_event.is_shift_pressed())
+        {
+            self.toggle_case();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '>>' for indent (first '>' sets pending, second '>' executes)
+        // Handle '<<' for unindent (first '<' sets pending, second '<' executes)
+        if keycode == Key::GREATER
+            || (keycode == Key::PERIOD && key_event.is_shift_pressed())
+        {
+            if self.last_key == ">" {
+                self.indent_line();
+                self.last_key.clear();
+            } else {
+                self.last_key = ">".to_string();
+            }
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        if keycode == Key::LESS
+            || (keycode == Key::COMMA && key_event.is_shift_pressed())
+        {
+            if self.last_key == "<" {
+                self.unindent_line();
+                self.last_key.clear();
+            } else {
+                self.last_key = "<".to_string();
+            }
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'J' for join lines
+        if keycode == Key::J && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.join_lines();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle Ctrl+D for half page down
+        if key_event.is_ctrl_pressed() && keycode == Key::D {
+            self.half_page_down();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle Ctrl+U for half page up
+        if key_event.is_ctrl_pressed() && keycode == Key::U {
+            self.half_page_up();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -838,6 +1194,11 @@ impl GodotNeovimPlugin {
     }
 
     fn update_mode_display_with_cursor(&mut self, mode: &str, cursor: Option<(i64, i64)>) {
+        // Don't update if we're in command-line mode (our own command buffer)
+        if self.command_mode {
+            return;
+        }
+
         let mode_text = match mode {
             "n" | "normal" => "NORMAL",
             "i" | "insert" => "INSERT",
@@ -913,8 +1274,8 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// Handle scroll commands (zz, zt, zb) after sending to Neovim
-    /// Returns true if a scroll command was handled
+    /// Handle scroll commands (zz, zt, zb) and g-commands (gd) after sending to Neovim
+    /// Returns true if a command was handled
     fn handle_scroll_command(&mut self, keys: &str) -> bool {
         // Check for z-prefixed scroll commands
         if self.last_key == "z" {
@@ -961,6 +1322,24 @@ impl GodotNeovimPlugin {
                 return true;
             }
         }
+
+        // Check for g-prefixed commands
+        if self.last_key == "g" {
+            let handled = match keys {
+                "d" => {
+                    // gd - go to definition (use Godot's built-in)
+                    self.go_to_definition();
+                    true
+                }
+                _ => false,
+            };
+
+            if handled {
+                self.last_key.clear();
+                return true;
+            }
+        }
+
         false
     }
 
@@ -1175,5 +1554,1088 @@ impl GodotNeovimPlugin {
         Input::singleton().parse_input_event(&key_event);
 
         crate::verbose_print!("[godot-neovim] Opened find dialog (simulated Ctrl+F)");
+    }
+
+    /// Open command line for input
+    fn open_command_line(&mut self) {
+        self.command_buffer = ":".to_string();
+        self.command_mode = true;
+        self.update_command_display();
+        crate::verbose_print!("[godot-neovim] Command line opened");
+    }
+
+    /// Update command display in mode label
+    fn update_command_display(&mut self) {
+        if let Some(ref mut label) = self.mode_label {
+            label.set_text(&format!(" {} ", self.command_buffer));
+            // Yellow color for command mode
+            label.add_theme_color_override("font_color", Color::from_rgb(1.0, 1.0, 0.0));
+        }
+    }
+
+    /// Close command line
+    fn close_command_line(&mut self) {
+        self.command_buffer.clear();
+        self.command_mode = false;
+
+        // Restore normal mode display
+        let cursor = (self.current_cursor.0 + 1, self.current_cursor.1);
+        self.update_mode_display_with_cursor(&self.current_mode.clone(), Some(cursor));
+
+        crate::verbose_print!("[godot-neovim] Command line closed");
+    }
+
+    /// Execute the command from command line
+    fn execute_command(&mut self) {
+        let command = self.command_buffer.clone();
+
+        // Remove the leading ':'
+        let cmd = command.strip_prefix(':').unwrap_or(&command).trim();
+
+        crate::verbose_print!("[godot-neovim] Executing command: {}", cmd);
+
+        match cmd {
+            "w" => self.cmd_save(),
+            "q" => self.cmd_close(),
+            "wq" | "x" => {
+                self.cmd_save();
+                self.cmd_close();
+            }
+            _ => {
+                // Check for substitution command :%s/old/new/g
+                if cmd.starts_with("%s/") || cmd.starts_with("s/") {
+                    self.cmd_substitute(cmd);
+                } else {
+                    godot_warn!("[godot-neovim] Unknown command: {}", cmd);
+                }
+            }
+        }
+
+        self.close_command_line();
+    }
+
+    /// :w - Save the current file by simulating Ctrl+S
+    fn cmd_save(&self) {
+        // Simulate Ctrl+S to save (avoids re-entrant borrow issues)
+        let mut key_event = InputEventKey::new_gd();
+        key_event.set_keycode(Key::S);
+        key_event.set_ctrl_pressed(true);
+        key_event.set_pressed(true);
+        Input::singleton().parse_input_event(&key_event);
+        crate::verbose_print!("[godot-neovim] :w - Save triggered (Ctrl+S)");
+    }
+
+    /// :q - Close (does nothing in Godot editor context, just shows message)
+    fn cmd_close(&self) {
+        crate::verbose_print!("[godot-neovim] :q - Close requested (no-op in editor)");
+    }
+
+    /// :s/old/new/g or :%s/old/new/g - Substitute
+    fn cmd_substitute(&mut self, cmd: &str) {
+        // Parse the substitute command
+        // Format: [%]s/pattern/replacement/[g]
+        let cmd = cmd.strip_prefix('%').unwrap_or(cmd);
+        let cmd = cmd.strip_prefix("s/").unwrap_or(cmd);
+
+        let parts: Vec<&str> = cmd.split('/').collect();
+        if parts.len() < 2 {
+            godot_warn!("[godot-neovim] Invalid substitute command");
+            return;
+        }
+
+        let pattern = parts[0];
+        let replacement = parts[1];
+        let _flags = parts.get(2).unwrap_or(&"");
+
+        crate::verbose_print!(
+            "[godot-neovim] Substitute: '{}' -> '{}'",
+            pattern,
+            replacement
+        );
+
+        // Get current editor and perform replacement
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        // Get all text, replace, and set back
+        let text = editor.get_text().to_string();
+        let new_text = text.replace(pattern, replacement);
+
+        if text != new_text {
+            // Save cursor position
+            let line = editor.get_caret_line();
+            let col = editor.get_caret_column();
+
+            editor.set_text(&new_text);
+
+            // Restore cursor position (clamped to valid range)
+            let max_line = editor.get_line_count() - 1;
+            editor.set_caret_line(line.min(max_line));
+            editor.set_caret_column(col);
+
+            // Sync to Neovim
+            self.sync_buffer_to_neovim();
+
+            crate::verbose_print!("[godot-neovim] Substitution complete");
+        } else {
+            crate::verbose_print!("[godot-neovim] No matches found for '{}'", pattern);
+        }
+    }
+
+    /// Get the word under cursor from the Godot editor
+    /// Returns None if no word is found at cursor position
+    fn get_word_under_cursor(&self) -> Option<String> {
+        let editor = self.current_editor.as_ref()?;
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column() as usize;
+        let line_text = editor.get_line(line_idx).to_string();
+
+        if line_text.is_empty() || col_idx >= line_text.chars().count() {
+            return None;
+        }
+
+        let chars: Vec<char> = line_text.chars().collect();
+
+        // Check if cursor is on a word character
+        let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
+
+        if !is_word_char(chars[col_idx]) {
+            return None;
+        }
+
+        // Find word start
+        let mut start = col_idx;
+        while start > 0 && is_word_char(chars[start - 1]) {
+            start -= 1;
+        }
+
+        // Find word end
+        let mut end = col_idx;
+        while end < chars.len() && is_word_char(chars[end]) {
+            end += 1;
+        }
+
+        let word: String = chars[start..end].iter().collect();
+        if word.is_empty() {
+            None
+        } else {
+            Some(word)
+        }
+    }
+
+    /// Search forward for word under cursor (*)
+    fn search_word_forward(&mut self) {
+        let Some(word) = self.get_word_under_cursor() else {
+            crate::verbose_print!("[godot-neovim] *: No word under cursor");
+            return;
+        };
+
+        // Save for n/N repeat
+        self.last_search_word = word.clone();
+        self.last_search_forward = true;
+
+        crate::verbose_print!("[godot-neovim] *: Searching forward for '{}'", word);
+
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let current_line = editor.get_caret_line();
+        let current_col = editor.get_caret_column();
+        let line_count = editor.get_line_count();
+
+        // Search from current position forward
+        for line_idx in current_line..line_count {
+            let line_text = editor.get_line(line_idx).to_string();
+            let search_start = if line_idx == current_line {
+                // On current line, search after current word
+                (current_col as usize) + 1
+            } else {
+                0
+            };
+
+            if let Some(found) = self.find_word_in_line(&line_text, &word, search_start, true) {
+                self.move_cursor_to(line_idx, found as i32);
+                return;
+            }
+        }
+
+        // Wrap around to beginning of file
+        for line_idx in 0..=current_line {
+            let line_text = editor.get_line(line_idx).to_string();
+            let search_end = if line_idx == current_line {
+                current_col as usize
+            } else {
+                line_text.len()
+            };
+
+            if let Some(found) = self.find_word_in_line(&line_text, &word, 0, true) {
+                if line_idx < current_line || found < search_end {
+                    self.move_cursor_to(line_idx, found as i32);
+                    return;
+                }
+            }
+        }
+
+        crate::verbose_print!("[godot-neovim] *: No more matches for '{}'", word);
+    }
+
+    /// Search backward for word under cursor (#)
+    fn search_word_backward(&mut self) {
+        let Some(word) = self.get_word_under_cursor() else {
+            crate::verbose_print!("[godot-neovim] #: No word under cursor");
+            return;
+        };
+
+        // Save for n/N repeat
+        self.last_search_word = word.clone();
+        self.last_search_forward = false;
+
+        crate::verbose_print!("[godot-neovim] #: Searching backward for '{}'", word);
+
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let current_line = editor.get_caret_line();
+        let current_col = editor.get_caret_column() as usize;
+        let line_count = editor.get_line_count();
+
+        // Search from current position backward
+        for line_idx in (0..=current_line).rev() {
+            let line_text = editor.get_line(line_idx).to_string();
+
+            if let Some(found) = self.find_word_in_line_backward(&line_text, &word, current_line, line_idx, current_col) {
+                self.move_cursor_to(line_idx, found as i32);
+                return;
+            }
+        }
+
+        // Wrap around to end of file
+        for line_idx in (current_line..line_count).rev() {
+            let line_text = editor.get_line(line_idx).to_string();
+
+            if let Some(found) = self.find_word_in_line(&line_text, &word, 0, false) {
+                // Find last occurrence
+                let mut last = found;
+                let mut search_from = found + 1;
+                while let Some(next) = self.find_word_in_line(&line_text, &word, search_from, true) {
+                    if line_idx == current_line && next >= current_col {
+                        break;
+                    }
+                    last = next;
+                    search_from = next + 1;
+                }
+                self.move_cursor_to(line_idx, last as i32);
+                return;
+            }
+        }
+
+        crate::verbose_print!("[godot-neovim] #: No more matches for '{}'", word);
+    }
+
+    /// Find word boundary match in line starting from given position
+    fn find_word_in_line(&self, line: &str, word: &str, start: usize, forward: bool) -> Option<usize> {
+        let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
+        let chars: Vec<char> = line.chars().collect();
+        let word_chars: Vec<char> = word.chars().collect();
+        let word_len = word_chars.len();
+
+        if word_len == 0 || chars.len() < word_len {
+            return None;
+        }
+
+        let search_range: Box<dyn Iterator<Item = usize>> = if forward {
+            Box::new(start..=chars.len().saturating_sub(word_len))
+        } else {
+            Box::new((0..=chars.len().saturating_sub(word_len)).rev())
+        };
+
+        for i in search_range {
+            // Check if the substring matches
+            let mut matches = true;
+            for (j, wc) in word_chars.iter().enumerate() {
+                if chars[i + j] != *wc {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if !matches {
+                continue;
+            }
+
+            // Check word boundaries
+            let before_ok = i == 0 || !is_word_char(chars[i - 1]);
+            let after_ok = i + word_len >= chars.len() || !is_word_char(chars[i + word_len]);
+
+            if before_ok && after_ok {
+                return Some(i);
+            }
+        }
+
+        None
+    }
+
+    /// Find word in line for backward search, handling current line specially
+    fn find_word_in_line_backward(&self, line: &str, word: &str, current_line: i32, line_idx: i32, current_col: usize) -> Option<usize> {
+        let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
+        let chars: Vec<char> = line.chars().collect();
+        let word_chars: Vec<char> = word.chars().collect();
+        let word_len = word_chars.len();
+
+        if word_len == 0 || chars.len() < word_len {
+            return None;
+        }
+
+        // Determine the end position for search
+        let end_pos = if line_idx == current_line {
+            current_col.saturating_sub(1)
+        } else {
+            chars.len().saturating_sub(word_len)
+        };
+
+        // Search backward from end_pos
+        for i in (0..=end_pos.min(chars.len().saturating_sub(word_len))).rev() {
+            // Check if the substring matches
+            let mut matches = true;
+            for (j, wc) in word_chars.iter().enumerate() {
+                if chars[i + j] != *wc {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if !matches {
+                continue;
+            }
+
+            // Check word boundaries
+            let before_ok = i == 0 || !is_word_char(chars[i - 1]);
+            let after_ok = i + word_len >= chars.len() || !is_word_char(chars[i + word_len]);
+
+            if before_ok && after_ok {
+                return Some(i);
+            }
+        }
+
+        None
+    }
+
+    /// Move cursor to specified position and sync with Neovim
+    fn move_cursor_to(&mut self, line: i32, col: i32) {
+        if let Some(ref mut editor) = self.current_editor {
+            editor.set_caret_line(line);
+            editor.set_caret_column(col);
+            crate::verbose_print!("[godot-neovim] Moved cursor to {}:{}", line + 1, col);
+        }
+
+        // Update cached cursor position
+        self.current_cursor = (line as i64, col as i64);
+
+        // Sync to Neovim
+        self.sync_cursor_to_neovim();
+
+        // Update display
+        let display_cursor = (line as i64 + 1, col as i64);
+        self.update_mode_display_with_cursor(&self.current_mode.clone(), Some(display_cursor));
+    }
+
+    /// Repeat search in given direction (n/N commands)
+    fn repeat_search(&mut self, same_direction: bool) {
+        if self.last_search_word.is_empty() {
+            crate::verbose_print!("[godot-neovim] n/N: No previous search");
+            return;
+        }
+
+        let forward = if same_direction {
+            self.last_search_forward
+        } else {
+            !self.last_search_forward
+        };
+
+        crate::verbose_print!(
+            "[godot-neovim] {}: Repeating search for '{}' {}",
+            if same_direction { "n" } else { "N" },
+            self.last_search_word,
+            if forward { "forward" } else { "backward" }
+        );
+
+        let word = self.last_search_word.clone();
+        if forward {
+            self.search_word_forward_internal(&word);
+        } else {
+            self.search_word_backward_internal(&word);
+        }
+    }
+
+    /// Internal search forward (used by * and n)
+    fn search_word_forward_internal(&mut self, word: &str) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let current_line = editor.get_caret_line();
+        let current_col = editor.get_caret_column();
+        let line_count = editor.get_line_count();
+
+        // Search from current position forward
+        for line_idx in current_line..line_count {
+            let line_text = editor.get_line(line_idx).to_string();
+            let search_start = if line_idx == current_line {
+                (current_col as usize) + 1
+            } else {
+                0
+            };
+
+            if let Some(found) = self.find_word_in_line(&line_text, word, search_start, true) {
+                self.move_cursor_to(line_idx, found as i32);
+                return;
+            }
+        }
+
+        // Wrap around to beginning of file
+        for line_idx in 0..=current_line {
+            let line_text = editor.get_line(line_idx).to_string();
+            let search_end = if line_idx == current_line {
+                current_col as usize
+            } else {
+                line_text.len()
+            };
+
+            if let Some(found) = self.find_word_in_line(&line_text, word, 0, true) {
+                if line_idx < current_line || found < search_end {
+                    self.move_cursor_to(line_idx, found as i32);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Internal search backward (used by # and N)
+    fn search_word_backward_internal(&mut self, word: &str) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let current_line = editor.get_caret_line();
+        let current_col = editor.get_caret_column() as usize;
+        let line_count = editor.get_line_count();
+
+        // Search from current position backward
+        for line_idx in (0..=current_line).rev() {
+            let line_text = editor.get_line(line_idx).to_string();
+
+            if let Some(found) = self.find_word_in_line_backward(&line_text, word, current_line, line_idx, current_col) {
+                self.move_cursor_to(line_idx, found as i32);
+                return;
+            }
+        }
+
+        // Wrap around to end of file
+        for line_idx in (current_line..line_count).rev() {
+            let line_text = editor.get_line(line_idx).to_string();
+
+            if let Some(found) = self.find_word_in_line(&line_text, word, 0, false) {
+                let mut last = found;
+                let mut search_from = found + 1;
+                while let Some(next) = self.find_word_in_line(&line_text, word, search_from, true) {
+                    if line_idx == current_line && next >= current_col {
+                        break;
+                    }
+                    last = next;
+                    search_from = next + 1;
+                }
+                self.move_cursor_to(line_idx, last as i32);
+                return;
+            }
+        }
+    }
+
+    /// Find character forward on current line (f/t commands)
+    fn find_char_forward(&mut self, c: char, till: bool) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column() as usize;
+        let line_text = editor.get_line(line_idx).to_string();
+        let chars: Vec<char> = line_text.chars().collect();
+
+        // Search for character after cursor
+        for i in (col_idx + 1)..chars.len() {
+            if chars[i] == c {
+                let target_col = if till { i - 1 } else { i };
+                self.move_cursor_to(line_idx, target_col as i32);
+
+                // Save for ; and ,
+                self.last_find_char = Some(c);
+                self.last_find_forward = true;
+                self.last_find_till = till;
+
+                crate::verbose_print!(
+                    "[godot-neovim] {}{}: Found '{}' at col {}",
+                    if till { "t" } else { "f" },
+                    c,
+                    c,
+                    target_col
+                );
+                return;
+            }
+        }
+
+        crate::verbose_print!("[godot-neovim] f/t: Character '{}' not found", c);
+    }
+
+    /// Find character backward on current line (F/T commands)
+    fn find_char_backward(&mut self, c: char, till: bool) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column() as usize;
+        let line_text = editor.get_line(line_idx).to_string();
+        let chars: Vec<char> = line_text.chars().collect();
+
+        // Search for character before cursor
+        for i in (0..col_idx).rev() {
+            if chars[i] == c {
+                let target_col = if till { i + 1 } else { i };
+                self.move_cursor_to(line_idx, target_col as i32);
+
+                // Save for ; and ,
+                self.last_find_char = Some(c);
+                self.last_find_forward = false;
+                self.last_find_till = till;
+
+                crate::verbose_print!(
+                    "[godot-neovim] {}{}: Found '{}' at col {}",
+                    if till { "T" } else { "F" },
+                    c,
+                    c,
+                    target_col
+                );
+                return;
+            }
+        }
+
+        crate::verbose_print!("[godot-neovim] F/T: Character '{}' not found", c);
+    }
+
+    /// Repeat last f/F/t/T command (; and , commands)
+    fn repeat_find_char(&mut self, same_direction: bool) {
+        let Some(c) = self.last_find_char else {
+            crate::verbose_print!("[godot-neovim] ;/,: No previous find");
+            return;
+        };
+
+        let forward = if same_direction {
+            self.last_find_forward
+        } else {
+            !self.last_find_forward
+        };
+        let till = self.last_find_till;
+
+        if forward {
+            self.find_char_forward(c, till);
+        } else {
+            self.find_char_backward(c, till);
+        }
+    }
+
+    /// Jump to matching bracket (% command)
+    fn jump_to_matching_bracket(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column() as usize;
+        let line_text = editor.get_line(line_idx).to_string();
+        let chars: Vec<char> = line_text.chars().collect();
+
+        if col_idx >= chars.len() {
+            return;
+        }
+
+        let current_char = chars[col_idx];
+        let (target_char, search_forward) = match current_char {
+            '(' => (')', true),
+            ')' => ('(', false),
+            '[' => (']', true),
+            ']' => ('[', false),
+            '{' => ('}', true),
+            '}' => ('{', false),
+            '<' => ('>', true),
+            '>' => ('<', false),
+            _ => {
+                crate::verbose_print!("[godot-neovim] %: Not on a bracket");
+                return;
+            }
+        };
+
+        let line_count = editor.get_line_count();
+        let mut depth = 1;
+
+        if search_forward {
+            // Search forward
+            let mut line = line_idx;
+            let mut col = col_idx + 1;
+
+            while line < line_count {
+                let text = editor.get_line(line).to_string();
+                let line_chars: Vec<char> = text.chars().collect();
+
+                while col < line_chars.len() {
+                    if line_chars[col] == current_char {
+                        depth += 1;
+                    } else if line_chars[col] == target_char {
+                        depth -= 1;
+                        if depth == 0 {
+                            self.move_cursor_to(line, col as i32);
+                            crate::verbose_print!("[godot-neovim] %: Jump to {}:{}", line + 1, col);
+                            return;
+                        }
+                    }
+                    col += 1;
+                }
+                line += 1;
+                col = 0;
+            }
+        } else {
+            // Search backward
+            let mut line = line_idx as i32;
+            let mut col = col_idx as i32 - 1;
+
+            while line >= 0 {
+                let text = editor.get_line(line).to_string();
+                let line_chars: Vec<char> = text.chars().collect();
+
+                if col < 0 {
+                    col = line_chars.len() as i32 - 1;
+                }
+
+                while col >= 0 {
+                    if line_chars[col as usize] == current_char {
+                        depth += 1;
+                    } else if line_chars[col as usize] == target_char {
+                        depth -= 1;
+                        if depth == 0 {
+                            self.move_cursor_to(line, col);
+                            crate::verbose_print!("[godot-neovim] %: Jump to {}:{}", line + 1, col);
+                            return;
+                        }
+                    }
+                    col -= 1;
+                }
+                line -= 1;
+                if line >= 0 {
+                    col = editor.get_line(line).len() as i32 - 1;
+                }
+            }
+        }
+
+        crate::verbose_print!("[godot-neovim] %: Matching bracket not found");
+    }
+
+    /// Move to start of line (0 command)
+    fn move_to_line_start(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line = editor.get_caret_line();
+        self.move_cursor_to(line, 0);
+        crate::verbose_print!("[godot-neovim] 0: Moved to start of line");
+    }
+
+    /// Move to first non-blank character (^ command)
+    fn move_to_first_non_blank(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let line_text = editor.get_line(line_idx).to_string();
+
+        let first_non_blank = line_text
+            .chars()
+            .position(|c| !c.is_whitespace())
+            .unwrap_or(0);
+
+        self.move_cursor_to(line_idx, first_non_blank as i32);
+        crate::verbose_print!("[godot-neovim] ^: Moved to first non-blank at col {}", first_non_blank);
+    }
+
+    /// Move to end of line ($ command)
+    fn move_to_line_end(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let line_text = editor.get_line(line_idx).to_string();
+        let line_len = line_text.chars().count();
+
+        // Vim's $ goes to last character, not past it
+        let target_col = if line_len > 0 { line_len - 1 } else { 0 };
+        self.move_cursor_to(line_idx, target_col as i32);
+        crate::verbose_print!("[godot-neovim] $: Moved to end of line at col {}", target_col);
+    }
+
+    /// Move to previous paragraph ({ command)
+    fn move_to_prev_paragraph(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let current_line = editor.get_caret_line();
+
+        // Skip current empty lines
+        let mut line = current_line - 1;
+        while line > 0 {
+            let text = editor.get_line(line).to_string();
+            if text.trim().is_empty() {
+                line -= 1;
+            } else {
+                break;
+            }
+        }
+
+        // Find previous empty line
+        while line > 0 {
+            let text = editor.get_line(line).to_string();
+            if text.trim().is_empty() {
+                break;
+            }
+            line -= 1;
+        }
+
+        self.move_cursor_to(line.max(0), 0);
+        crate::verbose_print!("[godot-neovim] {{: Moved to line {}", line + 1);
+    }
+
+    /// Move to next paragraph (} command)
+    fn move_to_next_paragraph(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let current_line = editor.get_caret_line();
+        let line_count = editor.get_line_count();
+
+        // Skip current non-empty lines
+        let mut line = current_line + 1;
+        while line < line_count {
+            let text = editor.get_line(line).to_string();
+            if !text.trim().is_empty() {
+                line += 1;
+            } else {
+                break;
+            }
+        }
+
+        // Skip empty lines
+        while line < line_count {
+            let text = editor.get_line(line).to_string();
+            if text.trim().is_empty() {
+                line += 1;
+            } else {
+                break;
+            }
+        }
+
+        self.move_cursor_to(line.min(line_count - 1), 0);
+        crate::verbose_print!("[godot-neovim] }}: Moved to line {}", line + 1);
+    }
+
+    /// Delete character under cursor (x command)
+    fn delete_char_forward(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column();
+        let line_text = editor.get_line(line_idx).to_string();
+
+        if (col_idx as usize) < line_text.chars().count() {
+            let mut chars: Vec<char> = line_text.chars().collect();
+            chars.remove(col_idx as usize);
+            let new_line: String = chars.into_iter().collect();
+
+            // Update editor
+            editor.set_line(line_idx, &new_line);
+
+            // Adjust cursor if needed
+            let new_len = new_line.chars().count();
+            if col_idx as usize >= new_len && new_len > 0 {
+                editor.set_caret_column((new_len - 1) as i32);
+            }
+
+            self.sync_buffer_to_neovim();
+            crate::verbose_print!("[godot-neovim] x: Deleted char at col {}", col_idx);
+        }
+    }
+
+    /// Delete character before cursor (X command)
+    fn delete_char_backward(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column();
+
+        if col_idx > 0 {
+            let line_text = editor.get_line(line_idx).to_string();
+            let mut chars: Vec<char> = line_text.chars().collect();
+            chars.remove((col_idx - 1) as usize);
+            let new_line: String = chars.into_iter().collect();
+
+            // Update editor
+            editor.set_line(line_idx, &new_line);
+            editor.set_caret_column(col_idx - 1);
+
+            self.sync_buffer_to_neovim();
+            crate::verbose_print!("[godot-neovim] X: Deleted char at col {}", col_idx - 1);
+        }
+    }
+
+    /// Replace character under cursor (r command)
+    fn replace_char(&mut self, c: char) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column();
+        let line_text = editor.get_line(line_idx).to_string();
+
+        if (col_idx as usize) < line_text.chars().count() {
+            let mut chars: Vec<char> = line_text.chars().collect();
+            chars[col_idx as usize] = c;
+            let new_line: String = chars.into_iter().collect();
+
+            editor.set_line(line_idx, &new_line);
+            self.sync_buffer_to_neovim();
+            crate::verbose_print!("[godot-neovim] r{}: Replaced char at col {}", c, col_idx);
+        }
+    }
+
+    /// Toggle case of character under cursor (~ command)
+    fn toggle_case(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column();
+        let line_text = editor.get_line(line_idx).to_string();
+
+        if (col_idx as usize) < line_text.chars().count() {
+            let mut chars: Vec<char> = line_text.chars().collect();
+            let c = chars[col_idx as usize];
+            chars[col_idx as usize] = if c.is_uppercase() {
+                c.to_lowercase().next().unwrap_or(c)
+            } else {
+                c.to_uppercase().next().unwrap_or(c)
+            };
+            let new_line: String = chars.into_iter().collect();
+
+            editor.set_line(line_idx, &new_line);
+
+            // Move cursor forward (like Vim)
+            let line_len = new_line.chars().count();
+            if (col_idx as usize) < line_len - 1 {
+                editor.set_caret_column(col_idx + 1);
+            }
+
+            self.sync_buffer_to_neovim();
+            crate::verbose_print!("[godot-neovim] ~: Toggled case at col {}", col_idx);
+        }
+    }
+
+    /// Indent current line (>> command)
+    fn indent_line(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let line_text = editor.get_line(line_idx).to_string();
+
+        // Add a tab at the beginning
+        let new_line = format!("\t{}", line_text);
+        editor.set_line(line_idx, &new_line);
+
+        // Move cursor to first non-blank
+        let first_non_blank = new_line
+            .chars()
+            .position(|c| !c.is_whitespace())
+            .unwrap_or(0);
+        editor.set_caret_column(first_non_blank as i32);
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!("[godot-neovim] >>: Indented line {}", line_idx + 1);
+    }
+
+    /// Unindent current line (<< command)
+    fn unindent_line(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let line_text = editor.get_line(line_idx).to_string();
+
+        // Remove leading whitespace (one level)
+        let new_line = if line_text.starts_with('\t') {
+            line_text[1..].to_string()
+        } else if line_text.starts_with("    ") {
+            line_text[4..].to_string()
+        } else if line_text.starts_with("  ") {
+            line_text[2..].to_string()
+        } else if line_text.starts_with(' ') {
+            line_text[1..].to_string()
+        } else {
+            line_text
+        };
+
+        editor.set_line(line_idx, &new_line);
+
+        // Move cursor to first non-blank
+        let first_non_blank = new_line
+            .chars()
+            .position(|c| !c.is_whitespace())
+            .unwrap_or(0);
+        editor.set_caret_column(first_non_blank as i32);
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!("[godot-neovim] <<: Unindented line {}", line_idx + 1);
+    }
+
+    /// Join current line with next line (J command)
+    fn join_lines(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let line_count = editor.get_line_count();
+
+        if line_idx >= line_count - 1 {
+            crate::verbose_print!("[godot-neovim] J: Already on last line");
+            return;
+        }
+
+        let current_line = editor.get_line(line_idx).to_string();
+        let next_line = editor.get_line(line_idx + 1).to_string();
+
+        // Join with a space, trimming leading whitespace from next line
+        let current_trimmed = current_line.trim_end();
+        let next_trimmed = next_line.trim_start();
+
+        let new_line = if current_trimmed.is_empty() {
+            next_trimmed.to_string()
+        } else if next_trimmed.is_empty() {
+            current_trimmed.to_string()
+        } else {
+            format!("{} {}", current_trimmed, next_trimmed)
+        };
+
+        // Position cursor at the join point
+        let join_col = current_trimmed.chars().count();
+
+        // Update text
+        editor.set_line(line_idx, &new_line);
+
+        // Remove the next line
+        // Need to get full text, remove the line, and set it back
+        let full_text = editor.get_text().to_string();
+        let lines: Vec<&str> = full_text.lines().collect();
+        let mut new_lines: Vec<&str> = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            if i as i32 == line_idx {
+                new_lines.push(&new_line);
+            } else if i as i32 != line_idx + 1 {
+                new_lines.push(line);
+            }
+        }
+        let new_text = new_lines.join("\n");
+        editor.set_text(&new_text);
+
+        // Restore cursor position
+        editor.set_caret_line(line_idx);
+        editor.set_caret_column(join_col as i32);
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!("[godot-neovim] J: Joined lines {} and {}", line_idx + 1, line_idx + 2);
+    }
+
+    /// Move half page down (Ctrl+D command)
+    fn half_page_down(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let visible_lines = editor.get_visible_line_count();
+        let half_page = visible_lines / 2;
+        let current_line = editor.get_caret_line();
+        let line_count = editor.get_line_count();
+
+        let target_line = (current_line + half_page).min(line_count - 1);
+        editor.set_caret_line(target_line);
+
+        // Also scroll the viewport
+        let first_visible = editor.get_first_visible_line();
+        let new_first = (first_visible + half_page).min(line_count - visible_lines);
+        if new_first > first_visible {
+            editor.set_line_as_first_visible(new_first.max(0));
+        }
+
+        self.sync_cursor_to_neovim();
+        self.update_cursor_from_editor();
+        crate::verbose_print!("[godot-neovim] Ctrl+D: Moved to line {}", target_line + 1);
+    }
+
+    /// Move half page up (Ctrl+U command)
+    fn half_page_up(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let visible_lines = editor.get_visible_line_count();
+        let half_page = visible_lines / 2;
+        let current_line = editor.get_caret_line();
+
+        let target_line = (current_line - half_page).max(0);
+        editor.set_caret_line(target_line);
+
+        // Also scroll the viewport
+        let first_visible = editor.get_first_visible_line();
+        let new_first = (first_visible - half_page).max(0);
+        if new_first < first_visible {
+            editor.set_line_as_first_visible(new_first);
+        }
+
+        self.sync_cursor_to_neovim();
+        self.update_cursor_from_editor();
+        crate::verbose_print!("[godot-neovim] Ctrl+U: Moved to line {}", target_line + 1);
+    }
+
+    /// Go to definition (gd command) - uses Godot's built-in
+    fn go_to_definition(&self) {
+        // Simulate F12 or Ctrl+Click to go to definition
+        let mut key_event = InputEventKey::new_gd();
+        key_event.set_keycode(Key::F12);
+        key_event.set_pressed(true);
+
+        Input::singleton().parse_input_event(&key_event);
+        crate::verbose_print!("[godot-neovim] gd: Go to definition (F12)");
     }
 }

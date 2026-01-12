@@ -16,6 +16,12 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 - Insert mode with Godot native input (IME support, auto-completion)
 - Ctrl+[ as Escape alternative (terminal standard)
 - Ctrl+B for visual block mode (works from both normal and insert mode)
+- Word search under cursor (`*`, `#`, `n`, `N`)
+- Character find motions (`f`, `F`, `t`, `T`, `;`, `,`)
+- Line navigation (`0`, `^`, `$`) and paragraph movement (`{`, `}`)
+- Bracket matching (`%`) and go to definition (`gd`)
+- Character editing (`x`, `X`, `r`, `~`) and line operations (`J`, `>>`, `<<`)
+- Half-page scrolling (`Ctrl+D`, `Ctrl+U`)
 - Configurable Neovim executable path via Editor Settings
 - Path validation on startup and settings change
 
@@ -32,7 +38,16 @@ This plugin is in early development. The following features are implemented:
 - ✅ Insert mode with Godot native input (IME, auto-completion support)
 - ✅ Normal mode edits reflected in Godot (`dd`, `yy`, `p`, etc.)
 - ✅ Visual mode selection display (`v`, `V`)
-- ⬜ Command-line mode
+- ✅ Command-line mode (`:w`, `:q`, `:%s/old/new/g`)
+- ✅ Search word under cursor (`*` forward, `#` backward, `n`/`N` repeat)
+- ✅ Character find (`f`/`F`/`t`/`T`, `;`/`,` repeat)
+- ✅ Line navigation (`0`, `^`, `$`)
+- ✅ Paragraph movement (`{`, `}`)
+- ✅ Bracket matching (`%`)
+- ✅ Character editing (`x`, `X`, `r`, `~`)
+- ✅ Line operations (`J` join, `>>` indent, `<<` unindent)
+- ✅ Half-page scrolling (`Ctrl+D`, `Ctrl+U`)
+- ✅ Go to definition (`gd`)
 
 ## Requirements
 
@@ -114,6 +129,85 @@ Once the plugin is enabled:
 | VISUAL  | Orange |
 | COMMAND | Yellow |
 | REPLACE | Red    |
+
+### Supported Commands
+
+#### Navigation
+
+| Command | Description |
+|---------|-------------|
+| `h`, `j`, `k`, `l` | Basic cursor movement |
+| `w`, `b`, `e` | Word movement |
+| `0` | Go to start of line |
+| `^` | Go to first non-blank character |
+| `$` | Go to end of line |
+| `gg` | Go to first line |
+| `G` | Go to last line |
+| `H` | Go to top of visible area |
+| `M` | Go to middle of visible area |
+| `L` | Go to bottom of visible area |
+| `{` | Go to previous paragraph |
+| `}` | Go to next paragraph |
+| `%` | Jump to matching bracket |
+| `Ctrl+D` | Half page down |
+| `Ctrl+U` | Half page up |
+| `Ctrl+Y` | Scroll viewport up (cursor stays) |
+| `Ctrl+E` | Scroll viewport down (cursor stays) |
+| `zz` | Center viewport on cursor |
+| `zt` | Cursor line at top |
+| `zb` | Cursor line at bottom |
+
+#### Search
+
+| Command | Description |
+|---------|-------------|
+| `/` | Open find dialog |
+| `*` | Search forward for word under cursor |
+| `#` | Search backward for word under cursor |
+| `n` | Repeat last search (same direction) |
+| `N` | Repeat last search (opposite direction) |
+| `f{char}` | Find character forward on line |
+| `F{char}` | Find character backward on line |
+| `t{char}` | Move to before character forward |
+| `T{char}` | Move to after character backward |
+| `;` | Repeat last f/F/t/T (same direction) |
+| `,` | Repeat last f/F/t/T (opposite direction) |
+| `gd` | Go to definition |
+
+#### Editing
+
+| Command | Description |
+|---------|-------------|
+| `x` | Delete character under cursor |
+| `X` | Delete character before cursor |
+| `r{char}` | Replace character under cursor |
+| `~` | Toggle case of character |
+| `dd` | Delete line |
+| `yy` | Yank (copy) line |
+| `p` | Paste |
+| `J` | Join current line with next |
+| `>>` | Indent line |
+| `<<` | Unindent line |
+
+#### Mode Switching
+
+| Command | Description |
+|---------|-------------|
+| `i`, `a`, `o`, `O` | Enter insert mode |
+| `v` | Enter visual mode |
+| `V` | Enter visual line mode |
+| `Ctrl+B` | Enter visual block mode |
+| `Escape`, `Ctrl+[` | Return to normal mode |
+| `:` | Enter command-line mode |
+
+#### Command-Line Mode
+
+| Command | Description |
+|---------|-------------|
+| `:w` | Save file |
+| `:q` | Close (no-op in editor) |
+| `:wq`, `:x` | Save and close |
+| `:%s/old/new/g` | Substitute all occurrences |
 
 ## Architecture
 
