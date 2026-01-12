@@ -275,6 +275,14 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 | Neovim undo | Uses Godot's undo system |
 | Neovim config | `init.lua` and plugins are not loaded |
 
+### Roadmap
+
+Implementation candidates (in priority order):
+
+1. **Macros** - `q{a-z}` to record, `@{a-z}` to replay, `@@` to repeat last macro
+2. **Marks** - `m{a-z}` to set mark, `'{a-z}` to jump to mark line, `` `{a-z} `` to jump to exact position
+3. **Named Registers** - `"{a-z}` to specify register for yank/paste operations
+
 ## Architecture
 
 ```
