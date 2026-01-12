@@ -16,6 +16,12 @@ pub struct GodotNeovimPlugin {
     mode_label: Option<Gd<Label>>,
     #[init(val = None)]
     current_editor: Option<Gd<CodeEdit>>,
+    /// Current mode cached from last update
+    #[init(val = String::from("n"))]
+    current_mode: String,
+    /// Current cursor position (line, col) - 0-indexed from grid
+    #[init(val = (0, 0))]
+    current_cursor: (i64, i64),
 }
 
 #[godot_api]
@@ -64,6 +70,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
             self.sync_buffer_to_neovim();
         }
 
+        // Enable process() to be called every frame for checking redraw events
+        self.base_mut().set_process(true);
+
         godot_print!("[godot-neovim] Plugin initialized successfully");
     }
 
@@ -77,6 +86,11 @@ impl IEditorPlugin for GodotNeovimPlugin {
 
         // Neovim client will be stopped when dropped
         self.neovim = None;
+    }
+
+    fn process(&mut self, _delta: f64) {
+        // Check for pending updates from Neovim redraw events
+        self.process_neovim_updates();
     }
 
     fn input(&mut self, event: Gd<godot::classes::InputEvent>) {
@@ -97,10 +111,26 @@ impl IEditorPlugin for GodotNeovimPlugin {
 
         // Check if Neovim is connected
         if self.neovim.is_none() {
+            godot_print!("[godot-neovim] input: No neovim");
             return;
         }
 
-        // Forward key to Neovim
+        godot_print!("[godot-neovim] input: mode={}, key={:?}", self.current_mode, key_event.get_keycode());
+
+        // In insert mode, let Godot handle most keys natively
+        if self.is_insert_mode() {
+            // Only intercept Escape to exit insert mode
+            if key_event.get_keycode() == Key::ESCAPE {
+                self.send_keys("<Esc>");
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+            }
+            // Let Godot handle other keys in insert mode
+            return;
+        }
+
+        // Forward key to Neovim (normal/visual/etc modes)
         if let Some(keys) = self.key_event_to_nvim_string(&key_event) {
             self.send_keys(&keys);
 
@@ -115,6 +145,15 @@ impl IEditorPlugin for GodotNeovimPlugin {
 #[godot_api]
 impl GodotNeovimPlugin {
     fn create_mode_label(&mut self) {
+        // Only create label if we have a current editor with a status bar
+        let Some(code_edit) = &self.current_editor else {
+            return;
+        };
+
+        let Some(mut status_bar) = self.find_status_bar(code_edit.clone().upcast()) else {
+            return;
+        };
+
         let mut label = Label::new_alloc();
         label.set_text(" NORMAL ");
         label.set_name("NeovimModeLabel");
@@ -122,24 +161,9 @@ impl GodotNeovimPlugin {
         // Style the label
         label.add_theme_color_override("font_color", Color::from_rgb(0.0, 1.0, 0.5));
 
-        // Find the status bar in CodeEdit and add label there
-        if let Some(code_edit) = &self.current_editor {
-            if let Some(status_bar) = self.find_status_bar(code_edit.clone().upcast()) {
-                status_bar.clone().add_child(&label);
-                // Move to the beginning of status bar
-                let mut status_bar_mut = status_bar;
-                status_bar_mut.move_child(&label, 0);
-                self.mode_label = Some(label);
-                return;
-            }
-        }
-
-        // Fallback: add to script editor
-        let editor = EditorInterface::singleton();
-        if let Some(mut script_editor) = editor.get_script_editor() {
-            script_editor.add_child(&label);
-        }
-
+        // Add to status bar
+        status_bar.add_child(&label);
+        status_bar.move_child(&label, 0);
         self.mode_label = Some(label);
     }
 
@@ -209,6 +233,18 @@ impl GodotNeovimPlugin {
     }
 
     fn reposition_mode_label(&mut self) {
+        // Check if label is still valid (may have been freed with previous status bar)
+        let label_valid = self.mode_label.as_ref().map_or(false, |label| {
+            label.is_instance_valid()
+        });
+
+        if !label_valid {
+            // Label was freed, create a new one
+            self.mode_label = None;
+            self.create_mode_label();
+            return;
+        }
+
         let Some(ref label) = self.mode_label else {
             return;
         };
@@ -410,8 +446,56 @@ impl GodotNeovimPlugin {
         Some(result)
     }
 
-    fn send_keys(&mut self, keys: &str) {
+    /// Check if currently in insert mode
+    fn is_insert_mode(&self) -> bool {
+        self.current_mode == "i"
+    }
+
+    /// Process pending updates from Neovim redraw events
+    fn process_neovim_updates(&mut self) {
         let Some(ref neovim) = self.neovim else {
+            return;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            return;
+        };
+
+        // Poll the runtime to process async events
+        client.poll();
+
+        // Check if there are pending updates
+        if let Some((mode, cursor)) = client.take_state() {
+            godot_print!("[godot-neovim] Got update: mode={}, cursor=({}, {})", mode, cursor.0, cursor.1);
+
+            // Release lock before updating UI
+            drop(client);
+
+            let old_mode = self.current_mode.clone();
+            self.current_mode = mode.clone();
+            self.current_cursor = cursor;
+
+            // Update mode display
+            // Convert grid cursor (0-indexed) to Neovim cursor (1-indexed for display)
+            let display_cursor = (cursor.0 + 1, cursor.1);
+            self.update_mode_display_with_cursor(&mode, Some(display_cursor));
+
+            // Sync cursor to Godot editor
+            self.sync_cursor_from_grid(cursor);
+
+            // If exiting insert mode, sync buffer from Godot to Neovim
+            if old_mode == "i" && mode != "i" {
+                self.sync_buffer_to_neovim();
+            }
+        }
+    }
+
+    /// Send keys to Neovim and update state
+    fn send_keys(&mut self, keys: &str) {
+        godot_print!("[godot-neovim] send_keys: {}", keys);
+
+        let Some(ref neovim) = self.neovim else {
+            godot_print!("[godot-neovim] No neovim");
             return;
         };
 
@@ -425,52 +509,46 @@ impl GodotNeovimPlugin {
             godot_error!("[godot-neovim] Failed to send keys: {}", e);
             return;
         }
+        godot_print!("[godot-neovim] Key sent successfully");
 
-        // Get mode after input (includes blocking state)
+        // Query mode - if blocking (operator-pending), skip cursor sync
         let (mode, blocking) = client.get_mode();
 
-        // If Neovim is waiting for more input (operator-pending), skip sync
         if blocking {
+            godot_print!("[godot-neovim] Operator pending, skipping sync");
             return;
         }
 
-        // Only get buffer if in insert mode or editing command
-        let needs_buffer_sync = mode == "i" || self.is_editing_key(keys);
+        // Query cursor
+        let cursor = client.get_cursor().unwrap_or((1, 0));
 
-        let lines = if needs_buffer_sync {
-            client.get_buffer_lines(0, -1).ok()
-        } else {
-            None
-        };
-
-        // Get cursor position
-        let cursor = client.get_cursor().ok();
+        godot_print!("[godot-neovim] After key: mode={}, cursor=({}, {})", mode, cursor.0, cursor.1);
 
         // Release lock before updating UI
         drop(client);
 
-        // Update mode display with cursor position
-        self.update_mode_display_with_cursor(&mode, cursor);
+        // Update state
+        self.current_mode = mode.clone();
+        self.current_cursor = (cursor.0 - 1, cursor.1); // Convert to 0-indexed
 
-        // Sync buffer if needed, otherwise just sync cursor
-        if let Some(lines) = lines {
-            self.sync_buffer_from_neovim(lines, cursor);
-        } else {
-            self.sync_cursor_from_neovim(cursor);
-        }
+        // Update mode display
+        self.update_mode_display_with_cursor(&mode, Some(cursor));
+
+        // Sync cursor to Godot editor
+        self.sync_cursor_from_grid((cursor.0 - 1, cursor.1));
     }
 
-    fn is_editing_key(&self, keys: &str) -> bool {
-        // Keys that modify buffer content
-        matches!(keys,
-            "x" | "X" | "d" | "D" | "c" | "C" | "s" | "S" |
-            "p" | "P" | "o" | "O" | "r" | "R" |
-            "u" | "<C-r>" | // undo/redo
-            "." | // repeat
-            "J" | // join lines
-            "~" | // toggle case
-            "<CR>" | "<BS>" | "<Del>" | "<Tab>"
-        )
+    /// Sync cursor from grid position (0-indexed)
+    fn sync_cursor_from_grid(&mut self, cursor: (i64, i64)) {
+        let Some(ref mut editor) = self.current_editor else {
+            godot_print!("[godot-neovim] sync_cursor_from_grid: No current editor");
+            return;
+        };
+
+        let (row, col) = cursor;
+        godot_print!("[godot-neovim] sync_cursor_from_grid: Setting cursor to row={}, col={}", row, col);
+        editor.set_caret_line(row as i32);
+        editor.set_caret_column(col as i32);
     }
 
     fn sync_cursor_from_neovim(&mut self, cursor: Option<(i64, i64)>) {
