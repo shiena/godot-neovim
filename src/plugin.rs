@@ -119,8 +119,11 @@ impl IEditorPlugin for GodotNeovimPlugin {
 
         // In insert mode, let Godot handle most keys natively
         if self.is_insert_mode() {
-            // Only intercept Escape to exit insert mode
-            if key_event.get_keycode() == Key::ESCAPE {
+            // Intercept Escape or Ctrl+[ to exit insert mode
+            let is_escape = key_event.get_keycode() == Key::ESCAPE;
+            let is_ctrl_bracket = key_event.is_ctrl_pressed() && key_event.get_keycode() == Key::BRACKETLEFT;
+
+            if is_escape || is_ctrl_bracket {
                 self.send_keys("<Esc>");
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
@@ -380,6 +383,11 @@ impl GodotNeovimPlugin {
         let ctrl = event.is_ctrl_pressed();
         let alt = event.is_alt_pressed();
         let shift = event.is_shift_pressed();
+
+        // Ctrl+[ is equivalent to Escape (terminal standard)
+        if ctrl && keycode == Key::BRACKETLEFT {
+            return Some("<Esc>".to_string());
+        }
 
         // Handle special keys
         let key_str = match keycode {
