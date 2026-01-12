@@ -1229,10 +1229,18 @@ impl GodotNeovimPlugin {
         );
 
         // Update Godot editor only if content changed
+        // Normalize line endings and trailing newlines for comparison
+        // (Windows uses \r\n, Neovim uses \n; Godot may add trailing newline)
         let new_text = lines.join("\n");
-        let current_text = editor.get_text().to_string();
+        let current_text = editor
+            .get_text()
+            .to_string()
+            .replace("\r\n", "\n")
+            .trim_end_matches('\n')
+            .to_string();
+        let new_text_normalized = new_text.trim_end_matches('\n');
 
-        if new_text != current_text {
+        if new_text_normalized != current_text {
             crate::verbose_print!("[godot-neovim] Content changed, updating editor");
             editor.set_text(&new_text);
         } else {
