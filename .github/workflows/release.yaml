@@ -67,6 +67,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -87,6 +89,14 @@ jobs:
           # Create zip archive
           zip -r godot-neovim-${{ inputs.version }}.zip addons
 
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: CHANGELOG.md
+
       - name: Create Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -94,5 +104,5 @@ jobs:
         run: |
           gh release create ${{ inputs.version }} \
             --title "Release ${{ inputs.version }}" \
-            --generate-notes \
+            --notes-file CHANGELOG.md \
             godot-neovim-${{ inputs.version }}.zip
