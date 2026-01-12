@@ -368,6 +368,24 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
+        // Handle 'u' for undo
+        if keycode == Key::U && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.undo();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'Ctrl+R' for redo
+        if keycode == Key::R && key_event.is_ctrl_pressed() {
+            self.redo();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
         // Handle 'f' for find char forward
         if keycode == Key::F && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
             self.pending_char_op = Some('f');
@@ -2465,6 +2483,34 @@ impl GodotNeovimPlugin {
         }
 
         crate::verbose_print!("[godot-neovim] %: Matching bracket not found");
+    }
+
+    /// Undo (u command)
+    fn undo(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        editor.undo();
+        crate::verbose_print!("[godot-neovim] u: Undo");
+
+        // Sync buffer to Neovim after undo
+        self.sync_buffer_to_neovim();
+        self.sync_cursor_to_neovim();
+    }
+
+    /// Redo (Ctrl+R command)
+    fn redo(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        editor.redo();
+        crate::verbose_print!("[godot-neovim] Ctrl+R: Redo");
+
+        // Sync buffer to Neovim after redo
+        self.sync_buffer_to_neovim();
+        self.sync_cursor_to_neovim();
     }
 
     /// Move to start of line (0 command)
