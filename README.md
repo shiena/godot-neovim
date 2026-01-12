@@ -49,6 +49,8 @@ This plugin is in early development. The following features are implemented:
 - ✅ Line operations (`J` join, `>>` indent, `<<` unindent)
 - ✅ Full/half page scrolling (`Ctrl+F`, `Ctrl+B`, `Ctrl+D`, `Ctrl+U`)
 - ✅ Go to definition (`gd`)
+- ✅ Dot repeat (`.`)
+- ✅ Text objects (`ciw`, `di"`, `ya{`, etc.)
 
 ## Requirements
 
@@ -208,6 +210,19 @@ Once the plugin is enabled:
 | `J` | Join current line with next |
 | `>>` | Indent line |
 | `<<` | Unindent line |
+| `.` | Repeat last change |
+
+#### Text Objects
+
+| Command | Description |
+|---------|-------------|
+| `iw`, `aw` | Inner/around word |
+| `i"`, `a"` | Inner/around double quotes |
+| `i'`, `a'` | Inner/around single quotes |
+| `i(`, `a(` | Inner/around parentheses |
+| `i[`, `a[` | Inner/around brackets |
+| `i{`, `a{` | Inner/around braces |
+| `i<`, `a<` | Inner/around angle brackets |
 
 #### Mode Switching
 
@@ -253,7 +268,6 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 
 | Feature | Description |
 |---------|-------------|
-| Text objects | `ciw`, `da"`, `yi(`, etc. |
 | Named registers | `"a`, `"b`, etc. (uses system clipboard only) |
 | Macros | `q`, `@` |
 | Marks | `m`, `'`, `` ` `` |
