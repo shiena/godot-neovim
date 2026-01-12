@@ -68,6 +68,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
             crate::verbose_print!("[godot-neovim] Found existing CodeEdit, syncing initial buffer");
             self.reposition_mode_label();
             self.sync_buffer_to_neovim();
+            self.update_cursor_from_editor();
         }
 
         // Enable process() to be called every frame for checking redraw events
@@ -115,13 +116,18 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
-        crate::verbose_print!("[godot-neovim] input: mode={}, key={:?}", self.current_mode, key_event.get_keycode());
+        crate::verbose_print!(
+            "[godot-neovim] input: mode={}, key={:?}",
+            self.current_mode,
+            key_event.get_keycode()
+        );
 
         // In insert mode, let Godot handle most keys natively
         if self.is_insert_mode() {
             // Intercept Escape or Ctrl+[ to exit insert mode
             let is_escape = key_event.get_keycode() == Key::ESCAPE;
-            let is_ctrl_bracket = key_event.is_ctrl_pressed() && key_event.get_keycode() == Key::BRACKETLEFT;
+            let is_ctrl_bracket =
+                key_event.is_ctrl_pressed() && key_event.get_keycode() == Key::BRACKETLEFT;
 
             if is_escape || is_ctrl_bracket {
                 self.send_escape();
@@ -176,12 +182,14 @@ impl GodotNeovimPlugin {
         //                > HBoxContainer (status bar with line/column info)
 
         // Get parent (should be CodeTextEditor)
-        let Some(parent) = node.get_parent() else {
-            return None;
-        };
+        let parent = node.get_parent()?;
 
         let parent_class = parent.get_class().to_string();
-        crate::verbose_print!("[godot-neovim] CodeEdit parent: {} ({})", parent.get_name(), parent_class);
+        crate::verbose_print!(
+            "[godot-neovim] CodeEdit parent: {} ({})",
+            parent.get_name(),
+            parent_class
+        );
 
         // Search siblings for HBoxContainer (status bar)
         let child_count = parent.get_child_count();
@@ -233,13 +241,15 @@ impl GodotNeovimPlugin {
         self.find_current_code_edit();
         self.reposition_mode_label();
         self.sync_buffer_to_neovim();
+        self.update_cursor_from_editor();
     }
 
     fn reposition_mode_label(&mut self) {
         // Check if label is still valid (may have been freed with previous status bar)
-        let label_valid = self.mode_label.as_ref().map_or(false, |label| {
-            label.is_instance_valid()
-        });
+        let label_valid = self
+            .mode_label
+            .as_ref()
+            .is_some_and(|label| label.is_instance_valid());
 
         if !label_valid {
             // Label was freed, create a new one
@@ -276,13 +286,16 @@ impl GodotNeovimPlugin {
         let editor = EditorInterface::singleton();
         if let Some(script_editor) = editor.get_script_editor() {
             // Try to find the currently focused CodeEdit first
-            if let Some(code_edit) = self.find_focused_code_edit(script_editor.clone().upcast::<Control>()) {
+            if let Some(code_edit) =
+                self.find_focused_code_edit(script_editor.clone().upcast::<Control>())
+            {
                 crate::verbose_print!("[godot-neovim] Found focused CodeEdit");
                 self.current_editor = Some(code_edit);
                 return;
             }
             // Fallback: find visible CodeEdit
-            if let Some(code_edit) = self.find_visible_code_edit(script_editor.upcast::<Control>()) {
+            if let Some(code_edit) = self.find_visible_code_edit(script_editor.upcast::<Control>())
+            {
                 crate::verbose_print!("[godot-neovim] Found visible CodeEdit");
                 self.current_editor = Some(code_edit);
             }
@@ -357,7 +370,10 @@ impl GodotNeovimPlugin {
 
         crate::verbose_print!("[godot-neovim] Syncing {} lines to Neovim", lines.len());
         if !lines.is_empty() {
-            crate::verbose_print!("[godot-neovim] First line: '{}'", lines[0].chars().take(50).collect::<String>());
+            crate::verbose_print!(
+                "[godot-neovim] First line: '{}'",
+                lines[0].chars().take(50).collect::<String>()
+            );
         }
 
         // Set buffer content in Neovim
@@ -421,7 +437,7 @@ impl GodotNeovimPlugin {
                 // Get unicode character
                 let unicode = event.get_unicode();
                 if unicode > 0 {
-                    char::from_u32(unicode as u32)?.to_string()
+                    char::from_u32(unicode)?.to_string()
                 } else {
                     return None;
                 }
@@ -474,7 +490,12 @@ impl GodotNeovimPlugin {
 
         // Check if there are pending updates
         if let Some((mode, cursor)) = client.take_state() {
-            crate::verbose_print!("[godot-neovim] Got update: mode={}, cursor=({}, {})", mode, cursor.0, cursor.1);
+            crate::verbose_print!(
+                "[godot-neovim] Got update: mode={}, cursor=({}, {})",
+                mode,
+                cursor.0,
+                cursor.1
+            );
 
             // Release lock before updating UI
             drop(client);
@@ -519,11 +540,58 @@ impl GodotNeovimPlugin {
         // Release lock
         drop(client);
 
+        // Sync buffer and cursor from Godot to Neovim (user was typing in Godot)
+        self.sync_buffer_to_neovim();
+        self.sync_cursor_to_neovim();
+
         // Force mode to normal (ESC always returns to normal mode)
         self.current_mode = "n".to_string();
-        self.update_mode_display_with_cursor("n", None);
 
-        crate::verbose_print!("[godot-neovim] Escaped to normal mode");
+        // Display cursor position (convert 0-indexed to 1-indexed for display)
+        let display_cursor = (self.current_cursor.0 + 1, self.current_cursor.1);
+        self.update_mode_display_with_cursor("n", Some(display_cursor));
+
+        crate::verbose_print!("[godot-neovim] Escaped to normal mode, buffer synced");
+    }
+
+    /// Sync cursor position from Godot editor to Neovim
+    fn sync_cursor_to_neovim(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: No current editor");
+            return;
+        };
+
+        let Some(ref neovim) = self.neovim else {
+            crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: No neovim");
+            return;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: Failed to lock");
+            return;
+        };
+
+        // Get cursor from Godot (0-indexed)
+        let line = editor.get_caret_line();
+        let col = editor.get_caret_column();
+
+        // Neovim uses 1-indexed lines, 0-indexed columns
+        let nvim_line = (line + 1) as i64;
+        let nvim_col = col as i64;
+
+        crate::verbose_print!(
+            "[godot-neovim] Syncing cursor to Neovim: line={}, col={}",
+            nvim_line,
+            nvim_col
+        );
+
+        if let Err(e) = client.set_cursor(nvim_line, nvim_col) {
+            godot_error!("[godot-neovim] Failed to sync cursor: {}", e);
+        }
+
+        // Update cached cursor position
+        drop(client);
+        self.current_cursor = (line as i64, col as i64);
     }
 
     /// Send keys to Neovim and update state
@@ -558,7 +626,12 @@ impl GodotNeovimPlugin {
         // Query cursor
         let cursor = client.get_cursor().unwrap_or((1, 0));
 
-        crate::verbose_print!("[godot-neovim] After key: mode={}, cursor=({}, {})", mode, cursor.0, cursor.1);
+        crate::verbose_print!(
+            "[godot-neovim] After key: mode={}, cursor=({}, {})",
+            mode,
+            cursor.0,
+            cursor.1
+        );
 
         // Release lock before updating UI
         drop(client);
@@ -574,6 +647,23 @@ impl GodotNeovimPlugin {
         self.sync_cursor_from_grid((cursor.0 - 1, cursor.1));
     }
 
+    /// Update cursor position from Godot editor and refresh display
+    fn update_cursor_from_editor(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        // Get cursor from Godot (0-indexed)
+        let line = editor.get_caret_line() as i64;
+        let col = editor.get_caret_column() as i64;
+
+        self.current_cursor = (line, col);
+
+        // Update display (1-indexed for display)
+        let display_cursor = (line + 1, col);
+        self.update_mode_display_with_cursor(&self.current_mode.clone(), Some(display_cursor));
+    }
+
     /// Sync cursor from grid position (0-indexed)
     fn sync_cursor_from_grid(&mut self, cursor: (i64, i64)) {
         let Some(ref mut editor) = self.current_editor else {
@@ -582,7 +672,11 @@ impl GodotNeovimPlugin {
         };
 
         let (row, col) = cursor;
-        crate::verbose_print!("[godot-neovim] sync_cursor_from_grid: Setting cursor to row={}, col={}", row, col);
+        crate::verbose_print!(
+            "[godot-neovim] sync_cursor_from_grid: Setting cursor to row={}, col={}",
+            row,
+            col
+        );
         editor.set_caret_line(row as i32);
         editor.set_caret_column(col as i32);
     }
@@ -627,12 +721,12 @@ impl GodotNeovimPlugin {
 
             // Change color based on mode
             let color = match mode {
-                "n" | "normal" => Color::from_rgb(0.0, 1.0, 0.5),   // Green
-                "i" | "insert" => Color::from_rgb(0.3, 0.6, 1.0),  // Blue
+                "n" | "normal" => Color::from_rgb(0.0, 1.0, 0.5), // Green
+                "i" | "insert" => Color::from_rgb(0.3, 0.6, 1.0), // Blue
                 "v" | "visual" | "V" | "\x16" => Color::from_rgb(1.0, 0.5, 0.0), // Orange
                 "c" | "command" => Color::from_rgb(1.0, 1.0, 0.0), // Yellow
                 "R" | "replace" => Color::from_rgb(1.0, 0.3, 0.3), // Red
-                _ => Color::from_rgb(0.8, 0.8, 0.8),               // Gray
+                _ => Color::from_rgb(0.8, 0.8, 0.8),              // Gray
             };
             label.add_theme_color_override("font_color", color);
         }
@@ -644,11 +738,20 @@ impl GodotNeovimPlugin {
             return;
         };
 
-        crate::verbose_print!("[godot-neovim] Syncing buffer from Neovim: {} lines", lines.len());
+        crate::verbose_print!(
+            "[godot-neovim] Syncing buffer from Neovim: {} lines",
+            lines.len()
+        );
         if !lines.is_empty() {
-            crate::verbose_print!("[godot-neovim] First line from Neovim: '{}'", lines[0].chars().take(50).collect::<String>());
+            crate::verbose_print!(
+                "[godot-neovim] First line from Neovim: '{}'",
+                lines[0].chars().take(50).collect::<String>()
+            );
             if lines.len() > 1 {
-                crate::verbose_print!("[godot-neovim] Last line from Neovim: '{}'", lines[lines.len()-1].chars().take(50).collect::<String>());
+                crate::verbose_print!(
+                    "[godot-neovim] Last line from Neovim: '{}'",
+                    lines[lines.len() - 1].chars().take(50).collect::<String>()
+                );
             }
         }
 
@@ -659,7 +762,11 @@ impl GodotNeovimPlugin {
 
         // Update cursor position
         if let Some((line, col)) = cursor {
-            crate::verbose_print!("[godot-neovim] Setting cursor to line {}, col {}", line, col);
+            crate::verbose_print!(
+                "[godot-neovim] Setting cursor to line {}, col {}",
+                line,
+                col
+            );
             editor.set_caret_line((line - 1) as i32); // Neovim is 1-indexed
             editor.set_caret_column(col as i32);
         }

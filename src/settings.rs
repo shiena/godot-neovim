@@ -163,11 +163,7 @@ pub fn validate_current_path() -> ValidationResult {
             );
         }
         ValidationResult::InvalidVersion { error } => {
-            godot_error!(
-                "[godot-neovim] Invalid Neovim at '{}': {}",
-                path,
-                error
-            );
+            godot_error!("[godot-neovim] Invalid Neovim at '{}': {}", path, error);
         }
     }
 
@@ -193,10 +189,7 @@ pub fn on_settings_changed(settings: &Gd<EditorSettings>) {
                     );
                 }
                 ValidationResult::NotExecutable => {
-                    godot_warn!(
-                        "[godot-neovim] Neovim at '{}' is not executable.",
-                        path_str
-                    );
+                    godot_warn!("[godot-neovim] Neovim at '{}' is not executable.", path_str);
                 }
                 ValidationResult::InvalidVersion { error } => {
                     godot_warn!(

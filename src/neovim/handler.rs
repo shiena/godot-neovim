@@ -140,11 +140,8 @@ impl Handler for NeovimHandler {
         _neovim: nvim_rs::Neovim<Self::Writer>,
     ) {
         // Note: Cannot use godot_print! here - this runs on tokio worker thread
-        match name.as_str() {
-            "redraw" => {
-                self.handle_redraw(args).await;
-            }
-            _ => {}
+        if name.as_str() == "redraw" {
+            self.handle_redraw(args).await;
         }
     }
 

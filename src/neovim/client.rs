@@ -33,9 +33,7 @@ impl NeovimClient {
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Use current-thread runtime so all tasks run on the same thread
         // This ensures io_handler is processed during block_on calls
-        let runtime = Builder::new_current_thread()
-            .enable_all()
-            .build()?;
+        let runtime = Builder::new_current_thread().enable_all().build()?;
         let nvim_path = settings::get_neovim_path();
         let handler = NeovimHandler::new();
         let state = handler.get_state();
@@ -89,7 +87,7 @@ impl NeovimClient {
 
     /// Check if IO handler is still running
     pub fn is_io_running(&self) -> bool {
-        self.io_handle.as_ref().map_or(false, |h| !h.is_finished())
+        self.io_handle.as_ref().is_some_and(|h| !h.is_finished())
     }
 
     /// Update the Neovim executable path
@@ -137,7 +135,10 @@ impl NeovimClient {
 
         self.io_handle = Some(io_handle);
 
-        crate::verbose_print!("[godot-neovim] IO handler spawned, has_updates={}", self.has_updates.load(std::sync::atomic::Ordering::SeqCst));
+        crate::verbose_print!(
+            "[godot-neovim] IO handler spawned, has_updates={}",
+            self.has_updates.load(std::sync::atomic::Ordering::SeqCst)
+        );
 
         Ok(())
     }
@@ -161,17 +162,15 @@ impl NeovimClient {
 
         self.runtime.block_on(async {
             // Use timeout to avoid blocking on operator-pending commands like 'g'
-            let result = tokio::time::timeout(
-                std::time::Duration::from_millis(50),
-                async {
-                    let nvim_lock = neovim_arc.lock().await;
-                    if let Some(neovim) = nvim_lock.as_ref() {
-                        neovim.get_mode().await.ok()
-                    } else {
-                        None
-                    }
+            let result = tokio::time::timeout(std::time::Duration::from_millis(50), async {
+                let nvim_lock = neovim_arc.lock().await;
+                if let Some(neovim) = nvim_lock.as_ref() {
+                    neovim.get_mode().await.ok()
+                } else {
+                    None
                 }
-            ).await;
+            })
+            .await;
 
             match result {
                 Ok(Some(mode_info)) => {
@@ -283,12 +282,7 @@ impl NeovimClient {
     }
 
     /// Set buffer content
-    pub fn set_buffer_lines(
-        &self,
-        start: i64,
-        end: i64,
-        lines: Vec<String>,
-    ) -> Result<(), String> {
+    pub fn set_buffer_lines(&self, start: i64, end: i64, lines: Vec<String>) -> Result<(), String> {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -315,18 +309,16 @@ impl NeovimClient {
 
         self.runtime.block_on(async {
             // Use timeout to avoid blocking on operator-pending commands
-            let result = tokio::time::timeout(
-                std::time::Duration::from_millis(50),
-                async {
-                    let nvim_lock = neovim_arc.lock().await;
-                    if let Some(neovim) = nvim_lock.as_ref() {
-                        let window = neovim.get_current_win().await.ok()?;
-                        window.get_cursor().await.ok()
-                    } else {
-                        None
-                    }
+            let result = tokio::time::timeout(std::time::Duration::from_millis(50), async {
+                let nvim_lock = neovim_arc.lock().await;
+                if let Some(neovim) = nvim_lock.as_ref() {
+                    let window = neovim.get_current_win().await.ok()?;
+                    window.get_cursor().await.ok()
+                } else {
+                    None
                 }
-            ).await;
+            })
+            .await;
 
             match result {
                 Ok(Some(pos)) => Ok(pos),
@@ -337,7 +329,6 @@ impl NeovimClient {
     }
 
     /// Set cursor position
-    #[allow(dead_code)]
     pub fn set_cursor(&self, line: i64, col: i64) -> Result<(), String> {
         let neovim_arc = self.neovim.clone();
 
