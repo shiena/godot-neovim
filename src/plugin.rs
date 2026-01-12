@@ -1,6 +1,8 @@
 use crate::neovim::NeovimClient;
 use crate::settings;
-use godot::classes::{CodeEdit, Control, EditorInterface, EditorPlugin, IEditorPlugin, Label};
+use godot::classes::{
+    CodeEdit, Control, EditorInterface, EditorPlugin, IEditorPlugin, Input, InputEventKey, Label,
+};
 use godot::global::Key;
 use godot::prelude::*;
 use std::sync::Mutex;
@@ -180,6 +182,15 @@ impl IEditorPlugin for GodotNeovimPlugin {
             } else {
                 self.scroll_viewport_down();
             }
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '/' for search - open Godot's find dialog
+        if keycode == Key::SLASH && !key_event.is_ctrl_pressed() && !key_event.is_shift_pressed() {
+            self.open_find_dialog();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1150,5 +1161,19 @@ impl GodotNeovimPlugin {
                 first_visible + 1
             );
         }
+    }
+
+    /// Open Godot's find dialog by simulating Ctrl+F
+    fn open_find_dialog(&self) {
+        // Create a Ctrl+F key event
+        let mut key_event = InputEventKey::new_gd();
+        key_event.set_keycode(Key::F);
+        key_event.set_ctrl_pressed(true);
+        key_event.set_pressed(true);
+
+        // Parse the input event to trigger Godot's find dialog
+        Input::singleton().parse_input_event(&key_event);
+
+        crate::verbose_print!("[godot-neovim] Opened find dialog (simulated Ctrl+F)");
     }
 }
