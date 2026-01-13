@@ -1581,6 +1581,11 @@ impl GodotNeovimPlugin {
                         self.paste_before_and_move_after();
                         true
                     }
+                    "e" => {
+                        // ge - move to end of previous word
+                        self.move_to_word_end_backward();
+                        true
+                    }
                     _ => false,
                 };
 

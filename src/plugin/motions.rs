@@ -282,6 +282,80 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] }}: Moved to line {}", line + 1);
     }
 
+    /// Move to end of previous word (ge command)
+    pub(super) fn move_to_word_end_backward(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let mut line = editor.get_caret_line();
+        let mut col = editor.get_caret_column() as usize;
+
+        // Get current line text
+        let mut line_text = editor.get_line(line).to_string();
+        let mut chars: Vec<char> = line_text.chars().collect();
+
+        // If we're at or past the end of line, move to last character
+        if col > 0 && col >= chars.len() {
+            col = chars.len() - 1;
+        }
+
+        // Move back one position to start search
+        if col > 0 {
+            col -= 1;
+        } else if line > 0 {
+            // Move to previous line
+            line -= 1;
+            line_text = editor.get_line(line).to_string();
+            chars = line_text.chars().collect();
+            col = if chars.is_empty() { 0 } else { chars.len() - 1 };
+        }
+
+        // Skip whitespace going backward
+        loop {
+            if col < chars.len() && !chars[col].is_whitespace() {
+                break;
+            }
+            if col > 0 {
+                col -= 1;
+            } else if line > 0 {
+                line -= 1;
+                line_text = editor.get_line(line).to_string();
+                chars = line_text.chars().collect();
+                col = if chars.is_empty() { 0 } else { chars.len() - 1 };
+            } else {
+                // At beginning of document
+                self.move_cursor_to(0, 0);
+                crate::verbose_print!("[godot-neovim] ge: At start of document");
+                return;
+            }
+        }
+
+        // Now find the end of the word (we're on a non-whitespace char)
+        // Move to start of current word, then the end is our current position
+        let end_col = col;
+        let end_line = line;
+
+        // Check if we're on a word character
+        let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
+        let current_is_word = is_word_char(chars[col]);
+
+        // Move backward to find start of current word/non-word sequence
+        while col > 0 {
+            let prev_char = chars[col - 1];
+            let prev_is_word = is_word_char(prev_char);
+
+            if prev_is_word != current_is_word || prev_char.is_whitespace() {
+                break;
+            }
+            col -= 1;
+        }
+
+        // The end of the previous word is at end_col on end_line
+        self.move_cursor_to(end_line, end_col as i32);
+        crate::verbose_print!("[godot-neovim] ge: Moved to word end at {}:{}", end_line + 1, end_col);
+    }
+
     /// Move cursor to specified position and sync with Neovim
     pub(super) fn move_cursor_to(&mut self, line: i32, col: i32) {
         if let Some(ref mut editor) = self.current_editor {
