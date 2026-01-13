@@ -24,6 +24,20 @@ impl InputMode {
             _ => InputMode::Hybrid,
         }
     }
+
+    pub fn from_int(i: i64) -> Self {
+        match i {
+            1 => InputMode::Strict,
+            _ => InputMode::Hybrid,
+        }
+    }
+
+    pub fn to_int(self) -> i64 {
+        match self {
+            InputMode::Hybrid => 0,
+            InputMode::Strict => 1,
+        }
+    }
 }
 
 /// Result of validating Neovim executable path
@@ -71,19 +85,19 @@ pub fn initialize_settings() {
 
     // Add input_mode setting if it doesn't exist
     if !settings.has_setting(SETTING_INPUT_MODE) {
-        settings.set_setting(SETTING_INPUT_MODE, &Variant::from("hybrid"));
+        settings.set_setting(SETTING_INPUT_MODE, &Variant::from(0i64));
     }
 
-    // Set initial value for input_mode
-    settings.set_initial_value(SETTING_INPUT_MODE, &Variant::from("hybrid"), false);
+    // Set initial value for input_mode (0 = Hybrid)
+    settings.set_initial_value(SETTING_INPUT_MODE, &Variant::from(0i64), false);
 
     // Add property info for input_mode (dropdown)
     #[allow(deprecated)]
     let mut input_mode_info = Dictionary::new();
     input_mode_info.set("name", SETTING_INPUT_MODE);
-    input_mode_info.set("type", VariantType::STRING.ord());
+    input_mode_info.set("type", VariantType::INT.ord());
     input_mode_info.set("hint", godot::global::PropertyHint::ENUM.ord());
-    input_mode_info.set("hint_string", "hybrid,strict");
+    input_mode_info.set("hint_string", "Hybrid,Strict");
 
     settings.add_property_info(&input_mode_info);
 
@@ -164,6 +178,11 @@ pub fn get_input_mode() -> InputMode {
 
     if settings.has_setting(SETTING_INPUT_MODE) {
         let value = settings.get_setting(SETTING_INPUT_MODE);
+        // Try INT first (new format)
+        if let Ok(mode_int) = value.try_to::<i64>() {
+            return InputMode::from_int(mode_int);
+        }
+        // Fallback to STRING (old format for compatibility)
         if let Ok(mode_str) = value.try_to::<GString>() {
             return InputMode::from_str(&mode_str.to_string());
         }
