@@ -1330,8 +1330,8 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle 't' for till char forward
-        if keycode == Key::T && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+        // Handle 't' for till char forward (but not after 'g' - that's gt for tab navigation)
+        if keycode == Key::T && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() && self.last_key != "g" {
             self.pending_char_op = Some('t');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1339,8 +1339,8 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle 'T' for till char backward
-        if keycode == Key::T && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+        // Handle 'T' for till char backward (but not after 'g' - that's gT for tab navigation)
+        if keycode == Key::T && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() && self.last_key != "g" {
             self.pending_char_op = Some('T');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
