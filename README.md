@@ -295,6 +295,7 @@ Once the plugin is enabled:
 | `ZZ` | Save and close (normal mode) |
 | `ZQ` | Close without saving (discard changes) |
 | `:%s/old/new/g` | Substitute all occurrences |
+| `:{number}` | Jump to line number (e.g., `:123`) |
 | `Up`/`Down` | Browse command history |
 
 ### Limitations
@@ -332,7 +333,6 @@ Features requiring plugin-side implementation (in priority order):
 |----------|---------|----------|-------------|
 | Medium | Replace mode | `R` | Overwrite mode (typing replaces characters) |
 | Medium | Go to file | `gf` | Open file path under cursor |
-| Medium | Line jump | `:{number}` | Jump to specific line (e.g., `:123`) |
 | Low | Show registers | `:registers`, `:reg` | Display register contents |
 | Low | Show marks | `:marks` | Display mark locations |
 | Low | Count operations | `3dd`, `5yy` | Delete/yank multiple lines |

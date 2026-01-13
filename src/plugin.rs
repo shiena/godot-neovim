@@ -2292,8 +2292,12 @@ impl GodotNeovimPlugin {
                 self.cmd_close();
             }
             _ => {
+                // Check for :{number} - jump to line
+                if let Ok(line_num) = cmd.parse::<i32>() {
+                    self.cmd_goto_line(line_num);
+                }
                 // Check for :e[dit] {file} command
-                if cmd.starts_with("e ") || cmd.starts_with("edit ") {
+                else if cmd.starts_with("e ") || cmd.starts_with("edit ") {
                     let file_path = if cmd.starts_with("edit ") {
                         cmd.strip_prefix("edit ").unwrap_or("").trim()
                     } else {
@@ -2311,6 +2315,33 @@ impl GodotNeovimPlugin {
         }
 
         self.close_command_line();
+    }
+
+    /// :{number} - Jump to specific line number
+    fn cmd_goto_line(&mut self, line_num: i32) {
+        // Add to jump list before jumping
+        self.add_to_jump_list();
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_count = editor.get_line_count();
+        // Convert 1-indexed to 0-indexed, clamp to valid range
+        let target_line = (line_num - 1).clamp(0, line_count - 1);
+
+        editor.set_caret_line(target_line);
+
+        // Move to first non-blank character (Vim behavior)
+        let line_text = editor.get_line(target_line).to_string();
+        let first_non_blank = line_text
+            .chars()
+            .position(|c| !c.is_whitespace())
+            .unwrap_or(0);
+        editor.set_caret_column(first_non_blank as i32);
+
+        self.sync_cursor_to_neovim();
+        crate::verbose_print!("[godot-neovim] :{}: Jumped to line {}", line_num, target_line + 1);
     }
 
     /// :e[dit] {file} - Open a file in the script editor
