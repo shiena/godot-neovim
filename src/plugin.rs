@@ -87,6 +87,12 @@ pub struct GodotNeovimPlugin {
     /// Pending macro operation: Some('q') for record, Some('@') for play
     #[init(val = None)]
     pending_macro_op: Option<char>,
+    /// Named registers storage: char -> content
+    #[init(val = HashMap::new())]
+    registers: HashMap<char, String>,
+    /// Currently selected register for next yank/paste (None = default/system clipboard)
+    #[init(val = None)]
+    selected_register: Option<char>,
 }
 
 #[godot_api]
@@ -342,6 +348,35 @@ impl IEditorPlugin for GodotNeovimPlugin {
                         viewport.set_input_as_handled();
                     }
                     return;
+                }
+            }
+        }
+
+        // Handle pending register selection (waiting for register char after ")
+        if self.selected_register == Some('\0') {
+            let keycode = key_event.get_keycode();
+
+            // Cancel on Escape
+            if keycode == Key::ESCAPE {
+                self.selected_register = None;
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
+
+            // Get the character (must be a-z for named registers)
+            let unicode = key_event.get_unicode();
+            if unicode > 0 {
+                if let Some(c) = char::from_u32(unicode) {
+                    if c.is_ascii_lowercase() {
+                        self.selected_register = Some(c);
+                        crate::verbose_print!("[godot-neovim] \"{}: Register selected", c);
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    }
                 }
             }
         }
@@ -708,6 +743,16 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
+        // Handle '"' for register selection
+        if unicode_char == Some('"') && !key_event.is_ctrl_pressed() {
+            // Use '\0' as marker for "waiting for register char"
+            self.selected_register = Some('\0');
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
         // Handle '>>' for indent (first '>' sets pending, second '>' executes)
         // Handle '<<' for unindent (first '<' sets pending, second '<' executes)
         // Use unicode for keyboard layout independence
@@ -817,6 +862,88 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Clear Z prefix if another key is pressed (not Z or Q)
         if self.last_key == "Z" && keycode != Key::Z && keycode != Key::Q {
             self.last_key.clear();
+        }
+
+        // Handle register-aware yy (yank line)
+        if let Some(reg) = self.selected_register {
+            if reg != '\0' {
+                // Register is selected, check for yy
+                if keycode == Key::Y
+                    && !key_event.is_shift_pressed()
+                    && !key_event.is_ctrl_pressed()
+                {
+                    if self.last_key == "y" {
+                        // yy - yank current line to register
+                        self.yank_line_to_register(reg);
+                        self.selected_register = None;
+                        self.last_key.clear();
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    } else {
+                        // First y - wait for second
+                        self.last_key = "y".to_string();
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    }
+                }
+
+                // Handle register-aware p (paste)
+                if keycode == Key::P
+                    && !key_event.is_shift_pressed()
+                    && !key_event.is_ctrl_pressed()
+                {
+                    self.paste_from_register(reg);
+                    self.selected_register = None;
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
+
+                // Handle register-aware P (paste before)
+                if keycode == Key::P && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed()
+                {
+                    self.paste_from_register_before(reg);
+                    self.selected_register = None;
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
+
+                // Handle register-aware dd (delete line and yank)
+                if keycode == Key::D
+                    && !key_event.is_shift_pressed()
+                    && !key_event.is_ctrl_pressed()
+                {
+                    if self.last_key == "d" {
+                        // dd - delete line and store in register
+                        self.delete_line_to_register(reg);
+                        self.selected_register = None;
+                        self.last_key.clear();
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    } else {
+                        // First d - wait for second
+                        self.last_key = "d".to_string();
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    }
+                }
+
+                // Other keys cancel register selection
+                if keycode != Key::Y && keycode != Key::D {
+                    self.selected_register = None;
+                }
+            }
         }
 
         // Forward key to Neovim (normal/visual/etc modes)
@@ -3451,6 +3578,191 @@ impl GodotNeovimPlugin {
         } else {
             crate::verbose_print!("[godot-neovim] @@: No macro played yet");
         }
+    }
+
+    /// Yank current line to named register
+    fn yank_line_to_register(&mut self, register: char) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let line_text = editor.get_line(line_idx).to_string();
+
+        // Store with newline (line yank)
+        self.registers.insert(register, format!("{}\n", line_text));
+        crate::verbose_print!(
+            "[godot-neovim] \"{}: Yanked line {} to register",
+            register,
+            line_idx + 1
+        );
+    }
+
+    /// Delete current line and store in named register
+    fn delete_line_to_register(&mut self, register: char) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let line_text = editor.get_line(line_idx).to_string();
+        let line_count = editor.get_line_count();
+
+        // Store with newline (line delete)
+        self.registers.insert(register, format!("{}\n", line_text));
+
+        // Delete the line
+        if line_count > 1 {
+            // Remove the line by setting text
+            let mut lines: Vec<String> = Vec::new();
+            for i in 0..line_count {
+                if i != line_idx {
+                    lines.push(editor.get_line(i).to_string());
+                }
+            }
+            editor.set_text(&lines.join("\n"));
+
+            // Adjust cursor position
+            let new_line_count = editor.get_line_count();
+            let target_line = line_idx.min(new_line_count - 1);
+            editor.set_caret_line(target_line);
+
+            // Move to first non-blank
+            let target_text = editor.get_line(target_line).to_string();
+            let first_non_blank = target_text
+                .chars()
+                .position(|c| !c.is_whitespace())
+                .unwrap_or(0);
+            editor.set_caret_column(first_non_blank as i32);
+        } else {
+            // Last line - just clear it
+            editor.set_line(0, "");
+            editor.set_caret_column(0);
+        }
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] \"{}: Deleted line {} to register",
+            register,
+            line_idx + 1
+        );
+    }
+
+    /// Paste from named register (after cursor/below line)
+    fn paste_from_register(&mut self, register: char) {
+        let Some(content) = self.registers.get(&register).cloned() else {
+            crate::verbose_print!("[godot-neovim] \"{}: Register empty", register);
+            return;
+        };
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        // Check if it's a line paste (ends with newline)
+        if content.ends_with('\n') {
+            // Line paste - insert below current line
+            let line_idx = editor.get_caret_line();
+            let line_count = editor.get_line_count();
+            let paste_content = content.trim_end_matches('\n');
+
+            // Build new text with inserted line
+            let mut lines: Vec<String> = Vec::new();
+            for i in 0..line_count {
+                lines.push(editor.get_line(i).to_string());
+                if i == line_idx {
+                    lines.push(paste_content.to_string());
+                }
+            }
+            editor.set_text(&lines.join("\n"));
+
+            // Move cursor to the pasted line
+            editor.set_caret_line(line_idx + 1);
+            let first_non_blank = paste_content
+                .chars()
+                .position(|c| !c.is_whitespace())
+                .unwrap_or(0);
+            editor.set_caret_column(first_non_blank as i32);
+        } else {
+            // Character paste - insert after cursor
+            let line_idx = editor.get_caret_line();
+            let col_idx = editor.get_caret_column();
+            let line_text = editor.get_line(line_idx).to_string();
+
+            let mut chars: Vec<char> = line_text.chars().collect();
+            let insert_pos = ((col_idx + 1) as usize).min(chars.len());
+            for (i, c) in content.chars().enumerate() {
+                chars.insert(insert_pos + i, c);
+            }
+            let new_line: String = chars.into_iter().collect();
+            editor.set_line(line_idx, &new_line);
+
+            // Move cursor to end of pasted content
+            editor.set_caret_column(insert_pos as i32 + content.len() as i32 - 1);
+        }
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!("[godot-neovim] \"{}p: Pasted from register", register);
+    }
+
+    /// Paste from named register (before cursor/above line)
+    fn paste_from_register_before(&mut self, register: char) {
+        let Some(content) = self.registers.get(&register).cloned() else {
+            crate::verbose_print!("[godot-neovim] \"{}: Register empty", register);
+            return;
+        };
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        // Check if it's a line paste (ends with newline)
+        if content.ends_with('\n') {
+            // Line paste - insert above current line
+            let line_idx = editor.get_caret_line();
+            let line_count = editor.get_line_count();
+            let paste_content = content.trim_end_matches('\n');
+
+            // Build new text with inserted line
+            let mut lines: Vec<String> = Vec::new();
+            for i in 0..line_count {
+                if i == line_idx {
+                    lines.push(paste_content.to_string());
+                }
+                lines.push(editor.get_line(i).to_string());
+            }
+            editor.set_text(&lines.join("\n"));
+
+            // Move cursor to the pasted line
+            editor.set_caret_line(line_idx);
+            let first_non_blank = paste_content
+                .chars()
+                .position(|c| !c.is_whitespace())
+                .unwrap_or(0);
+            editor.set_caret_column(first_non_blank as i32);
+        } else {
+            // Character paste - insert before cursor
+            let line_idx = editor.get_caret_line();
+            let col_idx = editor.get_caret_column();
+            let line_text = editor.get_line(line_idx).to_string();
+
+            let mut chars: Vec<char> = line_text.chars().collect();
+            let insert_pos = (col_idx as usize).min(chars.len());
+            for (i, c) in content.chars().enumerate() {
+                chars.insert(insert_pos + i, c);
+            }
+            let new_line: String = chars.into_iter().collect();
+            editor.set_line(line_idx, &new_line);
+
+            // Move cursor to end of pasted content
+            editor.set_caret_column(insert_pos as i32 + content.len() as i32 - 1);
+        }
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] \"{}P: Pasted from register (before)",
+            register
+        );
     }
 
     /// Indent current line (>> command)

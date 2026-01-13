@@ -55,6 +55,7 @@ This plugin is in early development. The following features are implemented:
 - ✅ Command history (Up/Down in command-line mode)
 - ✅ Marks (`m{a-z}`, `'{a-z}`, `` `{a-z} ``)
 - ✅ Macros (`q{a-z}`, `@{a-z}`, `@@`)
+- ✅ Named registers (`"{a-z}yy`, `"{a-z}dd`, `"{a-z}p`)
 
 ## Requirements
 
@@ -247,6 +248,15 @@ Once the plugin is enabled:
 | `@{a-z}` | Play macro from register |
 | `@@` | Replay last played macro |
 
+#### Named Registers
+
+| Command | Description |
+|---------|-------------|
+| `"{a-z}yy` | Yank line to named register |
+| `"{a-z}dd` | Delete line to named register |
+| `"{a-z}p` | Paste from named register (after) |
+| `"{a-z}P` | Paste from named register (before) |
+
 #### Mode Switching
 
 | Command | Description |
@@ -292,18 +302,11 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 
 | Feature | Description |
 |---------|-------------|
-| Named registers | `"a`, `"b`, etc. (uses system clipboard only) |
 | Neovim search | `/` opens Godot's find dialog |
 | Neovim undo | Uses Godot's undo system |
 | Neovim config | `init.lua` and plugins are not loaded |
 
 ### Roadmap
-
-#### Implementation Candidates
-
-Features requiring plugin-side implementation (in priority order):
-
-1. **Named Registers** - `"{a-z}` to specify register for yank/paste operations
 
 #### Likely Already Working (Testing Needed)
 
