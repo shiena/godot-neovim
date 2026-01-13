@@ -192,12 +192,21 @@ Once the plugin is enabled:
 | `zz` | Center viewport on cursor |
 | `zt` | Cursor line at top |
 | `zb` | Cursor line at bottom |
+| `gj` | Move down by display line (wrapped) |
+| `gk` | Move up by display line (wrapped) |
+| `[{` | Jump to previous unmatched `{` |
+| `]}` | Jump to next unmatched `}` |
+| `[(` | Jump to previous unmatched `(` |
+| `])` | Jump to next unmatched `)` |
+| `[m` | Jump to previous method start |
+| `]m` | Jump to next method start |
 
 #### Search
 
 | Command | Description |
 |---------|-------------|
 | `/` | Open find dialog |
+| `?` | Search backward (open find dialog) |
 | `*` | Search forward for word under cursor |
 | `#` | Search backward for word under cursor |
 | `n` | Repeat last search (same direction) |
@@ -210,6 +219,8 @@ Once the plugin is enabled:
 | `,` | Repeat last f/F/t/T (opposite direction) |
 | `gd` | Go to definition |
 | `gf` | Go to file under cursor |
+| `gx` | Open URL/path under cursor in browser |
+| `K` | Open Godot documentation for word under cursor |
 
 #### Editing
 
@@ -230,6 +241,8 @@ Once the plugin is enabled:
 | `P` | Paste before cursor |
 | `gp` | Paste after and move cursor after text |
 | `gP` | Paste before and move cursor after text |
+| `[p` | Paste before with indent adjustment |
+| `]p` | Paste after with indent adjustment |
 | `J` | Join current line with next |
 | `gJ` | Join lines without adding space |
 | `>>` | Indent line |
@@ -239,6 +252,7 @@ Once the plugin is enabled:
 | `gU{motion}` | Convert to uppercase |
 | `g~{motion}` | Toggle case |
 | `ga` | Display ASCII/Unicode of char under cursor |
+| `gqq` | Format current line |
 
 #### Text Objects
 
@@ -251,6 +265,7 @@ Once the plugin is enabled:
 | `i[`, `a[` | Inner/around brackets |
 | `i{`, `a{` | Inner/around braces |
 | `i<`, `a<` | Inner/around angle brackets |
+| `ie`, `ae` | Inner/around entire buffer |
 
 #### Marks
 
@@ -277,6 +292,10 @@ Once the plugin is enabled:
 | `"{a-z}dd` | Delete line to named register |
 | `"{a-z}p` | Paste from named register (after) |
 | `"{a-z}P` | Paste from named register (before) |
+| `"+y`, `"*y` | Yank to system clipboard |
+| `"+p`, `"*p` | Paste from system clipboard |
+| `"_d` | Delete to black hole register (no save) |
+| `"0p` | Paste from yank register |
 
 #### Number Operations
 
@@ -297,6 +316,7 @@ Once the plugin is enabled:
 | Command | Description |
 |---------|-------------|
 | `i`, `a`, `o`, `O` | Enter insert mode |
+| `gi` | Insert at last insert position |
 | `gI` | Insert at column 0 (ignore indent) |
 | `R` | Enter replace mode (overwrite) |
 | `v` | Enter visual mode |
@@ -305,6 +325,16 @@ Once the plugin is enabled:
 | `o` (visual) | Toggle selection direction |
 | `Escape`, `Ctrl+[` | Return to normal mode |
 | `:` | Enter command-line mode |
+
+#### Folding
+
+| Command | Description |
+|---------|-------------|
+| `za` | Toggle fold under cursor |
+| `zo` | Open fold under cursor |
+| `zc` | Close fold under cursor |
+| `zM` | Close all folds |
+| `zR` | Open all folds |
 
 #### Command-Line Mode
 
@@ -322,6 +352,14 @@ Once the plugin is enabled:
 | `ZZ` | Save and close (normal mode) |
 | `ZQ` | Close without saving (discard changes) |
 | `:%s/old/new/g` | Substitute all occurrences |
+| `:g/{pattern}/d` | Delete lines matching pattern |
+| `:sort` | Sort lines |
+| `:t {line}` | Copy current line to after {line} |
+| `:m {line}` | Move current line to after {line} |
+| `:bn` | Next buffer (script tab) |
+| `:bp` | Previous buffer (script tab) |
+| `:bd` | Close current buffer |
+| `:ls` | List open buffers |
 | `g&` | Repeat last `:s` on entire file |
 | `:{number}` | Jump to line number (e.g., `:123`) |
 | `:marks` | Show all marks (output to console) |
@@ -361,32 +399,16 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 
 #### Implementation Candidates
 
-Features requiring plugin-side implementation (in priority order):
+Features requiring plugin-side implementation:
 
 | Priority | Feature | Commands | Difficulty | Description |
 |----------|---------|----------|------------|-------------|
-| High | System clipboard | `"+p`, `"*y` | ⭐ Easy | Integration with OS clipboard |
-| High | Special registers | `"_d`, `"0p` | ⭐ Easy | Black hole register / Yank register |
-| High | Insert at last position | `gi` | ⭐ Easy | Return to last insert position and insert |
-| High | Global command | `:g/{pattern}/{cmd}` | ⭐⭐ Medium | Execute command on matching lines |
 | High | Confirm substitute | `:%s/old/new/gc` | ⭐⭐⭐ Hard | Confirm each replacement (requires UI) |
-| Medium | Open URL/path | `gx` | ⭐ Easy | Open URL under cursor in browser |
 | Medium | Auto-indent | `=`, `==`, `=G` | ⭐⭐⭐ Hard | Requires GDScript syntax parsing (keyword analysis for `func`, `if`, `for`, etc.) |
-| Medium | Backward search | `?{pattern}` | ⭐ Easy | Search backward in file |
-| Medium | Indent-aware paste | `[p`, `]p` | ⭐ Easy | Paste with indent adjustment |
-| Medium | Entire buffer object | `ae`, `ie` | ⭐ Easy | Select entire buffer |
-| Medium | Line operations | `:sort`, `:t`, `:m` | ⭐⭐ Medium | Sort, copy, move lines |
-| Medium | Documentation | `K` | ⭐⭐ Medium | Open Godot docs for word under cursor |
-| Medium | Format operator | `gq{motion}`, `gqq` | ⭐⭐ Medium | Format/wrap text (useful for comments) |
 | Medium | Change list | `g;`, `g,` | ⭐⭐ Medium | Navigate through change positions |
 | Medium | Sequential increment | `gCtrl+A`, `gCtrl+X` | ⭐⭐ Medium | Generate number sequence in visual block |
-| Medium | Buffer navigation | `:bn`, `:bp`, `:bd`, `:ls` | ⭐⭐ Medium | Navigate/manage script tabs |
-| Medium | Block jump | `[{`, `]}`, `[(`, `])` | ⭐⭐ Medium | Jump to block start/end |
 | Medium | Indent text object | `ii`, `ai` | ⭐⭐ Medium | Select by indentation level |
 | Medium | Argument text object | `ia`, `aa` | ⭐⭐⭐ Hard | Select function argument (requires parsing) |
-| Low | Folding | `za`, `zo`, `zc`, `zR`, `zM` | ⭐ Easy | Code folding operations |
-| Low | Display line motion | `gj`, `gk` | ⭐⭐ Medium | Move by display lines (wrapped) |
-| Low | Method jump | `[m`, `]m` | ⭐⭐ Medium | Jump to method start/end |
 | Low | Visual block insert | `I`/`A` (v-block) | ⭐⭐⭐ Hard | Insert/append on multiple lines |
 
 #### Likely Already Working (Testing Needed)
@@ -395,9 +417,9 @@ These features may already work through Neovim backend:
 
 | Category | Commands |
 |----------|----------|
-| Motions | `gj`, `gk`, `g0`, `g$`, `(`, `)`, `[[`, `]]` |
+| Motions | `g0`, `g$`, `(`, `)`, `[[`, `]]` |
 | Text Objects | `is`, `as` (sentence), `ip`, `ap` (paragraph), `it`, `at` (tag) |
-| Line Range | `:1,10d`, `:g/pattern/d`, `:.,$s/old/new/g` |
+| Line Range | `:1,10d`, `:.,$s/old/new/g` |
 
 ## Architecture
 
