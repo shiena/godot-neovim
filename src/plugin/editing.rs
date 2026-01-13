@@ -1,7 +1,7 @@
 //! Editing operations: undo, redo, delete, replace, indent, join
 
 use super::GodotNeovimPlugin;
-use godot::classes::{EditorInterface, Input};
+use godot::classes::{EditorInterface, Input, Os};
 use godot::global::Key;
 use godot::prelude::*;
 
@@ -559,8 +559,11 @@ impl GodotNeovimPlugin {
             return;
         };
 
-        // Move cursor to column 0
+        // Save last insert position
         let line_idx = editor.get_caret_line();
+        self.last_insert_position = Some((line_idx, 0));
+
+        // Move cursor to column 0
         editor.set_caret_column(0);
 
         // Enter insert mode by sending 'i' to Neovim
@@ -570,6 +573,50 @@ impl GodotNeovimPlugin {
             "[godot-neovim] gI: Insert at column 0, line {}",
             line_idx + 1
         );
+    }
+
+    /// Insert at last insert position (gi command)
+    pub(super) fn insert_at_last_position(&mut self) {
+        let Some((line, col)) = self.last_insert_position else {
+            // No previous insert position - just enter insert mode
+            self.send_keys("i");
+            crate::verbose_print!("[godot-neovim] gi: No previous insert position, entering insert mode");
+            return;
+        };
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        // Clamp to valid range
+        let line_count = editor.get_line_count();
+        let target_line = line.min(line_count - 1);
+        let line_len = editor.get_line(target_line).len() as i32;
+        let target_col = col.min(line_len);
+
+        // Move to last insert position
+        editor.set_caret_line(target_line);
+        editor.set_caret_column(target_col);
+
+        // Enter insert mode
+        self.sync_cursor_to_neovim();
+        self.send_keys("i");
+        crate::verbose_print!(
+            "[godot-neovim] gi: Insert at last position ({}, {})",
+            target_line + 1,
+            target_col
+        );
+    }
+
+    /// Save current position as last insert position (called when entering insert mode)
+    pub(super) fn save_insert_position(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line = editor.get_caret_line();
+        let col = editor.get_caret_column();
+        self.last_insert_position = Some((line, col));
     }
 
     /// Substitute character under cursor (s command)
@@ -582,6 +629,9 @@ impl GodotNeovimPlugin {
         let col_idx = editor.get_caret_column() as usize;
         let line_text = editor.get_line(line_idx).to_string();
         let chars: Vec<char> = line_text.chars().collect();
+
+        // Save insert position
+        self.last_insert_position = Some((line_idx, col_idx as i32));
 
         if col_idx < chars.len() {
             // Delete the character
@@ -609,6 +659,9 @@ impl GodotNeovimPlugin {
 
         // Preserve indentation
         let indent: String = line_text.chars().take_while(|c| c.is_whitespace()).collect();
+
+        // Save insert position (at end of indent)
+        self.last_insert_position = Some((line_idx, indent.len() as i32));
 
         // Replace line with just the indentation
         editor.set_line(line_idx, &indent);
@@ -662,6 +715,9 @@ impl GodotNeovimPlugin {
         let col_idx = editor.get_caret_column() as usize;
         let line_text = editor.get_line(line_idx).to_string();
         let chars: Vec<char> = line_text.chars().collect();
+
+        // Save insert position
+        self.last_insert_position = Some((line_idx, col_idx as i32));
 
         // Delete from cursor to end
         let new_line: String = chars[..col_idx].iter().collect();
@@ -751,5 +807,325 @@ impl GodotNeovimPlugin {
 
         // Try to open the file
         self.cmd_edit(&path);
+    }
+
+    /// Open URL or path under cursor in browser (gx command)
+    pub(super) fn open_url_under_cursor(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column() as usize;
+        let line_text = editor.get_line(line_idx).to_string();
+        let chars: Vec<char> = line_text.chars().collect();
+
+        if col_idx >= chars.len() {
+            crate::verbose_print!("[godot-neovim] gx: Cursor at end of line");
+            return;
+        }
+
+        // Find start and end of URL-like text
+        // Valid URL characters: alphanumeric, /:.-_~?#[]@!$&'()*+,;=%
+        let url_chars = |c: char| {
+            c.is_alphanumeric()
+                || "/:.-_~?#[]@!$&'()*+,;=%".contains(c)
+        };
+
+        let mut start = col_idx;
+        while start > 0 && url_chars(chars[start - 1]) {
+            start -= 1;
+        }
+
+        let mut end = col_idx;
+        while end < chars.len() && url_chars(chars[end]) {
+            end += 1;
+        }
+
+        if start == end {
+            crate::verbose_print!("[godot-neovim] gx: No URL under cursor");
+            return;
+        }
+
+        let url: String = chars[start..end].iter().collect();
+
+        // Check if it looks like a URL
+        if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("file://") {
+            crate::verbose_print!("[godot-neovim] gx: Opening URL: {}", url);
+            let _ = Os::singleton().shell_open(&url);
+        } else if url.contains("://") {
+            // Other URL schemes
+            crate::verbose_print!("[godot-neovim] gx: Opening URI: {}", url);
+            let _ = Os::singleton().shell_open(&url);
+        } else if url.contains('.') && !url.starts_with('.') {
+            // Likely a domain name - add https://
+            let full_url = format!("https://{}", url);
+            crate::verbose_print!("[godot-neovim] gx: Opening as URL: {}", full_url);
+            let _ = Os::singleton().shell_open(&full_url);
+        } else {
+            crate::verbose_print!("[godot-neovim] gx: Not a valid URL: {}", url);
+        }
+    }
+
+    /// Auto-indent current line (== command)
+    pub(super) fn auto_indent_line(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+
+        // Select the current line
+        editor.select(line_idx, 0, line_idx + 1, 0);
+
+        // Use CodeEdit's indent_lines method
+        editor.indent_lines();
+
+        // Deselect
+        editor.deselect();
+
+        // Move to first non-blank
+        let line_text = editor.get_line(line_idx).to_string();
+        let first_non_blank = line_text
+            .chars()
+            .position(|c| !c.is_whitespace())
+            .unwrap_or(0);
+        editor.set_caret_column(first_non_blank as i32);
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!("[godot-neovim] ==: Auto-indented line {}", line_idx + 1);
+    }
+
+    /// Auto-indent from current line to end of file (=G command)
+    pub(super) fn auto_indent_to_end(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let start_line = editor.get_caret_line();
+        let end_line = editor.get_line_count();
+
+        // Select from current line to end
+        editor.select(start_line, 0, end_line, 0);
+
+        // Use CodeEdit's indent_lines method
+        editor.indent_lines();
+
+        // Deselect
+        editor.deselect();
+
+        // Move to first non-blank of current line
+        let line_text = editor.get_line(start_line).to_string();
+        let first_non_blank = line_text
+            .chars()
+            .position(|c| !c.is_whitespace())
+            .unwrap_or(0);
+        editor.set_caret_line(start_line);
+        editor.set_caret_column(first_non_blank as i32);
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] =G: Auto-indented lines {} to {}",
+            start_line + 1,
+            end_line
+        );
+    }
+
+    /// Fold current line (zc command)
+    pub(super) fn fold_current_line(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        if editor.can_fold_line(line_idx) {
+            editor.fold_line(line_idx);
+            crate::verbose_print!("[godot-neovim] zc: Folded line {}", line_idx + 1);
+        } else {
+            crate::verbose_print!("[godot-neovim] zc: Cannot fold line {}", line_idx + 1);
+        }
+    }
+
+    /// Unfold current line (zo command)
+    pub(super) fn unfold_current_line(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        if editor.is_line_folded(line_idx) {
+            editor.unfold_line(line_idx);
+            crate::verbose_print!("[godot-neovim] zo: Unfolded line {}", line_idx + 1);
+        } else {
+            crate::verbose_print!("[godot-neovim] zo: Line {} not folded", line_idx + 1);
+        }
+    }
+
+    /// Toggle fold at current line (za command)
+    pub(super) fn toggle_fold(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        editor.toggle_foldable_line(line_idx);
+        crate::verbose_print!("[godot-neovim] za: Toggled fold at line {}", line_idx + 1);
+    }
+
+    /// Fold all lines (zM command)
+    pub(super) fn fold_all(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        editor.fold_all_lines();
+        crate::verbose_print!("[godot-neovim] zM: Folded all lines");
+    }
+
+    /// Unfold all lines (zR command)
+    pub(super) fn unfold_all(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        editor.unfold_all_lines();
+        crate::verbose_print!("[godot-neovim] zR: Unfolded all lines");
+    }
+
+    /// Paste with indent adjustment ([p command - paste before with indent)
+    pub(super) fn paste_with_indent_before(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let content = godot::classes::DisplayServer::singleton()
+            .clipboard_get()
+            .to_string();
+        if content.is_empty() {
+            return;
+        }
+
+        // Get current line's indentation
+        let line_idx = editor.get_caret_line();
+        let current_line = editor.get_line(line_idx).to_string();
+        let current_indent: String = current_line
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .collect();
+
+        // Adjust pasted content's indentation
+        let adjusted = Self::adjust_paste_indent(&content, &current_indent);
+
+        // Paste above current line
+        let line_count = editor.get_line_count();
+        let paste_lines: Vec<&str> = adjusted.trim_end_matches('\n').lines().collect();
+
+        let mut lines: Vec<String> = Vec::new();
+        for i in 0..line_count {
+            if i == line_idx {
+                for paste_line in &paste_lines {
+                    lines.push(paste_line.to_string());
+                }
+            }
+            lines.push(editor.get_line(i).to_string());
+        }
+        editor.set_text(&lines.join("\n"));
+
+        // Move cursor to first pasted line
+        editor.set_caret_line(line_idx);
+        let first_non_blank = paste_lines
+            .first()
+            .map(|l| l.chars().position(|c| !c.is_whitespace()).unwrap_or(0))
+            .unwrap_or(0);
+        editor.set_caret_column(first_non_blank as i32);
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!("[godot-neovim] [p: Pasted with indent before");
+    }
+
+    /// Paste with indent adjustment (]p command - paste after with indent)
+    pub(super) fn paste_with_indent_after(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let content = godot::classes::DisplayServer::singleton()
+            .clipboard_get()
+            .to_string();
+        if content.is_empty() {
+            return;
+        }
+
+        // Get current line's indentation
+        let line_idx = editor.get_caret_line();
+        let current_line = editor.get_line(line_idx).to_string();
+        let current_indent: String = current_line
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .collect();
+
+        // Adjust pasted content's indentation
+        let adjusted = Self::adjust_paste_indent(&content, &current_indent);
+
+        // Paste below current line
+        let line_count = editor.get_line_count();
+        let paste_lines: Vec<&str> = adjusted.trim_end_matches('\n').lines().collect();
+
+        let mut lines: Vec<String> = Vec::new();
+        for i in 0..line_count {
+            lines.push(editor.get_line(i).to_string());
+            if i == line_idx {
+                for paste_line in &paste_lines {
+                    lines.push(paste_line.to_string());
+                }
+            }
+        }
+        editor.set_text(&lines.join("\n"));
+
+        // Move cursor to first pasted line
+        editor.set_caret_line(line_idx + 1);
+        let first_non_blank = paste_lines
+            .first()
+            .map(|l| l.chars().position(|c| !c.is_whitespace()).unwrap_or(0))
+            .unwrap_or(0);
+        editor.set_caret_column(first_non_blank as i32);
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!("[godot-neovim] ]p: Pasted with indent after");
+    }
+
+    /// Adjust paste content's indentation to match target indent
+    fn adjust_paste_indent(content: &str, target_indent: &str) -> String {
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.is_empty() {
+            return content.to_string();
+        }
+
+        // Find the minimum indentation in the pasted content
+        let min_indent = lines
+            .iter()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| l.chars().take_while(|c| c.is_whitespace()).count())
+            .min()
+            .unwrap_or(0);
+
+        // Adjust each line
+        let adjusted: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                if line.trim().is_empty() {
+                    String::new()
+                } else {
+                    let stripped: String = line.chars().skip(min_indent).collect();
+                    format!("{}{}", target_indent, stripped)
+                }
+            })
+            .collect();
+
+        if content.ends_with('\n') {
+            adjusted.join("\n") + "\n"
+        } else {
+            adjusted.join("\n")
+        }
     }
 }

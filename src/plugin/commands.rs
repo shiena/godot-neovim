@@ -696,4 +696,42 @@ impl GodotNeovimPlugin {
             }
         }
     }
+
+    /// Start backward search (? command) - opens Godot's search dialog
+    pub(super) fn start_search_backward(&self) {
+        // Simulate Ctrl+F to open the search dialog
+        let mut key_event = InputEventKey::new_gd();
+        key_event.set_keycode(Key::F);
+        key_event.set_ctrl_pressed(true);
+        key_event.set_pressed(true);
+        Input::singleton().parse_input_event(&key_event);
+
+        crate::verbose_print!("[godot-neovim] ?: Opening search dialog (use Find Previous for backward search)");
+    }
+
+    /// Select entire buffer (ae/ie text objects for visual mode)
+    pub(super) fn select_entire_buffer(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_count = editor.get_line_count();
+        if line_count == 0 {
+            return;
+        }
+
+        let last_line = line_count - 1;
+        let last_line_len = editor.get_line(last_line).len() as i32;
+
+        // Select from start to end of buffer
+        editor.select(0, 0, last_line, last_line_len);
+
+        // Enter visual mode in Neovim
+        self.send_keys("ggVG");
+
+        crate::verbose_print!(
+            "[godot-neovim] ae/ie: Selected entire buffer ({} lines)",
+            line_count
+        );
+    }
 }

@@ -4,6 +4,67 @@ use super::GodotNeovimPlugin;
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
+    /// Check if register is a system clipboard register (+ or *)
+    fn is_clipboard_register(register: char) -> bool {
+        register == '+' || register == '*'
+    }
+
+    /// Check if register is the black hole register (_)
+    fn is_blackhole_register(register: char) -> bool {
+        register == '_'
+    }
+
+    /// Check if register is the yank register (0)
+    fn is_yank_register(register: char) -> bool {
+        register == '0'
+    }
+
+    /// Store content to register (handles special registers)
+    fn store_to_register(&mut self, register: char, content: &str, is_yank: bool) {
+        if Self::is_blackhole_register(register) {
+            // Black hole register - discard
+            crate::verbose_print!("[godot-neovim] \"_: Discarded to black hole");
+            return;
+        }
+
+        if Self::is_clipboard_register(register) {
+            // System clipboard
+            godot::classes::DisplayServer::singleton().clipboard_set(content);
+            crate::verbose_print!("[godot-neovim] \"{}: Stored to system clipboard", register);
+        } else {
+            // Named register
+            self.registers.insert(register, content.to_string());
+        }
+
+        // Also store to yank register (0) if this is a yank operation
+        if is_yank && !Self::is_yank_register(register) {
+            self.registers.insert('0', content.to_string());
+        }
+    }
+
+    /// Get content from register (handles special registers)
+    fn get_from_register(&self, register: char) -> Option<String> {
+        if Self::is_blackhole_register(register) {
+            // Black hole register - always empty
+            return None;
+        }
+
+        if Self::is_clipboard_register(register) {
+            // System clipboard
+            let content = godot::classes::DisplayServer::singleton()
+                .clipboard_get()
+                .to_string();
+            if content.is_empty() {
+                None
+            } else {
+                Some(content)
+            }
+        } else {
+            // Named register (including 0)
+            self.registers.get(&register).cloned()
+        }
+    }
+
     /// Yank current line to named register
     #[allow(dead_code)]
     pub(super) fn yank_line_to_register(&mut self, register: char) {
@@ -28,7 +89,7 @@ impl GodotNeovimPlugin {
 
         // Store with newline (line yank)
         let content = lines.join("\n") + "\n";
-        self.registers.insert(register, content);
+        self.store_to_register(register, &content, true);
         crate::verbose_print!(
             "[godot-neovim] \"{}: Yanked {} line(s) from line {} to register",
             register,
@@ -45,35 +106,52 @@ impl GodotNeovimPlugin {
 
     /// Delete multiple lines and store in named register
     pub(super) fn delete_lines_to_register(&mut self, register: char, count: i32) {
+        // First phase: collect data with editor borrowed
+        let (line_idx, actual_count, content, new_text_opt) = {
+            let Some(ref editor) = self.current_editor else {
+                return;
+            };
+
+            let line_idx = editor.get_caret_line();
+            let line_count = editor.get_line_count();
+            let end_line = (line_idx + count).min(line_count);
+            let actual_count = end_line - line_idx;
+
+            // Collect lines to delete
+            let mut deleted_lines: Vec<String> = Vec::new();
+            for i in line_idx..end_line {
+                deleted_lines.push(editor.get_line(i).to_string());
+            }
+
+            // Store with newline (line delete)
+            let content = deleted_lines.join("\n") + "\n";
+
+            // Prepare new text if not deleting all lines
+            let new_text_opt = if actual_count < line_count {
+                let mut lines: Vec<String> = Vec::new();
+                for i in 0..line_count {
+                    if i < line_idx || i >= end_line {
+                        lines.push(editor.get_line(i).to_string());
+                    }
+                }
+                Some(lines.join("\n"))
+            } else {
+                None
+            };
+
+            (line_idx, actual_count, content, new_text_opt)
+        };
+
+        // Store to register (editor borrow released)
+        self.store_to_register(register, &content, false);
+
+        // Second phase: update editor
         let Some(ref mut editor) = self.current_editor else {
             return;
         };
 
-        let line_idx = editor.get_caret_line();
-        let line_count = editor.get_line_count();
-        let end_line = (line_idx + count).min(line_count);
-        let actual_count = end_line - line_idx;
-
-        // Collect lines to delete
-        let mut deleted_lines: Vec<String> = Vec::new();
-        for i in line_idx..end_line {
-            deleted_lines.push(editor.get_line(i).to_string());
-        }
-
-        // Store with newline (line delete)
-        let content = deleted_lines.join("\n") + "\n";
-        self.registers.insert(register, content);
-
-        // Delete the lines
-        if actual_count < line_count {
-            // Remove lines by setting text
-            let mut lines: Vec<String> = Vec::new();
-            for i in 0..line_count {
-                if i < line_idx || i >= end_line {
-                    lines.push(editor.get_line(i).to_string());
-                }
-            }
-            editor.set_text(&lines.join("\n"));
+        if let Some(new_text) = new_text_opt {
+            editor.set_text(&new_text);
 
             // Adjust cursor position
             let new_line_count = editor.get_line_count();
@@ -105,7 +183,7 @@ impl GodotNeovimPlugin {
 
     /// Paste from named register (after cursor/below line)
     pub(super) fn paste_from_register(&mut self, register: char) {
-        let Some(content) = self.registers.get(&register).cloned() else {
+        let Some(content) = self.get_from_register(register) else {
             crate::verbose_print!("[godot-neovim] \"{}: Register empty", register);
             return;
         };
@@ -162,7 +240,7 @@ impl GodotNeovimPlugin {
 
     /// Paste from named register (before cursor/above line)
     pub(super) fn paste_from_register_before(&mut self, register: char) {
-        let Some(content) = self.registers.get(&register).cloned() else {
+        let Some(content) = self.get_from_register(register) else {
             crate::verbose_print!("[godot-neovim] \"{}: Register empty", register);
             return;
         };

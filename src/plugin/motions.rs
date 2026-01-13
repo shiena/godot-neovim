@@ -3,7 +3,7 @@
 use super::GodotNeovimPlugin;
 
 impl GodotNeovimPlugin {
-    /// Handle scroll command sequences (zz, zt, zb)
+    /// Handle scroll and fold command sequences (zz, zt, zb, za, zo, zc, zM, zR)
     pub(super) fn handle_scroll_command(&mut self, keys: &str) -> bool {
         if self.last_key == "z" {
             match keys {
@@ -19,6 +19,31 @@ impl GodotNeovimPlugin {
                 }
                 "b" => {
                     self.scroll_cursor_to_bottom();
+                    self.last_key.clear();
+                    return true;
+                }
+                "a" => {
+                    self.toggle_fold();
+                    self.last_key.clear();
+                    return true;
+                }
+                "o" => {
+                    self.unfold_current_line();
+                    self.last_key.clear();
+                    return true;
+                }
+                "c" => {
+                    self.fold_current_line();
+                    self.last_key.clear();
+                    return true;
+                }
+                "M" => {
+                    self.fold_all();
+                    self.last_key.clear();
+                    return true;
+                }
+                "R" => {
+                    self.unfold_all();
                     self.last_key.clear();
                     return true;
                 }

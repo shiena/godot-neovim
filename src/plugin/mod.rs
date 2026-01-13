@@ -117,6 +117,9 @@ pub struct GodotNeovimPlugin {
     /// Last substitution: (pattern, replacement) for g& command
     #[init(val = None)]
     last_substitute: Option<(String, String)>,
+    /// Last insert position: (line, col) for gi command
+    #[init(val = None)]
+    last_insert_position: Option<(i32, i32)>,
 }
 
 #[godot_api]
@@ -743,11 +746,17 @@ impl GodotNeovimPlugin {
             return true;
         }
 
-        // Get the character (must be a-z for named registers)
+        // Get the character
+        // Valid registers: a-z (named), + and * (clipboard), _ (black hole), 0 (yank)
         let unicode = key_event.get_unicode();
         if unicode > 0 {
             if let Some(c) = char::from_u32(unicode) {
-                if c.is_ascii_lowercase() {
+                let is_valid_register = c.is_ascii_lowercase()
+                    || c == '+'
+                    || c == '*'
+                    || c == '_'
+                    || c == '0';
+                if is_valid_register {
                     self.selected_register = Some(c);
                     crate::verbose_print!("[godot-neovim] \"{}: Register selected", c);
                     if let Some(mut viewport) = self.base().get_viewport() {
@@ -1347,6 +1356,80 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        // Handle '==' for auto-indent current line, '=G' for indent to end of file
+        if unicode_char == Some('=') {
+            if self.last_key == "=" {
+                self.auto_indent_line();
+                self.last_key.clear();
+            } else {
+                self.last_key = "=".to_string();
+            }
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '=G' (auto-indent to end of file)
+        if self.last_key == "="
+            && keycode == Key::G
+            && key_event.is_shift_pressed()
+            && !key_event.is_ctrl_pressed()
+        {
+            self.auto_indent_to_end();
+            self.last_key.clear();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '[p' for paste before with indent adjustment
+        if unicode_char == Some('[') {
+            self.last_key = "[".to_string();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle ']p' for paste after with indent adjustment
+        if unicode_char == Some(']') {
+            self.last_key = "]".to_string();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle p after [ or ]
+        if keycode == Key::P && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            if self.last_key == "[" {
+                self.paste_with_indent_before();
+                self.last_key.clear();
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            } else if self.last_key == "]" {
+                self.paste_with_indent_after();
+                self.last_key.clear();
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
+        }
+
+        // Handle '?' for backward search
+        if unicode_char == Some('?') && !key_event.is_ctrl_pressed() {
+            self.start_search_backward();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
         // Handle 'J' for join lines
         if keycode == Key::J && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
             self.join_lines();
@@ -1577,6 +1660,11 @@ impl GodotNeovimPlugin {
                         self.insert_at_column_zero();
                         true
                     }
+                    "i" => {
+                        // gi - insert at last insert position
+                        self.insert_at_last_position();
+                        true
+                    }
                     "a" => {
                         // ga - show character info under cursor
                         self.show_char_info();
@@ -1605,6 +1693,11 @@ impl GodotNeovimPlugin {
                     "e" => {
                         // ge - move to end of previous word
                         self.move_to_word_end_backward();
+                        true
+                    }
+                    "x" => {
+                        // gx - open URL under cursor in browser
+                        self.open_url_under_cursor();
                         true
                     }
                     _ => false,
