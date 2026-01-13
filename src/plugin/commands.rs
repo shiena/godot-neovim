@@ -106,6 +106,11 @@ impl GodotNeovimPlugin {
                 self.cmd_save();
                 self.cmd_close();
             }
+            "wa" | "wall" => self.cmd_save_all(),
+            "wqa" | "wqall" | "xa" | "xall" => {
+                self.cmd_save_all();
+                self.cmd_close_all();
+            }
             _ => {
                 // Check for :{number} - jump to line
                 if let Ok(line_num) = cmd.parse::<i32>() {
@@ -293,6 +298,37 @@ impl GodotNeovimPlugin {
         Input::singleton().parse_input_event(&key_release);
 
         crate::verbose_print!("[godot-neovim] :w - Save triggered (Ctrl+S)");
+    }
+
+    /// :wa/:wall - Save all open scripts
+    pub(super) fn cmd_save_all(&self) {
+        let editor = EditorInterface::singleton();
+        if let Some(script_editor) = editor.get_script_editor() {
+            let open_scripts = script_editor.get_open_scripts();
+            let mut saved_count = 0;
+
+            for i in 0..open_scripts.len() {
+                if let Some(script_var) = open_scripts.get(i) {
+                    if let Ok(script) = script_var.try_cast::<godot::classes::Script>() {
+                        let path = script.get_path();
+                        if !path.is_empty() {
+                            let result = ResourceSaver::singleton()
+                                .save_ex(&script)
+                                .path(&path)
+                                .done();
+                            if result == godot::global::Error::OK {
+                                saved_count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            crate::verbose_print!(
+                "[godot-neovim] :wa - Saved {} script(s)",
+                saved_count
+            );
+        }
     }
 
     /// ZZ - Save and close (using ResourceSaver for synchronous save)
