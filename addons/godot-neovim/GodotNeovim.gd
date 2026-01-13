@@ -5,14 +5,14 @@
 ##
 ## @tutorial(GitHub): https://github.com/shiena/godot-neovim
 ##
-## [b]Modes[/b][br]
+## [br][br][b]Modes[/b][br]
 ## [code]Normal[/code] - Default mode for navigation and commands[br]
 ## [code]Insert[/code] - Text input mode (i, a, o, etc.)[br]
 ## [code]Visual[/code] - Character selection (v)[br]
 ## [code]Visual Line[/code] - Line selection (V)[br]
 ## [code]Replace[/code] - Overwrite mode (R)[br]
 ##
-## [b]Basic Motions[/b][br]
+## [br][b]Basic Motions[/b][br]
 ## [code]h j k l[/code] - Left, Down, Up, Right[br]
 ## [code]w b e[/code] - Word forward, Word backward, End of word[br]
 ## [code]W B E[/code] - WORD (whitespace-delimited)[br]
@@ -21,7 +21,7 @@
 ## [code]{count}G[/code] - Go to line number[br]
 ## [code]%[/code] - Matching bracket[br]
 ##
-## [b]Find Motions[/b][br]
+## [br][b]Find Motions[/b][br]
 ## [code]f{char}[/code] - Find char forward[br]
 ## [code]F{char}[/code] - Find char backward[br]
 ## [code]t{char}[/code] - Till char forward[br]
@@ -29,7 +29,7 @@
 ## [code];[/code] - Repeat last find[br]
 ## [code],[/code] - Repeat last find (reverse)[br]
 ##
-## [b]Operators[/b][br]
+## [br][b]Operators[/b][br]
 ## [code]d{motion}[/code] - Delete[br]
 ## [code]c{motion}[/code] - Change (delete and enter insert)[br]
 ## [code]y{motion}[/code] - Yank (copy)[br]
@@ -38,7 +38,7 @@
 ## [code]={motion}[/code] - Auto-indent[br]
 ## [code]gq{motion}[/code] - Format[br]
 ##
-## [b]Operator Shortcuts[/b][br]
+## [br][b]Operator Shortcuts[/b][br]
 ## [code]dd cc yy[/code] - Operate on entire line[br]
 ## [code]D C[/code] - Operate to end of line[br]
 ## [code]x X[/code] - Delete char under/before cursor[br]
@@ -46,7 +46,7 @@
 ## [code]p P[/code] - Paste after/before[br]
 ## [code]J[/code] - Join lines[br]
 ##
-## [b]Text Objects[/b][br]
+## [br][b]Text Objects[/b][br]
 ## [code]iw aw[/code] - Inner/Around word[br]
 ## [code]iW aW[/code] - Inner/Around WORD[br]
 ## [code]i" a" i' a'[/code] - Inner/Around quotes[br]
@@ -56,7 +56,7 @@
 ## [code]i< a< i> a>[/code] - Inner/Around angle brackets[br]
 ## [code]it at[/code] - Inner/Around XML tag[br]
 ##
-## [b]Insert Mode Entry[/b][br]
+## [br][b]Insert Mode Entry[/b][br]
 ## [code]i[/code] - Insert before cursor[br]
 ## [code]a[/code] - Append after cursor[br]
 ## [code]I[/code] - Insert at first non-blank[br]
@@ -66,53 +66,53 @@
 ## [code]gI[/code] - Insert at column 0[br]
 ## [code]gi[/code] - Insert at last insert position[br]
 ##
-## [b]Visual Mode[/b][br]
+## [br][b]Visual Mode[/b][br]
 ## [code]v[/code] - Character-wise visual[br]
 ## [code]V[/code] - Line-wise visual[br]
 ## [code]gv[/code] - Reselect last visual[br]
 ##
-## [b]Marks[/b][br]
+## [br][b]Marks[/b][br]
 ## [code]m{a-z}[/code] - Set mark[br]
 ## [code]'{a-z}[/code] - Jump to mark (line)[br]
 ## [code]`{a-z}[/code] - Jump to mark (position)[br]
 ## [code]:marks[/code] - Show all marks[br]
 ##
-## [b]Registers[/b][br]
+## [br][b]Registers[/b][br]
 ## [code]"{a-z}{operator}[/code] - Use named register[br]
 ## [code]"+[/code] - System clipboard[br]
 ## [code]"*[/code] - Primary selection[br]
 ## [code]:registers[/code] - Show all registers[br]
 ##
-## [b]Macros[/b][br]
+## [br][b]Macros[/b][br]
 ## [code]q{a-z}[/code] - Start recording macro[br]
 ## [code]q[/code] - Stop recording[br]
 ## [code]@{a-z}[/code] - Play macro[br]
 ## [code]@@[/code] - Repeat last macro[br]
 ##
-## [b]Search[/b][br]
+## [br][b]Search[/b][br]
 ## [code]/{pattern}[/code] - Search forward[br]
 ## [code]?{pattern}[/code] - Search backward[br]
 ## [code]n N[/code] - Next/Previous match[br]
 ## [code]*[/code] - Search word under cursor[br]
 ## [code]#[/code] - Search word backward[br]
 ##
-## [b]Go Commands[/b][br]
+## [br][b]Go Commands[/b][br]
 ## [code]gd[/code] - Go to definition (LSP)[br]
 ## [code]gf[/code] - Go to file under cursor[br]
 ## [code]gx[/code] - Open URL under cursor[br]
 ## [code]gt gT[/code] - Next/Previous tab[br]
 ##
-## [b]Info Commands[/b][br]
+## [br][b]Info Commands[/b][br]
 ## [code]K[/code] - Show hover info (LSP)[br]
 ## [code]ga[/code] - Show ASCII value[br]
 ## [code]Ctrl+G[/code] - Show file info[br]
 ##
-## [b]Undo/Redo[/b][br]
+## [br][b]Undo/Redo[/b][br]
 ## [code]u[/code] - Undo[br]
 ## [code]Ctrl+R[/code] - Redo[br]
 ## [code].[/code] - Repeat last change[br]
 ##
-## [b]Ex Commands[/b][br]
+## [br][b]Ex Commands[/b][br]
 ## [code]:w[/code] - Save[br]
 ## [code]:q[/code] - Close[br]
 ## [code]:wq :x[/code] - Save and close[br]
@@ -122,7 +122,7 @@
 ## [code]:bn :bp[/code] - Next/Previous buffer[br]
 ## [code]:{number}[/code] - Go to line[br]
 ##
-## [b]Settings[/b][br]
+## [br][b]Settings[/b][br]
 ## Configure via [code]Editor > Editor Settings > godot_neovim[/code]:[br]
 ## - [code]neovim_executable_path[/code] - Path to nvim[br]
 ## - [code]input_mode[/code] - Hybrid (IME) or Strict[br]
