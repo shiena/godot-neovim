@@ -531,14 +531,7 @@ impl GodotNeovimPlugin {
         match result {
             Ok(Some(location)) => {
                 // Convert URI back to file path (handles URL decoding and Windows paths)
-                let path = match location.uri.to_file_path() {
-                    Ok(p) => p.to_string_lossy().to_string(),
-                    Err(_) => {
-                        crate::verbose_print!("[godot-neovim] gd: Failed to convert URI to path");
-                        self.show_status_message("Failed to parse definition path");
-                        return;
-                    }
-                };
+                let path = Self::uri_to_file_path(location.uri.as_str());
 
                 // Normalize path separators for comparison (Windows uses backslash, Godot uses forward slash)
                 let path_normalized = path.replace('\\', "/");
@@ -1281,5 +1274,45 @@ impl GodotNeovimPlugin {
         } else {
             adjusted.join("\n")
         }
+    }
+
+    /// Convert file:// URI to file path
+    /// Handles URL decoding and Windows paths (file:///C:/... -> C:/...)
+    fn uri_to_file_path(uri: &str) -> String {
+        let path = uri
+            .strip_prefix("file:///")
+            .or_else(|| uri.strip_prefix("file://"))
+            .unwrap_or(uri);
+
+        // URL decode (handle %20, %3A, etc.)
+        // On Windows, the path might start with a drive letter
+        // file:///C:/path -> C:/path (already correct after stripping)
+        Self::url_decode(path)
+    }
+
+    /// Simple URL decoding for file paths
+    fn url_decode(input: &str) -> String {
+        let mut result = String::with_capacity(input.len());
+        let mut chars = input.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c == '%' {
+                // Try to read two hex digits
+                let hex: String = chars.by_ref().take(2).collect();
+                if hex.len() == 2 {
+                    if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                        result.push(byte as char);
+                        continue;
+                    }
+                }
+                // If decoding failed, keep original
+                result.push('%');
+                result.push_str(&hex);
+            } else {
+                result.push(c);
+            }
+        }
+
+        result
     }
 }

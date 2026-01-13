@@ -1,7 +1,7 @@
 use lsp_types::{
     DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
     InitializeResult, Location, Position, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, Url, WorkspaceFolder,
+    TextDocumentPositionParams, Uri, WorkspaceFolder,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -92,11 +92,16 @@ impl GodotLspClient {
         // Small delay to let the server prepare after connection
         std::thread::sleep(Duration::from_millis(100));
 
-        let uri = Url::parse(root_uri).map_err(|e| e.to_string())?;
+        let name = root_uri
+            .split('/')
+            .next_back()
+            .unwrap_or("workspace")
+            .to_string();
+        let workspace_uri = root_uri.parse::<Uri>().map_err(|e| e.to_string())?;
         let params = InitializeParams {
             workspace_folders: Some(vec![WorkspaceFolder {
-                uri: uri.clone(),
-                name: uri.path().split('/').next_back().unwrap_or("workspace").to_string(),
+                uri: workspace_uri,
+                name,
             }]),
             capabilities: lsp_types::ClientCapabilities::default(),
             ..Default::default()
@@ -118,9 +123,10 @@ impl GodotLspClient {
     }
 
     pub fn did_open(&self, uri: &str, text: &str) -> Result<(), String> {
+        let doc_uri = uri.parse::<Uri>().map_err(|e| e.to_string())?;
         let params = DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
-                uri: Url::parse(uri).map_err(|e| e.to_string())?,
+                uri: doc_uri,
                 language_id: "gdscript".to_string(),
                 version: 1,
                 text: text.to_string(),
@@ -139,11 +145,10 @@ impl GodotLspClient {
         line: u32,
         col: u32,
     ) -> Result<Option<Location>, String> {
+        let doc_uri = uri.parse::<Uri>().map_err(|e| e.to_string())?;
         let params = GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(uri).map_err(|e| e.to_string())?,
-                },
+                text_document: TextDocumentIdentifier { uri: doc_uri },
                 position: Position {
                     line,
                     character: col,
