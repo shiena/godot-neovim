@@ -111,6 +111,7 @@ impl GodotNeovimPlugin {
                 self.cmd_save_all();
                 self.cmd_close_all();
             }
+            "e!" | "edit!" => self.cmd_reload(),
             _ => {
                 // Check for :{number} - jump to line
                 if let Ok(line_num) = cmd.parse::<i32>() {
@@ -328,6 +329,34 @@ impl GodotNeovimPlugin {
                 "[godot-neovim] :wa - Saved {} script(s)",
                 saved_count
             );
+        }
+    }
+
+    /// :e!/:edit! - Reload current file from disk (discard changes)
+    pub(super) fn cmd_reload(&mut self) {
+        let editor = EditorInterface::singleton();
+        if let Some(mut script_editor) = editor.get_script_editor() {
+            if let Some(mut current_script) = script_editor.get_current_script() {
+                let path = current_script.get_path();
+                if !path.is_empty() {
+                    // Reload the script from disk
+                    let _ = current_script.reload();
+
+                    // Update the CodeEdit to match the reloaded script
+                    if let Some(ref mut code_edit) = self.current_editor {
+                        let source = current_script.get_source_code();
+                        code_edit.set_text(&source);
+                        code_edit.tag_saved_version();
+
+                        // Sync to Neovim
+                        self.sync_buffer_to_neovim();
+                    }
+
+                    crate::verbose_print!("[godot-neovim] :e! - Reloaded: {}", path);
+                } else {
+                    godot_warn!("[godot-neovim] :e! - No file to reload (new buffer)");
+                }
+            }
         }
     }
 
