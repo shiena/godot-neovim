@@ -877,6 +877,27 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        // Handle 'o' in visual mode: toggle selection direction
+        if Self::is_visual_mode(&self.current_mode)
+            && keycode == Key::O
+            && !key_event.is_ctrl_pressed()
+            && !key_event.is_shift_pressed()
+        {
+            // Send 'o' to Neovim to toggle selection direction
+            self.send_keys("o");
+            // Update selection display (Neovim will swap anchor and cursor)
+            if self.current_mode == "v" {
+                self.update_visual_selection();
+            } else if self.current_mode == "V" {
+                self.update_visual_line_selection();
+            }
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            crate::verbose_print!("[godot-neovim] o: Toggle visual selection direction");
+            return;
+        }
+
         // Handle Ctrl+F for page down
         if key_event.is_ctrl_pressed() && keycode == Key::F {
             self.page_down();
