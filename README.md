@@ -54,6 +54,7 @@ This plugin is in early development. The following features are implemented:
 - ✅ Case operators (`gu`, `gU`, `g~` + motion)
 - ✅ Command history (Up/Down in command-line mode)
 - ✅ Marks (`m{a-z}`, `'{a-z}`, `` `{a-z} ``)
+- ✅ Macros (`q{a-z}`, `@{a-z}`, `@@`)
 
 ## Requirements
 
@@ -237,6 +238,15 @@ Once the plugin is enabled:
 | `'{a-z}` | Jump to mark line (first non-blank) |
 | `` `{a-z} `` | Jump to exact mark position |
 
+#### Macros
+
+| Command | Description |
+|---------|-------------|
+| `q{a-z}` | Start recording macro to register |
+| `q` | Stop recording macro (when recording) |
+| `@{a-z}` | Play macro from register |
+| `@@` | Replay last played macro |
+
 #### Mode Switching
 
 | Command | Description |
@@ -283,7 +293,6 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 | Feature | Description |
 |---------|-------------|
 | Named registers | `"a`, `"b`, etc. (uses system clipboard only) |
-| Macros | `q`, `@` |
 | Neovim search | `/` opens Godot's find dialog |
 | Neovim undo | Uses Godot's undo system |
 | Neovim config | `init.lua` and plugins are not loaded |
@@ -294,8 +303,7 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 
 Features requiring plugin-side implementation (in priority order):
 
-1. **Macros** - `q{a-z}` to record, `@{a-z}` to replay, `@@` to repeat last macro
-2. **Named Registers** - `"{a-z}` to specify register for yank/paste operations
+1. **Named Registers** - `"{a-z}` to specify register for yank/paste operations
 
 #### Likely Already Working (Testing Needed)
 

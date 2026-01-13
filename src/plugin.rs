@@ -69,6 +69,24 @@ pub struct GodotNeovimPlugin {
     /// Pending mark operation: Some('m') for set mark, Some('\'') for jump to line, Some('`') for jump to position
     #[init(val = None)]
     pending_mark_op: Option<char>,
+    /// Macro storage: char -> Vec of key sequences
+    #[init(val = HashMap::new())]
+    macros: HashMap<char, Vec<String>>,
+    /// Currently recording macro (None if not recording)
+    #[init(val = None)]
+    recording_macro: Option<char>,
+    /// Buffer for keys being recorded
+    #[init(val = Vec::new())]
+    macro_buffer: Vec<String>,
+    /// Last played macro register (for @@)
+    #[init(val = None)]
+    last_macro: Option<char>,
+    /// Flag to prevent recursive macro recording
+    #[init(val = false)]
+    playing_macro: bool,
+    /// Pending macro operation: Some('q') for record, Some('@') for play
+    #[init(val = None)]
+    pending_macro_op: Option<char>,
 }
 
 #[godot_api]
@@ -280,6 +298,50 @@ impl IEditorPlugin for GodotNeovimPlugin {
                         }
                         return;
                     }
+                }
+            }
+        }
+
+        // Handle pending macro operation (q for record, @ for play)
+        if let Some(op) = self.pending_macro_op {
+            let keycode = key_event.get_keycode();
+
+            // Cancel on Escape
+            if keycode == Key::ESCAPE {
+                self.pending_macro_op = None;
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
+
+            // Get the character
+            let unicode = key_event.get_unicode();
+            if unicode > 0 {
+                if let Some(c) = char::from_u32(unicode) {
+                    self.pending_macro_op = None;
+                    match op {
+                        'q' => {
+                            // Start recording if a-z
+                            if c.is_ascii_lowercase() {
+                                self.start_macro_recording(c);
+                            }
+                        }
+                        '@' => {
+                            if c == '@' {
+                                // @@ - replay last macro
+                                self.replay_last_macro();
+                            } else if c.is_ascii_lowercase() {
+                                // @{a-z} - play specific macro
+                                self.play_macro(c);
+                            }
+                        }
+                        _ => {}
+                    }
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
                 }
             }
         }
@@ -622,6 +684,30 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
+        // Handle 'q' for macro recording (start/stop)
+        if keycode == Key::Q && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            if self.recording_macro.is_some() {
+                // Stop recording
+                self.stop_macro_recording();
+            } else {
+                // Wait for register character
+                self.pending_macro_op = Some('q');
+            }
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '@' for macro playback
+        if unicode_char == Some('@') && !key_event.is_ctrl_pressed() {
+            self.pending_macro_op = Some('@');
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
         // Handle '>>' for indent (first '>' sets pending, second '>' executes)
         // Handle '<<' for unindent (first '<' sets pending, second '<' executes)
         // Use unicode for keyboard layout independence
@@ -735,6 +821,11 @@ impl IEditorPlugin for GodotNeovimPlugin {
 
         // Forward key to Neovim (normal/visual/etc modes)
         if let Some(keys) = self.key_event_to_nvim_string(&key_event) {
+            // Record key for macro if recording (and not playing back)
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push(keys.clone());
+            }
+
             let completed = self.send_keys(&keys);
 
             // Handle scroll commands (zz, zt, zb) only if command completed
@@ -3294,6 +3385,72 @@ impl GodotNeovimPlugin {
             target_line + 1,
             target_col
         );
+    }
+
+    /// Start recording a macro to the specified register
+    fn start_macro_recording(&mut self, register: char) {
+        self.recording_macro = Some(register);
+        self.macro_buffer.clear();
+        crate::verbose_print!("[godot-neovim] q{}: Started recording macro", register);
+    }
+
+    /// Stop recording the current macro and save it
+    fn stop_macro_recording(&mut self) {
+        if let Some(register) = self.recording_macro.take() {
+            let keys = std::mem::take(&mut self.macro_buffer);
+            if !keys.is_empty() {
+                self.macros.insert(register, keys.clone());
+                crate::verbose_print!(
+                    "[godot-neovim] q: Stopped recording macro '{}' ({} keys)",
+                    register,
+                    keys.len()
+                );
+            } else {
+                crate::verbose_print!(
+                    "[godot-neovim] q: Stopped recording macro '{}' (empty)",
+                    register
+                );
+            }
+        }
+    }
+
+    /// Play a macro from the specified register
+    fn play_macro(&mut self, register: char) {
+        let Some(keys) = self.macros.get(&register).cloned() else {
+            crate::verbose_print!("[godot-neovim] @{}: Macro not recorded", register);
+            return;
+        };
+
+        if keys.is_empty() {
+            crate::verbose_print!("[godot-neovim] @{}: Macro is empty", register);
+            return;
+        }
+
+        self.last_macro = Some(register);
+        self.playing_macro = true;
+
+        crate::verbose_print!(
+            "[godot-neovim] @{}: Playing macro ({} keys)",
+            register,
+            keys.len()
+        );
+
+        // Play back each key
+        for key in &keys {
+            self.send_keys(key);
+        }
+
+        self.playing_macro = false;
+    }
+
+    /// Replay the last played macro (@@)
+    fn replay_last_macro(&mut self) {
+        if let Some(register) = self.last_macro {
+            crate::verbose_print!("[godot-neovim] @@: Replaying macro '{}'", register);
+            self.play_macro(register);
+        } else {
+            crate::verbose_print!("[godot-neovim] @@: No macro played yet");
+        }
     }
 
     /// Indent current line (>> command)
