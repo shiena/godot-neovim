@@ -1482,6 +1482,11 @@ impl GodotNeovimPlugin {
                         self.go_to_file_under_cursor();
                         true
                     }
+                    "I" => {
+                        // gI - insert at column 0
+                        self.insert_at_column_zero();
+                        true
+                    }
                     _ => false,
                 };
 

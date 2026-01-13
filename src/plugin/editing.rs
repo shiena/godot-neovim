@@ -411,6 +411,25 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] gd: Go to definition (F12)");
     }
 
+    /// Insert at column 0 (gI command)
+    pub(super) fn insert_at_column_zero(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        // Move cursor to column 0
+        let line_idx = editor.get_caret_line();
+        editor.set_caret_column(0);
+
+        // Enter insert mode by sending 'i' to Neovim
+        self.sync_cursor_to_neovim();
+        self.send_keys("i");
+        crate::verbose_print!(
+            "[godot-neovim] gI: Insert at column 0, line {}",
+            line_idx + 1
+        );
+    }
+
     /// Yank from cursor to end of line (Y command)
     pub(super) fn yank_to_eol(&mut self) {
         let Some(ref editor) = self.current_editor else {
