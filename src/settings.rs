@@ -31,13 +31,6 @@ impl InputMode {
             _ => InputMode::Hybrid,
         }
     }
-
-    pub fn to_int(self) -> i64 {
-        match self {
-            InputMode::Hybrid => 0,
-            InputMode::Strict => 1,
-        }
-    }
 }
 
 /// Result of validating Neovim executable path

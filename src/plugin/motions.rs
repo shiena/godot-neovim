@@ -66,7 +66,10 @@ impl GodotNeovimPlugin {
         let target_first = (current_line - half_visible).max(0);
         editor.set_line_as_first_visible(target_first);
 
-        crate::verbose_print!("[godot-neovim] zz: Centered cursor on line {}", current_line + 1);
+        crate::verbose_print!(
+            "[godot-neovim] zz: Centered cursor on line {}",
+            current_line + 1
+        );
     }
 
     /// Scroll cursor line to top (zt command)
@@ -93,7 +96,10 @@ impl GodotNeovimPlugin {
         let target_first = (current_line - visible_lines + 1).max(0);
         editor.set_line_as_first_visible(target_first);
 
-        crate::verbose_print!("[godot-neovim] zb: Cursor line {} at bottom", current_line + 1);
+        crate::verbose_print!(
+            "[godot-neovim] zb: Cursor line {} at bottom",
+            current_line + 1
+        );
     }
 
     /// Move cursor to top of visible area (H command)
@@ -358,7 +364,11 @@ impl GodotNeovimPlugin {
 
         // We're now on a non-whitespace char - this is the end of the previous word
         self.move_cursor_to(line, col as i32);
-        crate::verbose_print!("[godot-neovim] ge: Moved to word end at {}:{}", line + 1, col);
+        crate::verbose_print!(
+            "[godot-neovim] ge: Moved to word end at {}:{}",
+            line + 1,
+            col
+        );
     }
 
     /// Move cursor to specified position and sync with Neovim
@@ -620,7 +630,7 @@ impl GodotNeovimPlugin {
         };
 
         let mut line = editor.get_caret_line();
-        let mut col = editor.get_caret_column() as i32 - 1;
+        let mut col = editor.get_caret_column() - 1;
         let mut depth = 0;
 
         // Search backward for unmatched opening bracket
@@ -657,7 +667,10 @@ impl GodotNeovimPlugin {
             }
         }
 
-        crate::verbose_print!("[godot-neovim] [{}: No matching block start found", open_char);
+        crate::verbose_print!(
+            "[godot-neovim] [{}: No matching block start found",
+            open_char
+        );
     }
 
     /// Jump to end of enclosing block (]} command)
@@ -701,7 +714,10 @@ impl GodotNeovimPlugin {
             col = 0;
         }
 
-        crate::verbose_print!("[godot-neovim] ]{}: No matching block end found", close_char);
+        crate::verbose_print!(
+            "[godot-neovim] ]{}: No matching block end found",
+            close_char
+        );
     }
 
     /// Jump to previous method/function definition ([m command)

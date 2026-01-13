@@ -54,6 +54,7 @@ impl NeovimClient {
     }
 
     /// Check if there are pending updates from redraw events
+    #[allow(dead_code)]
     pub fn has_pending_updates(&self) -> bool {
         self.has_updates.load(Ordering::SeqCst)
     }
@@ -72,6 +73,7 @@ impl NeovimClient {
     }
 
     /// Get current state (always returns, doesn't check updates flag)
+    #[allow(dead_code)]
     pub fn get_state(&self) -> (String, (i64, i64)) {
         self.runtime.block_on(async {
             let state = self.state.lock().await;
@@ -90,6 +92,7 @@ impl NeovimClient {
     }
 
     /// Check if IO handler is still running
+    #[allow(dead_code)]
     pub fn is_io_running(&self) -> bool {
         self.io_handle.as_ref().is_some_and(|h| !h.is_finished())
     }
@@ -140,7 +143,9 @@ impl NeovimClient {
             // - shortmess+=A: Suppress swap file warnings
             // - SwapExists autocmd: Auto-select 'edit anyway' if swap exists
             neovim
-                .command("set noswapfile shortmess+=A | autocmd SwapExists * let v:swapchoice = 'e'")
+                .command(
+                    "set noswapfile shortmess+=A | autocmd SwapExists * let v:swapchoice = 'e'",
+                )
                 .await
                 .map_err(|e| format!("Failed to configure swapfile handling: {}", e))?;
 
@@ -172,7 +177,7 @@ impl NeovimClient {
         // Clear the neovim instance without sending quit command
         // (IO is already aborted, command would timeout anyway)
         let neovim_arc = self.neovim.clone();
-        let _ = self.runtime.block_on(async {
+        self.runtime.block_on(async {
             let mut nvim_lock = neovim_arc.lock().await;
             nvim_lock.take();
         });
@@ -248,6 +253,7 @@ impl NeovimClient {
 
     /// Send keys to Neovim without blocking for response
     /// State updates will come via redraw events
+    #[allow(dead_code)]
     pub fn input_async(&self, keys: &str) -> Result<(), String> {
         let neovim_arc = self.neovim.clone();
         let keys = keys.to_string();
@@ -446,6 +452,7 @@ impl NeovimClient {
     }
 
     /// Check if buffer is modified in Neovim
+    #[allow(dead_code)]
     pub fn is_buffer_modified(&self) -> bool {
         let neovim_arc = self.neovim.clone();
 
@@ -538,6 +545,7 @@ impl NeovimClient {
     }
 
     /// Execute Lua code in Neovim
+    #[allow(dead_code)]
     pub fn execute_lua(&self, code: &str) -> Result<rmpv::Value, String> {
         let neovim_arc = self.neovim.clone();
         let code = code.to_string();
@@ -554,7 +562,6 @@ impl NeovimClient {
             }
         })
     }
-
 }
 
 impl Default for NeovimClient {

@@ -47,6 +47,7 @@ impl NeovimHandler {
     }
 
     /// Check and clear the updates flag
+    #[allow(dead_code)]
     pub fn take_updates(&self) -> bool {
         self.has_updates.swap(false, Ordering::SeqCst)
     }

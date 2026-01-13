@@ -14,15 +14,13 @@ mod visual;
 use crate::lsp::GodotLspClient;
 use crate::neovim::NeovimClient;
 use crate::settings;
-use std::sync::Arc;
 use godot::classes::text_edit::CaretType;
-use godot::classes::{
-    CodeEdit, Control, EditorInterface, EditorPlugin, IEditorPlugin, Label,
-};
+use godot::classes::{CodeEdit, Control, EditorInterface, EditorPlugin, IEditorPlugin, Label};
 use godot::global::Key;
 use godot::prelude::*;
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::Mutex;
 
 /// Main editor plugin for godot-neovim
@@ -190,7 +188,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
                     let lsp_client = Arc::new(GodotLspClient::new());
                     self.godot_lsp = Some(lsp_client);
                     self.lsp_connected = true;
-                    crate::verbose_print!("[godot-neovim] LSP client initialized (use_thread=true)");
+                    crate::verbose_print!(
+                        "[godot-neovim] LSP client initialized (use_thread=true)"
+                    );
                 } else {
                     crate::verbose_print!("[godot-neovim] LSP disabled (use_thread=false)");
                 }
@@ -275,9 +275,15 @@ impl IEditorPlugin for GodotNeovimPlugin {
                 if word.chars().next().is_some_and(|c| c.is_uppercase()) {
                     let help_query = format!("class_name:{}", word);
                     script_editor.goto_help(&help_query);
-                    crate::verbose_print!("[godot-neovim] K: Opening help for class '{}' (deferred)", word);
+                    crate::verbose_print!(
+                        "[godot-neovim] K: Opening help for class '{}' (deferred)",
+                        word
+                    );
                 } else {
-                    crate::verbose_print!("[godot-neovim] K: Skipping help for '{}' (not a class name)", word);
+                    crate::verbose_print!(
+                        "[godot-neovim] K: Skipping help for '{}' (not a class name)",
+                        word
+                    );
                 }
 
                 // Reconnect to signal
@@ -320,7 +326,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
                 script_editor.connect("editor_script_changed", &callable);
 
                 // Manually trigger handle_script_changed since we missed the signal
-                crate::verbose_print!("[godot-neovim] gf: Triggering manual script change handling");
+                crate::verbose_print!(
+                    "[godot-neovim] gf: Triggering manual script change handling"
+                );
                 self.handle_script_changed();
             }
         }
@@ -764,6 +772,7 @@ impl GodotNeovimPlugin {
         }
     }
 
+    #[allow(dead_code)]
     fn update_mode_display(&mut self, mode: &str) {
         self.update_mode_display_with_cursor(mode, None);
     }
@@ -796,14 +805,14 @@ impl GodotNeovimPlugin {
 
         // Set color based on mode
         let color = match mode {
-            "n" => Color::from_rgb(0.0, 1.0, 0.5),   // Green for normal
+            "n" => Color::from_rgb(0.0, 1.0, 0.5), // Green for normal
             "i" | "insert" => Color::from_rgb(0.4, 0.6, 1.0), // Blue for insert
             "R" | "replace" => Color::from_rgb(1.0, 0.3, 0.3), // Red for replace
             "v" | "V" | "\x16" | "^V" | "CTRL-V" | "visual" | "visual-line" | "visual-block" => {
                 Color::from_rgb(1.0, 0.6, 0.2) // Orange for visual
             }
             "c" | "command" => Color::from_rgb(1.0, 1.0, 0.4), // Yellow for command
-            _ => Color::from_rgb(1.0, 1.0, 1.0),  // White for unknown
+            _ => Color::from_rgb(1.0, 1.0, 1.0),               // White for unknown
         };
 
         label.add_theme_color_override("font_color", color);
@@ -1009,11 +1018,8 @@ impl GodotNeovimPlugin {
         let unicode = key_event.get_unicode();
         if unicode > 0 {
             if let Some(c) = char::from_u32(unicode) {
-                let is_valid_register = c.is_ascii_lowercase()
-                    || c == '+'
-                    || c == '*'
-                    || c == '_'
-                    || c == '0';
+                let is_valid_register =
+                    c.is_ascii_lowercase() || c == '+' || c == '*' || c == '_' || c == '0';
                 if is_valid_register {
                     self.selected_register = Some(c);
                     crate::verbose_print!("[godot-neovim] \"{}: Register selected", c);
@@ -1331,7 +1337,11 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 't' for till char forward (but not after 'g' - that's gt for tab navigation)
-        if keycode == Key::T && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() && self.last_key != "g" {
+        if keycode == Key::T
+            && !key_event.is_shift_pressed()
+            && !key_event.is_ctrl_pressed()
+            && self.last_key != "g"
+        {
             self.pending_char_op = Some('t');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1340,7 +1350,11 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 'T' for till char backward (but not after 'g' - that's gT for tab navigation)
-        if keycode == Key::T && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() && self.last_key != "g" {
+        if keycode == Key::T
+            && key_event.is_shift_pressed()
+            && !key_event.is_ctrl_pressed()
+            && self.last_key != "g"
+        {
             self.pending_char_op = Some('T');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1560,7 +1574,11 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 'q' for macro recording (start/stop) - but not after 'g' (that's gq for format)
-        if keycode == Key::Q && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() && self.last_key != "g" {
+        if keycode == Key::Q
+            && !key_event.is_shift_pressed()
+            && !key_event.is_ctrl_pressed()
+            && self.last_key != "g"
+        {
             if self.recording_macro.is_some() {
                 // Stop recording
                 self.stop_macro_recording();
@@ -1943,9 +1961,10 @@ impl GodotNeovimPlugin {
                 match keys.as_str() {
                     "x" => {
                         // Save cursor position before canceling pending operator
-                        let saved_cursor = self.current_editor.as_ref().map(|e| {
-                            (e.get_caret_line(), e.get_caret_column())
-                        });
+                        let saved_cursor = self
+                            .current_editor
+                            .as_ref()
+                            .map(|e| (e.get_caret_line(), e.get_caret_column()));
                         // Cancel Neovim's pending 'g' operator
                         self.send_keys("<Esc>");
                         // Restore cursor position
@@ -1974,11 +1993,10 @@ impl GodotNeovimPlugin {
                     }
                     "d" => {
                         // Save cursor position before Esc (which may move cursor)
-                        let saved_cursor = if let Some(ref editor) = self.current_editor {
-                            Some((editor.get_caret_line(), editor.get_caret_column()))
-                        } else {
-                            None
-                        };
+                        let saved_cursor = self
+                            .current_editor
+                            .as_ref()
+                            .map(|editor| (editor.get_caret_line(), editor.get_caret_column()));
 
                         // Cancel Neovim's pending 'g' operator (use input directly to avoid cursor sync)
                         if let Some(ref neovim) = self.neovim {
@@ -1988,7 +2006,9 @@ impl GodotNeovimPlugin {
                         }
 
                         // Restore cursor position
-                        if let (Some((line, col)), Some(ref mut editor)) = (saved_cursor, self.current_editor.as_mut()) {
+                        if let (Some((line, col)), Some(ref mut editor)) =
+                            (saved_cursor, self.current_editor.as_mut())
+                        {
                             editor.set_caret_line(line);
                             editor.set_caret_column(col);
                         }

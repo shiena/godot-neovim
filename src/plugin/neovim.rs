@@ -57,26 +57,19 @@ impl GodotNeovimPlugin {
             // Try to set buffer name, but don't block on errors (E325 swap file issues)
             match client.set_buffer_name(&abs_path) {
                 Ok(()) => {
-                    crate::verbose_print!(
-                        "[godot-neovim] Buffer name set to: {}",
-                        abs_path
-                    );
+                    crate::verbose_print!("[godot-neovim] Buffer name set to: {}", abs_path);
                     // Set filetype for syntax highlighting
                     let _ = client.command("set filetype=gdscript");
                 }
                 Err(e) => {
                     // Log warning but continue - editing will still work
-                    crate::verbose_print!(
-                        "[godot-neovim] Buffer name not set: {}",
-                        e
-                    );
+                    crate::verbose_print!("[godot-neovim] Buffer name not set: {}", e);
                     // Still set filetype for syntax highlighting
                     let _ = client.command("set filetype=gdscript");
                 }
             }
         }
     }
-
 
     /// Sync cursor position from Godot editor to Neovim
     pub(super) fn sync_cursor_to_neovim(&mut self) {
@@ -371,64 +364,12 @@ impl GodotNeovimPlugin {
         editor.set_caret_column(column.max(0));
     }
 
-    /// Sync cursor from Neovim to Godot (1-indexed to 0-indexed)
-    pub(super) fn sync_cursor_from_neovim(&mut self, cursor: Option<(i64, i64)>) {
-        let Some((line, col)) = cursor else {
-            return;
-        };
-
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        // Convert 1-indexed to 0-indexed
-        let target_line = (line - 1).max(0) as i32;
-        let target_col = col.max(0) as i32;
-
-        editor.set_caret_line(target_line);
-        editor.set_caret_column(target_col);
-    }
-
-    /// Immediately get cursor position from Neovim and sync to Godot
-    /// Used for commands like gd where we need to reflect Neovim's cursor movement
-    pub(super) fn sync_cursor_from_neovim_immediate(&mut self) {
-        let Some(ref neovim) = self.neovim else {
-            return;
-        };
-
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let client = neovim.lock().unwrap();
-        let Ok((line, col)) = client.get_cursor() else {
-            crate::verbose_print!("[godot-neovim] Failed to get cursor from Neovim");
-            return;
-        };
-        drop(client);
-
-        // Neovim uses 1-indexed lines, 0-indexed columns
-        let target_line = (line - 1).max(0) as i32;
-        let target_col = col.max(0) as i32;
-
-        let line_count = editor.get_line_count();
-        let safe_line = target_line.min(line_count - 1).max(0);
-
-        editor.set_caret_line(safe_line);
-        editor.set_caret_column(target_col);
-
-        // Update cached cursor position
-        self.current_cursor = (line - 1, col);
-
-        crate::verbose_print!(
-            "[godot-neovim] Synced cursor from Neovim: line {}, col {}",
-            safe_line + 1,
-            target_col
-        );
-    }
-
     /// Sync buffer from Neovim to Godot editor
-    pub(super) fn sync_buffer_from_neovim(&mut self, lines: Vec<String>, cursor: Option<(i64, i64)>) {
+    pub(super) fn sync_buffer_from_neovim(
+        &mut self,
+        lines: Vec<String>,
+        cursor: Option<(i64, i64)>,
+    ) {
         let Some(ref mut editor) = self.current_editor else {
             return;
         };
@@ -444,7 +385,10 @@ impl GodotNeovimPlugin {
 
         if text_normalized != current_normalized {
             editor.set_text(&text);
-            crate::verbose_print!("[godot-neovim] Buffer synced from Neovim ({} lines)", lines.len());
+            crate::verbose_print!(
+                "[godot-neovim] Buffer synced from Neovim ({} lines)",
+                lines.len()
+            );
         }
 
         // Sync cursor position

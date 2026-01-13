@@ -1,7 +1,7 @@
 //! Command-line mode and Ex commands
 
 use super::GodotNeovimPlugin;
-use godot::classes::{EditorInterface, Input, InputEventKey, ResourceSaver, TabBar};
+use godot::classes::{EditorInterface, Input, InputEventKey, ResourceSaver};
 use godot::global::Key;
 use godot::prelude::*;
 
@@ -43,7 +43,11 @@ impl GodotNeovimPlugin {
         match self.command_history_index {
             None => {
                 // Save current input and start browsing
-                self.command_history_temp = self.command_buffer.strip_prefix(':').unwrap_or("").to_string();
+                self.command_history_temp = self
+                    .command_buffer
+                    .strip_prefix(':')
+                    .unwrap_or("")
+                    .to_string();
                 self.command_history_index = Some(self.command_history.len() - 1);
             }
             Some(0) => {
@@ -145,7 +149,11 @@ impl GodotNeovimPlugin {
                     self.cmd_show_changes();
                 }
                 // Check for :e[dit] {file} command (or just :e to open quick open)
-                else if cmd == "e" || cmd == "edit" || cmd.starts_with("e ") || cmd.starts_with("edit ") {
+                else if cmd == "e"
+                    || cmd == "edit"
+                    || cmd.starts_with("e ")
+                    || cmd.starts_with("edit ")
+                {
                     let file_path = if cmd == "e" || cmd == "edit" {
                         ""
                     } else if cmd.starts_with("edit ") {
@@ -184,17 +192,13 @@ impl GodotNeovimPlugin {
                 // Buffer navigation commands
                 else if cmd == "bn" || cmd == "bnext" {
                     self.cmd_buffer_next();
-                }
-                else if cmd == "bp" || cmd == "bprev" || cmd == "bprevious" {
+                } else if cmd == "bp" || cmd == "bprev" || cmd == "bprevious" {
                     self.cmd_buffer_prev();
-                }
-                else if cmd == "bd" || cmd == "bdelete" {
+                } else if cmd == "bd" || cmd == "bdelete" {
                     self.cmd_close();
-                }
-                else if cmd == "ls" || cmd == "buffers" {
+                } else if cmd == "ls" || cmd == "buffers" {
                     self.cmd_list_buffers();
-                }
-                else {
+                } else {
                     godot_warn!("[godot-neovim] Unknown command: {}", cmd);
                 }
             }
@@ -227,7 +231,11 @@ impl GodotNeovimPlugin {
         editor.set_caret_column(first_non_blank as i32);
 
         self.sync_cursor_to_neovim();
-        crate::verbose_print!("[godot-neovim] :{}: Jumped to line {}", line_num, target_line + 1);
+        crate::verbose_print!(
+            "[godot-neovim] :{}: Jumped to line {}",
+            line_num,
+            target_line + 1
+        );
     }
 
     /// :marks - Show all marks
@@ -312,8 +320,7 @@ impl GodotNeovimPlugin {
                     let path: String = path_var.to::<String>();
                     if !path.is_empty() {
                         // Load and open the selected script
-                        let resource =
-                            godot::classes::ResourceLoader::singleton().load(&path);
+                        let resource = godot::classes::ResourceLoader::singleton().load(&path);
                         if let Some(res) = resource {
                             if let Ok(script) = res.try_cast::<godot::classes::Script>() {
                                 let mut ed = EditorInterface::singleton();
@@ -407,10 +414,7 @@ impl GodotNeovimPlugin {
                 }
             }
 
-            crate::verbose_print!(
-                "[godot-neovim] :wa - Saved {} script(s)",
-                saved_count
-            );
+            crate::verbose_print!("[godot-neovim] :wa - Saved {} script(s)", saved_count);
         }
     }
 
@@ -681,7 +685,10 @@ impl GodotNeovimPlugin {
         let open_scripts = script_editor.get_open_scripts();
         let count = open_scripts.len() as i32;
         if count <= 1 {
-            crate::verbose_print!("[godot-neovim] switch_script_tab: only {} script(s) open", count);
+            crate::verbose_print!(
+                "[godot-neovim] switch_script_tab: only {} script(s) open",
+                count
+            );
             return;
         }
 
@@ -723,56 +730,6 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// Find TabBar in the ScriptEditor hierarchy
-    pub(super) fn find_tab_bar(&self, node: Gd<godot::classes::Control>) -> Option<Gd<TabBar>> {
-        // Check if this node is a TabBar
-        if let Ok(tab_bar) = node.clone().try_cast::<TabBar>() {
-            // Make sure it has tabs (script tabs, not other TabBars)
-            if tab_bar.get_tab_count() > 0 {
-                crate::verbose_print!(
-                    "[godot-neovim] Found TabBar with {} tabs",
-                    tab_bar.get_tab_count()
-                );
-                return Some(tab_bar);
-            }
-        }
-
-        // Search children
-        let count = node.get_child_count();
-        for i in 0..count {
-            if let Some(child) = node.get_child(i) {
-                if let Ok(control) = child.try_cast::<godot::classes::Control>() {
-                    if let Some(tab_bar) = self.find_tab_bar(control) {
-                        return Some(tab_bar);
-                    }
-                }
-            }
-        }
-
-        None
-    }
-
-    /// Debug: Print node hierarchy to find TabBar
-    #[allow(dead_code)]
-    pub(super) fn debug_print_hierarchy(&self, node: Gd<godot::classes::Control>, depth: i32) {
-        let indent = "  ".repeat(depth as usize);
-        let class_name = node.get_class();
-        let node_name = node.get_name();
-        crate::verbose_print!("{}[{}] {}", indent, class_name, node_name);
-
-        let count = node.get_child_count();
-        for i in 0..count {
-            if let Some(child) = node.get_child(i) {
-                if let Ok(control) = child.try_cast::<godot::classes::Control>() {
-                    if depth < 5 {
-                        // Limit depth to avoid too much output
-                        self.debug_print_hierarchy(control, depth + 1);
-                    }
-                }
-            }
-        }
-    }
-
     /// Start backward search (? command) - opens Godot's search dialog
     pub(super) fn start_search_backward(&self) {
         // Simulate Ctrl+F to open the search dialog
@@ -782,32 +739,8 @@ impl GodotNeovimPlugin {
         key_event.set_pressed(true);
         Input::singleton().parse_input_event(&key_event);
 
-        crate::verbose_print!("[godot-neovim] ?: Opening search dialog (use Find Previous for backward search)");
-    }
-
-    /// Select entire buffer (ae/ie text objects for visual mode)
-    pub(super) fn select_entire_buffer(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let line_count = editor.get_line_count();
-        if line_count == 0 {
-            return;
-        }
-
-        let last_line = line_count - 1;
-        let last_line_len = editor.get_line(last_line).len() as i32;
-
-        // Select from start to end of buffer
-        editor.select(0, 0, last_line, last_line_len);
-
-        // Enter visual mode in Neovim
-        self.send_keys("ggVG");
-
         crate::verbose_print!(
-            "[godot-neovim] ae/ie: Selected entire buffer ({} lines)",
-            line_count
+            "[godot-neovim] ?: Opening search dialog (use Find Previous for backward search)"
         );
     }
 
@@ -1000,7 +933,11 @@ impl GodotNeovimPlugin {
         editor.set_text(&new_lines.join("\n"));
 
         // Move cursor to the new location
-        let new_line = if insert_after < 0 { 0 } else { insert_after + 1 };
+        let new_line = if insert_after < 0 {
+            0
+        } else {
+            insert_after + 1
+        };
         editor.set_caret_line(new_line.max(0));
 
         self.sync_buffer_to_neovim();
@@ -1033,7 +970,7 @@ impl GodotNeovimPlugin {
                 if let Some(script_var) = open_scripts.get(i) {
                     if let Ok(script) = script_var.try_cast::<godot::classes::Script>() {
                         let path = script.get_path().to_string();
-                        let name = path.split('/').last().unwrap_or(&path);
+                        let name = path.split('/').next_back().unwrap_or(&path);
                         godot_print!("  {}: {}", i + 1, name);
                     }
                 }

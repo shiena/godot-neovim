@@ -494,7 +494,12 @@ impl GodotNeovimPlugin {
             format!("file:///{}", project_root.replace('\\', "/"))
         };
 
-        crate::verbose_print!("[godot-neovim] gd: Requesting definition at {}:{}:{}", uri, line, col);
+        crate::verbose_print!(
+            "[godot-neovim] gd: Requesting definition at {}:{}:{}",
+            uri,
+            line,
+            col
+        );
 
         // Ensure connected
         if !lsp.is_connected() {
@@ -649,23 +654,22 @@ impl GodotNeovimPlugin {
         };
 
         // Try to get the script path
-        let file_name = if let Some(mut script_edit) =
-            EditorInterface::singleton().get_script_editor()
-        {
-            if let Some(current_script) = script_edit.get_current_script() {
-                let path = current_script.get_path().to_string();
-                if path.is_empty() {
-                    "[New File]".to_string()
+        let file_name =
+            if let Some(mut script_edit) = EditorInterface::singleton().get_script_editor() {
+                if let Some(current_script) = script_edit.get_current_script() {
+                    let path = current_script.get_path().to_string();
+                    if path.is_empty() {
+                        "[New File]".to_string()
+                    } else {
+                        // Extract just the filename from path
+                        path.split('/').next_back().unwrap_or(&path).to_string()
+                    }
                 } else {
-                    // Extract just the filename from path
-                    path.split('/').last().unwrap_or(&path).to_string()
+                    "[No Script]".to_string()
                 }
             } else {
-                "[No Script]".to_string()
-            }
-        } else {
-            "[Unknown]".to_string()
-        };
+                "[Unknown]".to_string()
+            };
 
         let msg = format!(
             "\"{}\" line {} of {} --{}%--",
@@ -684,7 +688,8 @@ impl GodotNeovimPlugin {
 
         label.set_text(&format!(" {} ", msg));
         // Use white color for info messages
-        label.add_theme_color_override("font_color", godot::prelude::Color::from_rgb(1.0, 1.0, 1.0));
+        label
+            .add_theme_color_override("font_color", godot::prelude::Color::from_rgb(1.0, 1.0, 1.0));
     }
 
     /// Insert at column 0 (gI command)
@@ -714,7 +719,9 @@ impl GodotNeovimPlugin {
         let Some((line, col)) = self.last_insert_position else {
             // No previous insert position - just enter insert mode
             self.send_keys("i");
-            crate::verbose_print!("[godot-neovim] gi: No previous insert position, entering insert mode");
+            crate::verbose_print!(
+                "[godot-neovim] gi: No previous insert position, entering insert mode"
+            );
             return;
         };
 
@@ -740,17 +747,6 @@ impl GodotNeovimPlugin {
             target_line + 1,
             target_col
         );
-    }
-
-    /// Save current position as last insert position (called when entering insert mode)
-    pub(super) fn save_insert_position(&mut self) {
-        let Some(ref editor) = self.current_editor else {
-            return;
-        };
-
-        let line = editor.get_caret_line();
-        let col = editor.get_caret_column();
-        self.last_insert_position = Some((line, col));
     }
 
     /// Substitute character under cursor (s command)
@@ -792,7 +788,10 @@ impl GodotNeovimPlugin {
         let line_text = editor.get_line(line_idx).to_string();
 
         // Preserve indentation
-        let indent: String = line_text.chars().take_while(|c| c.is_whitespace()).collect();
+        let indent: String = line_text
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .collect();
 
         // Save insert position (at end of indent)
         self.last_insert_position = Some((line_idx, indent.len() as i32));
@@ -836,7 +835,10 @@ impl GodotNeovimPlugin {
         }
 
         self.sync_buffer_to_neovim();
-        crate::verbose_print!("[godot-neovim] D: Deleted to end of line from col {}", col_idx);
+        crate::verbose_print!(
+            "[godot-neovim] D: Deleted to end of line from col {}",
+            col_idx
+        );
     }
 
     /// Change from cursor to end of line (C command)
@@ -862,7 +864,10 @@ impl GodotNeovimPlugin {
         self.sync_buffer_to_neovim();
         self.sync_cursor_to_neovim();
         self.send_keys("i");
-        crate::verbose_print!("[godot-neovim] C: Changed to end of line from col {}", col_idx);
+        crate::verbose_print!(
+            "[godot-neovim] C: Changed to end of line from col {}",
+            col_idx
+        );
     }
 
     /// Yank from cursor to end of line (Y command)
@@ -962,10 +967,7 @@ impl GodotNeovimPlugin {
 
         // Find start and end of URL-like text
         // Valid URL characters: alphanumeric, /:.-_~?#[]@!$&'()*+,;=%
-        let url_chars = |c: char| {
-            c.is_alphanumeric()
-                || "/:.-_~?#[]@!$&'()*+,;=%".contains(c)
-        };
+        let url_chars = |c: char| c.is_alphanumeric() || "/:.-_~?#[]@!$&'()*+,;=%".contains(c);
 
         let mut start = col_idx;
         while start > 0 && url_chars(chars[start - 1]) {
@@ -1175,7 +1177,10 @@ impl GodotNeovimPlugin {
         let line_text = editor.get_line(line_idx).to_string();
 
         // Get indent
-        let indent: String = line_text.chars().take_while(|c| c.is_whitespace()).collect();
+        let indent: String = line_text
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .collect();
         let content = line_text.trim_start();
 
         // Wrap at 80 characters (configurable later)
@@ -1183,7 +1188,10 @@ impl GodotNeovimPlugin {
         let effective_width = wrap_width - indent.len();
 
         if content.len() <= effective_width {
-            crate::verbose_print!("[godot-neovim] gqq: Line {} already short enough", line_idx + 1);
+            crate::verbose_print!(
+                "[godot-neovim] gqq: Line {} already short enough",
+                line_idx + 1
+            );
             return;
         }
 

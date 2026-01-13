@@ -7,10 +7,7 @@ use godot::prelude::*;
 
 impl GodotNeovimPlugin {
     /// Convert Godot key event to Neovim key string
-    pub(super) fn key_event_to_nvim_string(
-        &self,
-        event: &Gd<InputEventKey>,
-    ) -> Option<String> {
+    pub(super) fn key_event_to_nvim_string(&self, event: &Gd<InputEventKey>) -> Option<String> {
         let keycode = event.get_keycode();
         let ctrl = event.is_ctrl_pressed();
         let alt = event.is_alt_pressed();

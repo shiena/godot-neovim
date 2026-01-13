@@ -1,7 +1,7 @@
 use lsp_types::{
-    GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult,
-    Location, Position, TextDocumentIdentifier, TextDocumentPositionParams, Url,
-    DidOpenTextDocumentParams, TextDocumentItem,
+    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
+    InitializeResult, Location, Position, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, Url, WorkspaceFolder,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -64,7 +64,8 @@ impl GodotLspClient {
             .map_err(|e| format!("Failed to connect to LSP server at {}: {}", addr, e))?;
 
         // Set read timeout - longer for initialization
-        stream.set_read_timeout(Some(Duration::from_secs(10)))
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
             .map_err(|e| format!("Failed to set timeout: {}", e))?;
 
         *self.stream.lock().unwrap() = Some(stream);
@@ -91,16 +92,20 @@ impl GodotLspClient {
         // Small delay to let the server prepare after connection
         std::thread::sleep(Duration::from_millis(100));
 
+        let uri = Url::parse(root_uri).map_err(|e| e.to_string())?;
         let params = InitializeParams {
-            root_uri: Some(Url::parse(root_uri).map_err(|e| e.to_string())?),
+            workspace_folders: Some(vec![WorkspaceFolder {
+                uri: uri.clone(),
+                name: uri.path().split('/').next_back().unwrap_or("workspace").to_string(),
+            }]),
             capabilities: lsp_types::ClientCapabilities::default(),
             ..Default::default()
         };
 
         crate::verbose_print!("[godot-neovim] LSP: Sending initialize request...");
 
-        let _result: InitializeResult = self
-            .send_request("initialize", Some(serde_json::to_value(params).unwrap()))?;
+        let _result: InitializeResult =
+            self.send_request("initialize", Some(serde_json::to_value(params).unwrap()))?;
 
         crate::verbose_print!("[godot-neovim] LSP: Initialize response received");
 
@@ -148,11 +153,10 @@ impl GodotLspClient {
             partial_result_params: Default::default(),
         };
 
-        let result: Option<GotoDefinitionResponse> = self
-            .send_request(
-                "textDocument/definition",
-                Some(serde_json::to_value(params).unwrap()),
-            )?;
+        let result: Option<GotoDefinitionResponse> = self.send_request(
+            "textDocument/definition",
+            Some(serde_json::to_value(params).unwrap()),
+        )?;
 
         match result {
             Some(GotoDefinitionResponse::Scalar(loc)) => Ok(Some(loc)),
@@ -207,14 +211,19 @@ impl GodotLspClient {
         stream
             .write_all(message.as_bytes())
             .map_err(|e| format!("Failed to send request: {}", e))?;
-        stream.flush().map_err(|e| format!("Failed to flush: {}", e))?;
+        stream
+            .flush()
+            .map_err(|e| format!("Failed to flush: {}", e))?;
 
         crate::verbose_print!("[godot-neovim] LSP: Request sent, waiting for response...");
 
         // Read response
         let response = Self::read_response(stream)?;
 
-        crate::verbose_print!("[godot-neovim] LSP: Response received for id={:?}", response.id);
+        crate::verbose_print!(
+            "[godot-neovim] LSP: Response received for id={:?}",
+            response.id
+        );
 
         if let Some(id_resp) = response.id {
             if id_resp != id {
@@ -259,7 +268,9 @@ impl GodotLspClient {
         stream
             .write_all(message.as_bytes())
             .map_err(|e| format!("Failed to send notification: {}", e))?;
-        stream.flush().map_err(|e| format!("Failed to flush: {}", e))?;
+        stream
+            .flush()
+            .map_err(|e| format!("Failed to flush: {}", e))?;
 
         Ok(())
     }
