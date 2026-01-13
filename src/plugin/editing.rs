@@ -1094,6 +1094,81 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] ]p: Pasted with indent after");
     }
 
+    /// Format current line (gqq command) - wrap long lines
+    pub(super) fn format_current_line(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let line_text = editor.get_line(line_idx).to_string();
+
+        // Get indent
+        let indent: String = line_text.chars().take_while(|c| c.is_whitespace()).collect();
+        let content = line_text.trim_start();
+
+        // Wrap at 80 characters (configurable later)
+        let wrap_width = 80;
+        let effective_width = wrap_width - indent.len();
+
+        if content.len() <= effective_width {
+            crate::verbose_print!("[godot-neovim] gqq: Line {} already short enough", line_idx + 1);
+            return;
+        }
+
+        // Split into words and wrap
+        let words: Vec<&str> = content.split_whitespace().collect();
+        let mut lines: Vec<String> = Vec::new();
+        let mut current_line = indent.clone();
+
+        for word in words {
+            let test_line = if current_line.trim().is_empty() {
+                format!("{}{}", current_line, word)
+            } else {
+                format!("{} {}", current_line, word)
+            };
+
+            if test_line.len() > wrap_width && !current_line.trim().is_empty() {
+                lines.push(current_line);
+                current_line = format!("{}{}", indent, word);
+            } else {
+                current_line = test_line;
+            }
+        }
+
+        if !current_line.trim().is_empty() {
+            lines.push(current_line);
+        }
+
+        if lines.len() <= 1 {
+            crate::verbose_print!("[godot-neovim] gqq: No wrapping needed");
+            return;
+        }
+
+        // Replace current line with wrapped lines
+        let full_text = editor.get_text().to_string();
+        let all_lines: Vec<&str> = full_text.lines().collect();
+        let mut new_lines: Vec<String> = Vec::new();
+
+        for (i, line) in all_lines.iter().enumerate() {
+            if i as i32 == line_idx {
+                new_lines.extend(lines.clone());
+            } else {
+                new_lines.push(line.to_string());
+            }
+        }
+
+        editor.set_text(&new_lines.join("\n"));
+        editor.set_caret_line(line_idx);
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] gqq: Wrapped line {} into {} lines",
+            line_idx + 1,
+            lines.len()
+        );
+    }
+
     /// Adjust paste content's indentation to match target indent
     fn adjust_paste_indent(content: &str, target_indent: &str) -> String {
         let lines: Vec<&str> = content.lines().collect();

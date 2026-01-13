@@ -577,4 +577,181 @@ impl GodotNeovimPlugin {
 
         crate::verbose_print!("[godot-neovim] %: Matching bracket not found");
     }
+
+    /// Move down by display line (gj command)
+    pub(super) fn move_display_line_down(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let current_line = editor.get_caret_line();
+        let line_count = editor.get_line_count();
+
+        // Simply move to next line for now (CodeEdit doesn't expose wrapped line info easily)
+        let target_line = (current_line + 1).min(line_count - 1);
+        editor.set_caret_line(target_line);
+
+        self.sync_cursor_to_neovim();
+        crate::verbose_print!("[godot-neovim] gj: Moved to line {}", target_line + 1);
+    }
+
+    /// Move up by display line (gk command)
+    pub(super) fn move_display_line_up(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let current_line = editor.get_caret_line();
+
+        // Simply move to previous line for now
+        let target_line = (current_line - 1).max(0);
+        editor.set_caret_line(target_line);
+
+        self.sync_cursor_to_neovim();
+        crate::verbose_print!("[godot-neovim] gk: Moved to line {}", target_line + 1);
+    }
+
+    /// Jump to start of enclosing block ([{ command)
+    pub(super) fn jump_to_block_start(&mut self, open_char: char, close_char: char) {
+        self.add_to_jump_list();
+
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let mut line = editor.get_caret_line();
+        let mut col = editor.get_caret_column() as i32 - 1;
+        let mut depth = 0;
+
+        // Search backward for unmatched opening bracket
+        while line >= 0 {
+            let text = editor.get_line(line).to_string();
+            let chars: Vec<char> = text.chars().collect();
+
+            if col < 0 {
+                col = chars.len() as i32 - 1;
+            }
+
+            while col >= 0 {
+                let c = chars.get(col as usize).copied().unwrap_or(' ');
+                if c == close_char {
+                    depth += 1;
+                } else if c == open_char {
+                    if depth == 0 {
+                        self.move_cursor_to(line, col);
+                        crate::verbose_print!(
+                            "[godot-neovim] [{}: Jump to {}:{}",
+                            open_char,
+                            line + 1,
+                            col
+                        );
+                        return;
+                    }
+                    depth -= 1;
+                }
+                col -= 1;
+            }
+            line -= 1;
+            if line >= 0 {
+                col = editor.get_line(line).len() as i32 - 1;
+            }
+        }
+
+        crate::verbose_print!("[godot-neovim] [{}: No matching block start found", open_char);
+    }
+
+    /// Jump to end of enclosing block (]} command)
+    pub(super) fn jump_to_block_end(&mut self, open_char: char, close_char: char) {
+        self.add_to_jump_list();
+
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line_count = editor.get_line_count();
+        let mut line = editor.get_caret_line();
+        let mut col = editor.get_caret_column() as usize + 1;
+        let mut depth = 0;
+
+        // Search forward for unmatched closing bracket
+        while line < line_count {
+            let text = editor.get_line(line).to_string();
+            let chars: Vec<char> = text.chars().collect();
+
+            while col < chars.len() {
+                let c = chars[col];
+                if c == open_char {
+                    depth += 1;
+                } else if c == close_char {
+                    if depth == 0 {
+                        self.move_cursor_to(line, col as i32);
+                        crate::verbose_print!(
+                            "[godot-neovim] ]{}: Jump to {}:{}",
+                            close_char,
+                            line + 1,
+                            col
+                        );
+                        return;
+                    }
+                    depth -= 1;
+                }
+                col += 1;
+            }
+            line += 1;
+            col = 0;
+        }
+
+        crate::verbose_print!("[godot-neovim] ]{}: No matching block end found", close_char);
+    }
+
+    /// Jump to previous method/function definition ([m command)
+    pub(super) fn jump_to_prev_method(&mut self) {
+        self.add_to_jump_list();
+
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let current_line = editor.get_caret_line();
+
+        // Search backward for 'func ' at the start of a line (GDScript)
+        for line in (0..current_line).rev() {
+            let text = editor.get_line(line).to_string();
+            let trimmed = text.trim_start();
+            if trimmed.starts_with("func ") {
+                let col = text.find("func").unwrap_or(0) as i32;
+                self.move_cursor_to(line, col);
+                crate::verbose_print!("[godot-neovim] [m: Jump to method at line {}", line + 1);
+                return;
+            }
+        }
+
+        crate::verbose_print!("[godot-neovim] [m: No previous method found");
+    }
+
+    /// Jump to next method/function definition (]m command)
+    pub(super) fn jump_to_next_method(&mut self) {
+        self.add_to_jump_list();
+
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let current_line = editor.get_caret_line();
+        let line_count = editor.get_line_count();
+
+        // Search forward for 'func ' at the start of a line (GDScript)
+        for line in (current_line + 1)..line_count {
+            let text = editor.get_line(line).to_string();
+            let trimmed = text.trim_start();
+            if trimmed.starts_with("func ") {
+                let col = text.find("func").unwrap_or(0) as i32;
+                self.move_cursor_to(line, col);
+                crate::verbose_print!("[godot-neovim] ]m: Jump to method at line {}", line + 1);
+                return;
+            }
+        }
+
+        crate::verbose_print!("[godot-neovim] ]m: No next method found");
+    }
 }

@@ -158,7 +158,43 @@ impl GodotNeovimPlugin {
                 // Check for substitution command :%s/old/new/g
                 else if cmd.starts_with("%s/") || cmd.starts_with("s/") {
                     self.cmd_substitute(cmd);
-                } else {
+                }
+                // Check for global command :g/pattern/cmd
+                else if cmd.starts_with("g/") {
+                    self.cmd_global(cmd);
+                }
+                // Check for :sort command
+                else if cmd == "sort" || cmd.starts_with("sort ") {
+                    self.cmd_sort(cmd);
+                }
+                // Check for :t (copy line) command
+                else if cmd.starts_with("t") && cmd.len() > 1 {
+                    let dest = cmd[1..].trim();
+                    if let Ok(line_num) = dest.parse::<i32>() {
+                        self.cmd_copy_line(line_num);
+                    }
+                }
+                // Check for :m (move line) command
+                else if cmd.starts_with("m") && cmd.len() > 1 {
+                    let dest = cmd[1..].trim();
+                    if let Ok(line_num) = dest.parse::<i32>() {
+                        self.cmd_move_line(line_num);
+                    }
+                }
+                // Buffer navigation commands
+                else if cmd == "bn" || cmd == "bnext" {
+                    self.cmd_buffer_next();
+                }
+                else if cmd == "bp" || cmd == "bprev" || cmd == "bprevious" {
+                    self.cmd_buffer_prev();
+                }
+                else if cmd == "bd" || cmd == "bdelete" {
+                    self.cmd_close();
+                }
+                else if cmd == "ls" || cmd == "buffers" {
+                    self.cmd_list_buffers();
+                }
+                else {
                     godot_warn!("[godot-neovim] Unknown command: {}", cmd);
                 }
             }
@@ -733,5 +769,276 @@ impl GodotNeovimPlugin {
             "[godot-neovim] ae/ie: Selected entire buffer ({} lines)",
             line_count
         );
+    }
+
+    /// :g/pattern/cmd - Global command (execute cmd on lines matching pattern)
+    pub(super) fn cmd_global(&mut self, cmd: &str) {
+        // Parse: g/pattern/command
+        let cmd = cmd.strip_prefix("g/").unwrap_or(cmd);
+        let parts: Vec<&str> = cmd.splitn(2, '/').collect();
+        if parts.len() < 2 {
+            godot_warn!("[godot-neovim] :g - Invalid format. Use :g/pattern/command");
+            return;
+        }
+
+        let pattern = parts[0];
+        let command = parts[1];
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_count = editor.get_line_count();
+        let mut matched_lines: Vec<i32> = Vec::new();
+
+        // Find matching lines
+        for i in 0..line_count {
+            let line_text = editor.get_line(i).to_string();
+            if line_text.contains(pattern) {
+                matched_lines.push(i);
+            }
+        }
+
+        if matched_lines.is_empty() {
+            crate::verbose_print!("[godot-neovim] :g/{} - No matches", pattern);
+            return;
+        }
+
+        // Execute command on matching lines (process in reverse to maintain line numbers)
+        match command {
+            "d" => {
+                // Delete matching lines (process in reverse)
+                let full_text = editor.get_text().to_string();
+                let lines: Vec<&str> = full_text.lines().collect();
+                let new_lines: Vec<&str> = lines
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !matched_lines.contains(&(*i as i32)))
+                    .map(|(_, l)| *l)
+                    .collect();
+                editor.set_text(&new_lines.join("\n"));
+                crate::verbose_print!(
+                    "[godot-neovim] :g/{}/d - Deleted {} lines",
+                    pattern,
+                    matched_lines.len()
+                );
+            }
+            _ => {
+                crate::verbose_print!(
+                    "[godot-neovim] :g - Found {} matches for '{}'. Command '{}' not yet supported.",
+                    matched_lines.len(),
+                    pattern,
+                    command
+                );
+            }
+        }
+
+        self.sync_buffer_to_neovim();
+    }
+
+    /// :sort - Sort lines
+    pub(super) fn cmd_sort(&mut self, cmd: &str) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let reverse = cmd.contains('!') || cmd.contains("reverse");
+        let unique = cmd.contains('u');
+
+        let full_text = editor.get_text().to_string();
+        let mut lines: Vec<&str> = full_text.lines().collect();
+
+        // Sort
+        lines.sort();
+        if reverse {
+            lines.reverse();
+        }
+
+        // Remove duplicates if requested
+        if unique {
+            lines.dedup();
+        }
+
+        // Save cursor position
+        let line = editor.get_caret_line();
+        let col = editor.get_caret_column();
+
+        editor.set_text(&lines.join("\n"));
+
+        // Restore cursor
+        let max_line = editor.get_line_count() - 1;
+        editor.set_caret_line(line.min(max_line));
+        editor.set_caret_column(col);
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] :sort{}{} - Sorted {} lines",
+            if reverse { "!" } else { "" },
+            if unique { " u" } else { "" },
+            lines.len()
+        );
+    }
+
+    /// :t{address} - Copy current line to after {address}
+    pub(super) fn cmd_copy_line(&mut self, dest_line: i32) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let current_line = editor.get_caret_line();
+        let line_text = editor.get_line(current_line).to_string();
+        let line_count = editor.get_line_count();
+
+        // Insert the line after dest_line (1-indexed in Vim, convert to 0-indexed)
+        let insert_after = (dest_line - 1).max(0).min(line_count - 1);
+
+        let full_text = editor.get_text().to_string();
+        let lines: Vec<&str> = full_text.lines().collect();
+
+        let mut new_lines: Vec<String> = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            new_lines.push(line.to_string());
+            if i as i32 == insert_after {
+                new_lines.push(line_text.clone());
+            }
+        }
+
+        editor.set_text(&new_lines.join("\n"));
+
+        // Move cursor to the new line
+        editor.set_caret_line(insert_after + 1);
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] :t{} - Copied line {} to after line {}",
+            dest_line,
+            current_line + 1,
+            insert_after + 1
+        );
+    }
+
+    /// :m{address} - Move current line to after {address}
+    pub(super) fn cmd_move_line(&mut self, dest_line: i32) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let current_line = editor.get_caret_line();
+        let line_text = editor.get_line(current_line).to_string();
+        let line_count = editor.get_line_count();
+
+        // Calculate destination (1-indexed in Vim, convert to 0-indexed)
+        let mut insert_after = (dest_line - 1).max(-1).min(line_count - 1);
+        if insert_after >= current_line {
+            insert_after -= 1; // Account for removed line
+        }
+
+        let full_text = editor.get_text().to_string();
+        let lines: Vec<&str> = full_text.lines().collect();
+
+        let mut new_lines: Vec<String> = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            if i as i32 == current_line {
+                continue; // Skip the line being moved
+            }
+            new_lines.push(line.to_string());
+            if i as i32 == insert_after || (insert_after < 0 && i == 0) {
+                if insert_after < 0 {
+                    // Insert at beginning
+                    new_lines.insert(0, line_text.clone());
+                } else {
+                    new_lines.push(line_text.clone());
+                }
+            }
+        }
+
+        // Handle case where inserting at the end
+        if insert_after >= lines.len() as i32 - 1 {
+            new_lines.push(line_text);
+        }
+
+        editor.set_text(&new_lines.join("\n"));
+
+        // Move cursor to the new location
+        let new_line = if insert_after < 0 { 0 } else { insert_after + 1 };
+        editor.set_caret_line(new_line.max(0));
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] :m{} - Moved line {} to after line {}",
+            dest_line,
+            current_line + 1,
+            insert_after + 1
+        );
+    }
+
+    /// :bn / :bnext - Go to next buffer (script tab)
+    pub(super) fn cmd_buffer_next(&self) {
+        self.next_script_tab();
+    }
+
+    /// :bp / :bprev - Go to previous buffer (script tab)
+    pub(super) fn cmd_buffer_prev(&self) {
+        self.prev_script_tab();
+    }
+
+    /// :ls / :buffers - List open buffers
+    pub(super) fn cmd_list_buffers(&self) {
+        let editor = EditorInterface::singleton();
+        if let Some(script_editor) = editor.get_script_editor() {
+            let open_scripts = script_editor.get_open_scripts();
+
+            godot_print!("[godot-neovim] :ls - Open buffers:");
+            for i in 0..open_scripts.len() {
+                if let Some(script_var) = open_scripts.get(i) {
+                    if let Ok(script) = script_var.try_cast::<godot::classes::Script>() {
+                        let path = script.get_path().to_string();
+                        let name = path.split('/').last().unwrap_or(&path);
+                        godot_print!("  {}: {}", i + 1, name);
+                    }
+                }
+            }
+        }
+    }
+
+    /// K - Open documentation for word under cursor
+    pub(super) fn open_documentation(&self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        // Get word under cursor
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column() as usize;
+        let line_text = editor.get_line(line_idx).to_string();
+        let chars: Vec<char> = line_text.chars().collect();
+
+        if col_idx >= chars.len() {
+            return;
+        }
+
+        // Find word boundaries
+        let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
+        let mut start = col_idx;
+        while start > 0 && is_word_char(chars[start - 1]) {
+            start -= 1;
+        }
+        let mut end = col_idx;
+        while end < chars.len() && is_word_char(chars[end]) {
+            end += 1;
+        }
+
+        if start == end {
+            return;
+        }
+
+        let word: String = chars[start..end].iter().collect();
+
+        // Try to open Godot's built-in help for this word
+        let editor_interface = EditorInterface::singleton();
+        if let Some(mut script_editor) = editor_interface.get_script_editor() {
+            script_editor.goto_help(&format!("class_name:{}", word));
+            crate::verbose_print!("[godot-neovim] K: Opening help for '{}'", word);
+        }
     }
 }

@@ -1430,6 +1430,92 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        // Handle 'K' for documentation lookup
+        if keycode == Key::K && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.open_documentation();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '[{' and ']}' for block jump
+        if self.last_key == "[" {
+            match unicode_char {
+                Some('{') => {
+                    self.jump_to_block_start('{', '}');
+                    self.last_key.clear();
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
+                Some('(') => {
+                    self.jump_to_block_start('(', ')');
+                    self.last_key.clear();
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
+                Some('m') => {
+                    self.jump_to_prev_method();
+                    self.last_key.clear();
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
+                _ => {
+                    // Not a recognized [ command, clear and continue
+                    self.last_key.clear();
+                }
+            }
+        }
+
+        if self.last_key == "]" {
+            match unicode_char {
+                Some('}') => {
+                    self.jump_to_block_end('{', '}');
+                    self.last_key.clear();
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
+                Some(')') => {
+                    self.jump_to_block_end('(', ')');
+                    self.last_key.clear();
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
+                Some('m') => {
+                    self.jump_to_next_method();
+                    self.last_key.clear();
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
+                _ => {
+                    // Not a recognized ] command, clear and continue
+                    self.last_key.clear();
+                }
+            }
+        }
+
+        // Handle gqq (format current line)
+        if self.last_key == "gq" && keycode == Key::Q && !key_event.is_shift_pressed() {
+            self.format_current_line();
+            self.last_key.clear();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
         // Handle 'J' for join lines
         if keycode == Key::J && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
             self.join_lines();
@@ -1699,6 +1785,21 @@ impl GodotNeovimPlugin {
                         // gx - open URL under cursor in browser
                         self.open_url_under_cursor();
                         true
+                    }
+                    "j" => {
+                        // gj - move down by display line (wrapped line)
+                        self.move_display_line_down();
+                        true
+                    }
+                    "k" => {
+                        // gk - move up by display line (wrapped line)
+                        self.move_display_line_up();
+                        true
+                    }
+                    "q" => {
+                        // gq - start format operator (wait for motion)
+                        self.last_key = "gq".to_string();
+                        false // Let normal key handling continue
                     }
                     _ => false,
                 };
