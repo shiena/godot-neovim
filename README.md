@@ -308,6 +308,21 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 
 ### Roadmap
 
+#### Implementation Candidates
+
+Features requiring plugin-side implementation (in priority order):
+
+| Priority | Feature | Commands | Description |
+|----------|---------|----------|-------------|
+| High | Number increment | `Ctrl+A`, `Ctrl+X` | Increment/decrement number under cursor |
+| High | Jump list | `Ctrl+O`, `Ctrl+I` | Navigate cursor position history |
+| Medium | Replace mode | `R` | Overwrite mode (typing replaces characters) |
+| Medium | Go to file | `gf` | Open file path under cursor |
+| Medium | Line jump | `:{number}` | Jump to specific line (e.g., `:123`) |
+| Low | Show registers | `:registers`, `:reg` | Display register contents |
+| Low | Show marks | `:marks` | Display mark locations |
+| Low | Count operations | `3dd`, `5yy` | Delete/yank multiple lines |
+
 #### Likely Already Working (Testing Needed)
 
 These features may already work through Neovim backend:
