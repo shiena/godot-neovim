@@ -411,6 +411,55 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] gd: Go to definition (F12)");
     }
 
+    /// Show character info under cursor (ga command)
+    pub(super) fn show_char_info(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column() as usize;
+        let line_text = editor.get_line(line_idx).to_string();
+        let chars: Vec<char> = line_text.chars().collect();
+
+        if col_idx >= chars.len() {
+            self.show_status_message("NUL");
+            return;
+        }
+
+        let c = chars[col_idx];
+        let code = c as u32;
+
+        // Format: <char> decimal, Hex hex, Oct octal
+        let msg = if c.is_control() || c == ' ' {
+            // For control characters and space, show descriptive name
+            let name = match c {
+                ' ' => "Space",
+                '\t' => "Tab",
+                '\n' => "NL",
+                '\r' => "CR",
+                _ => "Ctrl",
+            };
+            format!("<{}> {}, Hex {:02x}, Oct {:03o}", name, code, code, code)
+        } else {
+            format!("<{}> {}, Hex {:02x}, Oct {:03o}", c, code, code, code)
+        };
+
+        self.show_status_message(&msg);
+        crate::verbose_print!("[godot-neovim] ga: {}", msg);
+    }
+
+    /// Show a temporary message in the status line
+    pub(super) fn show_status_message(&mut self, msg: &str) {
+        let Some(ref mut label) = self.mode_label else {
+            return;
+        };
+
+        label.set_text(&format!(" {} ", msg));
+        // Use white color for info messages
+        label.add_theme_color_override("font_color", godot::prelude::Color::from_rgb(1.0, 1.0, 1.0));
+    }
+
     /// Insert at column 0 (gI command)
     pub(super) fn insert_at_column_zero(&mut self) {
         let Some(ref mut editor) = self.current_editor else {

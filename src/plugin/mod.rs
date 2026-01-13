@@ -1487,6 +1487,11 @@ impl GodotNeovimPlugin {
                         self.insert_at_column_zero();
                         true
                     }
+                    "a" => {
+                        // ga - show character info under cursor
+                        self.show_char_info();
+                        true
+                    }
                     _ => false,
                 };
 
