@@ -1,8 +1,13 @@
-# godot-neovim
+<p align="center">
+  <img src="addons/godot-neovim/icon.png" alt="godot-neovim logo" width="128" height="128">
+</p>
 
-Godot editor plugin that uses Neovim as the backend for script editing.
+<h1 align="center">godot-neovim</h1>
 
-Inspired by [vscode-neovim](https://github.com/vscode-neovim/vscode-neovim).
+<p align="center">
+  Godot editor plugin that uses Neovim as the backend for script editing.<br>
+  Inspired by <a href="https://github.com/vscode-neovim/vscode-neovim">vscode-neovim</a> and <a href="https://github.com/igorgue/godot-vim">godot-vim</a>.
+</p>
 
 ## Overview
 
