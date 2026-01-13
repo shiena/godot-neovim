@@ -6,7 +6,7 @@
 
 <p align="center">
   Godot editor plugin that uses Neovim as the backend for script editing.<br>
-  Inspired by <a href="https://github.com/vscode-neovim/vscode-neovim">vscode-neovim</a> and <a href="https://github.com/igorgue/godot-vim">godot-vim</a>.
+  Inspired by <a href="https://github.com/vscode-neovim/vscode-neovim">vscode-neovim</a> and <a href="https://github.com/hmdfrds/godot-vim">GodotVim</a>.
 </p>
 
 ## Overview
@@ -31,52 +31,53 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 - Configurable Neovim executable path via Editor Settings
 - Path validation on startup and settings change
 
-## Comparison with godot-vim
+## Comparison with GodotVim
 
-| Category | Feature | godot-neovim | godot-vim |
+| Category | Feature | godot-neovim | GodotVim |
 |----------|---------|:------------:|:---------:|
-| **Architecture** | Backend | Neovim (RPC) | GDScript |
-| | Language | Rust (GDExtension) | GDScript |
+| **Architecture** | Backend | Neovim (RPC) | GDExtension |
+| | Language | Rust | Rust |
 | | IME Support | ✅ (hybrid mode) | ❌ |
 | **Modes** | Normal, Insert, Visual, V-Line | ✅ | ✅ |
-| | Visual Block | ✅ (`gv`) | ❌ |
-| | Replace | ✅ (`R`) | ❌ |
-| | Command-line | ✅ (`:` commands) | ❌ |
+| | Visual Block | ✅ (`gv`) | ✅ |
+| | Replace | ✅ (`R`) | ✅ |
+| | Command-line | ✅ (`:` commands) | ✅ |
 | **Navigation** | Basic (hjkl, w, b, e, gg, G) | ✅ | ✅ |
-| | Paragraph (`{`, `}`) | ✅ | ❌ |
+| | Paragraph (`{`, `}`) | ✅ | ✅ |
 | | Display lines (`gj`, `gk`) | ✅ | ❌ |
 | | Block jump (`[{`, `]}`) | ✅ | ❌ |
 | | Method jump (`[m`, `]m`) | ✅ | ❌ |
 | **Scrolling** | Ctrl+F/B/D/U | ✅ | ✅ |
-| | Ctrl+Y/E, zz/zt/zb | ✅ | ❌ |
-| **Search** | `/`, `?` | ✅ | `/` only |
+| | Ctrl+Y/E, zz/zt/zb | ✅ | ✅ |
+| **Search** | `/`, `?` | ✅ | ✅ |
 | | `gd` (go to definition) | ✅ | ❌ |
 | | `gx` (open URL) | ✅ | ❌ |
 | | `K` (documentation) | ✅ | ❌ |
 | **Editing** | Basic (x, dd, yy, p, J, etc.) | ✅ | ✅ |
 | | `gp`, `gP`, `[p`, `]p` | ✅ | ❌ |
 | | `Ctrl+A`/`Ctrl+X` (numbers) | ✅ | ❌ |
-| | `ga`, `gqq` | ✅ | ❌ |
+| | `ga`, `gqq` | ✅ | ✅ |
 | **Text Objects** | Words, quotes, brackets | ✅ | ✅ |
 | | Entire buffer (`ie`, `ae`) | ✅ | ❌ |
 | **Registers** | Named (`"{a-z}`) | ✅ | ❌ |
-| | Clipboard (`"+`, `"*`) | ✅ | ❌ |
+| | Clipboard (`"+`, `"*`) | ✅ | ✅ |
 | | Black hole (`"_`), Yank (`"0`) | ✅ | ❌ |
 | **Marks** | `m{a-z}`, `'{a-z}` | ✅ | ✅ |
-| | Exact position (`` `{a-z} ``) | ✅ | ❌ |
+| | Exact position (`` `{a-z} ``) | ✅ | ✅ |
 | **Macros** | `q{a-z}`, `@{a-z}`, `@@` | ✅ | ✅ |
-| **Folding** | `za`, `zo`, `zc`, `zM`, `zR` | ✅ | `za`, `zM`, `zR` |
-| **Ex Commands** | `:w`, `:q`, `:wq`, `:x` | ✅ | ❌ |
-| | `:e`, `:e!`, `:wa`, `:qa` | ✅ | ❌ |
-| | `:%s/old/new/g` | ✅ | ❌ |
+| **Folding** | `za`, `zo`, `zc`, `zM`, `zR` | ✅ | ❌ |
+| **Ex Commands** | `:w`, `:q`, `:wq`, `:x` | ✅ | ✅ |
+| | `:e`, `:e!`, `:wa`, `:qa` | ✅ | `:e` only |
+| | `:%s/old/new/g` | ✅ | ✅ |
 | | `:g/{pattern}/d` | ✅ | ❌ |
 | | `:sort`, `:t`, `:m` | ✅ | ❌ |
 | | `:bn`, `:bp`, `:bd`, `:ls` | ✅ | ❌ |
 | | `ZZ`, `ZQ`, `@:`, `Ctrl+G` | ✅ | ❌ |
+| **Other** | Custom key mappings | ❌ | ✅ |
 
 **Summary:**
-- **godot-neovim**: Full Neovim backend with Ex commands, registers, IME support. Requires Neovim installation.
-- **godot-vim**: Pure GDScript, easy setup, basic Vim keybindings. No external dependencies.
+- **godot-neovim**: Full Neovim backend with all Ex commands, named registers, IME support. Requires Neovim 0.9+ installation.
+- **GodotVim**: GDExtension-based emulator with custom key mapping support. No external dependencies.
 
 ## Requirements
 
@@ -458,7 +459,13 @@ These features may already work through Neovim backend:
 
 ## Related Projects
 
-- [godot-vim](https://github.com/igorgue/godot-vim) - Vim keybinding emulator for Godot (GDScript)
+### Godot Vim Plugins
+- [hmdfrds/godot-vim](https://github.com/hmdfrds/godot-vim) - GDExtension/Rust, text objects, custom key mappings
+- [bernardo-bruning/godot-vim](https://github.com/bernardo-bruning/godot-vim) - GDScript, extensive Ex commands
+- [joshnajera/godot-vim](https://github.com/joshnajera/godot-vim) - GDScript, operator-motion architecture
+- [wovri-github/godot-vim-joshnajera](https://github.com/wovri-github/godot-vim-joshnajera) - GDScript, joshnajera fork with K (docs)
+
+### Other
 - [vscode-neovim](https://github.com/vscode-neovim/vscode-neovim) - VSCode extension with Neovim backend
 
 ## License
