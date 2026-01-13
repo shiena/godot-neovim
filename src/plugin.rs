@@ -981,7 +981,13 @@ impl GodotNeovimPlugin {
                 // Get unicode character
                 let unicode = event.get_unicode();
                 if unicode > 0 {
-                    char::from_u32(unicode)?.to_string()
+                    let c = char::from_u32(unicode)?;
+                    // Apply shift modifier for letters (get_unicode may not include shift)
+                    if shift && c.is_ascii_lowercase() {
+                        c.to_ascii_uppercase().to_string()
+                    } else {
+                        c.to_string()
+                    }
                 } else {
                     return None;
                 }
@@ -2866,8 +2872,26 @@ impl GodotNeovimPlugin {
             return;
         };
 
+        // Save current cursor position before undo
+        let saved_line = editor.get_caret_line();
+        let saved_col = editor.get_caret_column();
+
         editor.undo();
-        crate::verbose_print!("[godot-neovim] u: Undo");
+
+        // Godot's undo may move cursor to old position - restore to near the current position
+        // Vim behavior: cursor moves to the line where the change was undone
+        // Since we don't know where the change was, keep cursor at saved position if valid
+        let line_count = editor.get_line_count();
+        let target_line = saved_line.min(line_count - 1);
+        let line_length = editor.get_line(target_line).len() as i32;
+        let target_col = saved_col.min(line_length.max(0));
+        editor.set_caret_line(target_line);
+        editor.set_caret_column(target_col);
+
+        crate::verbose_print!(
+            "[godot-neovim] u: Undo (cursor kept at line {})",
+            target_line + 1
+        );
 
         // Sync buffer to Neovim after undo
         self.sync_buffer_to_neovim();
@@ -2880,8 +2904,24 @@ impl GodotNeovimPlugin {
             return;
         };
 
+        // Save current cursor position before redo
+        let saved_line = editor.get_caret_line();
+        let saved_col = editor.get_caret_column();
+
         editor.redo();
-        crate::verbose_print!("[godot-neovim] Ctrl+R: Redo");
+
+        // Keep cursor at saved position if valid
+        let line_count = editor.get_line_count();
+        let target_line = saved_line.min(line_count - 1);
+        let line_length = editor.get_line(target_line).len() as i32;
+        let target_col = saved_col.min(line_length.max(0));
+        editor.set_caret_line(target_line);
+        editor.set_caret_column(target_col);
+
+        crate::verbose_print!(
+            "[godot-neovim] Ctrl+R: Redo (cursor kept at line {})",
+            target_line + 1
+        );
 
         // Sync buffer to Neovim after redo
         self.sync_buffer_to_neovim();
