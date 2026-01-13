@@ -59,6 +59,7 @@ This plugin is in early development. The following features are implemented:
 - ✅ Number increment/decrement (`Ctrl+A`, `Ctrl+X`)
 - ✅ Jump list navigation (`Ctrl+O`, `Ctrl+I`)
 - ✅ Replace mode (`R`)
+- ✅ Count operations with registers (`"{a-z}3dd`, `"{a-z}5yy`)
 
 ## Requirements
 
@@ -329,14 +330,6 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 | Neovim config | `init.lua` and plugins are not loaded |
 
 ### Roadmap
-
-#### Implementation Candidates
-
-Features requiring plugin-side implementation (in priority order):
-
-| Priority | Feature | Commands | Description |
-|----------|---------|----------|-------------|
-| Low | Count operations | `3dd`, `5yy` | Delete/yank multiple lines |
 
 #### Likely Already Working (Testing Needed)
 

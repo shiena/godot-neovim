@@ -99,6 +99,9 @@ pub struct GodotNeovimPlugin {
     /// Current position in jump list (index into jump_list, or len() if at end)
     #[init(val = 0)]
     jump_list_pos: usize,
+    /// Count prefix buffer for commands like 3dd, 5yy
+    #[init(val = String::new())]
+    count_buffer: String,
 }
 
 #[godot_api]
@@ -968,14 +971,26 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Handle register-aware yy (yank line)
         if let Some(reg) = self.selected_register {
             if reg != '\0' {
+                // Handle count prefix (digits 1-9, or 0 if count_buffer not empty)
+                if let Some(c) = unicode_char {
+                    if c.is_ascii_digit() && (c != '0' || !self.count_buffer.is_empty()) {
+                        self.count_buffer.push(c);
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    }
+                }
+
                 // Register is selected, check for yy
                 if keycode == Key::Y
                     && !key_event.is_shift_pressed()
                     && !key_event.is_ctrl_pressed()
                 {
                     if self.last_key == "y" {
-                        // yy - yank current line to register
-                        self.yank_line_to_register(reg);
+                        // yy - yank current line(s) to register
+                        let count = self.get_and_clear_count();
+                        self.yank_lines_to_register(reg, count);
                         self.selected_register = None;
                         self.last_key.clear();
                         if let Some(mut viewport) = self.base().get_viewport() {
@@ -999,6 +1014,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
                 {
                     self.paste_from_register(reg);
                     self.selected_register = None;
+                    self.count_buffer.clear();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
@@ -1010,6 +1026,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
                 {
                     self.paste_from_register_before(reg);
                     self.selected_register = None;
+                    self.count_buffer.clear();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
@@ -1022,8 +1039,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
                     && !key_event.is_ctrl_pressed()
                 {
                     if self.last_key == "d" {
-                        // dd - delete line and store in register
-                        self.delete_line_to_register(reg);
+                        // dd - delete line(s) and store in register
+                        let count = self.get_and_clear_count();
+                        self.delete_lines_to_register(reg, count);
                         self.selected_register = None;
                         self.last_key.clear();
                         if let Some(mut viewport) = self.base().get_viewport() {
@@ -1043,6 +1061,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
                 // Other keys cancel register selection
                 if keycode != Key::Y && keycode != Key::D {
                     self.selected_register = None;
+                    self.count_buffer.clear();
                 }
             }
         }
@@ -1415,6 +1434,16 @@ impl GodotNeovimPlugin {
     /// Check if currently in replace mode
     fn is_replace_mode(&self) -> bool {
         self.current_mode == "R"
+    }
+
+    /// Get and clear the count buffer, returning 1 if empty
+    fn get_and_clear_count(&mut self) -> i32 {
+        if self.count_buffer.is_empty() {
+            return 1;
+        }
+        let count = self.count_buffer.parse::<i32>().unwrap_or(1).max(1);
+        self.count_buffer.clear();
+        count
     }
 
     /// Check if mode is a visual mode (v, V, or Ctrl+V)
@@ -3801,41 +3830,68 @@ impl GodotNeovimPlugin {
 
     /// Yank current line to named register
     fn yank_line_to_register(&mut self, register: char) {
+        self.yank_lines_to_register(register, 1);
+    }
+
+    /// Yank multiple lines to named register
+    fn yank_lines_to_register(&mut self, register: char, count: i32) {
         let Some(ref editor) = self.current_editor else {
             return;
         };
 
         let line_idx = editor.get_caret_line();
-        let line_text = editor.get_line(line_idx).to_string();
+        let line_count = editor.get_line_count();
+        let end_line = (line_idx + count).min(line_count);
+
+        // Collect lines
+        let mut lines: Vec<String> = Vec::new();
+        for i in line_idx..end_line {
+            lines.push(editor.get_line(i).to_string());
+        }
 
         // Store with newline (line yank)
-        self.registers.insert(register, format!("{}\n", line_text));
+        let content = lines.join("\n") + "\n";
+        self.registers.insert(register, content);
         crate::verbose_print!(
-            "[godot-neovim] \"{}: Yanked line {} to register",
+            "[godot-neovim] \"{}: Yanked {} line(s) from line {} to register",
             register,
+            count,
             line_idx + 1
         );
     }
 
     /// Delete current line and store in named register
     fn delete_line_to_register(&mut self, register: char) {
+        self.delete_lines_to_register(register, 1);
+    }
+
+    /// Delete multiple lines and store in named register
+    fn delete_lines_to_register(&mut self, register: char, count: i32) {
         let Some(ref mut editor) = self.current_editor else {
             return;
         };
 
         let line_idx = editor.get_caret_line();
-        let line_text = editor.get_line(line_idx).to_string();
         let line_count = editor.get_line_count();
+        let end_line = (line_idx + count).min(line_count);
+        let actual_count = end_line - line_idx;
+
+        // Collect lines to delete
+        let mut deleted_lines: Vec<String> = Vec::new();
+        for i in line_idx..end_line {
+            deleted_lines.push(editor.get_line(i).to_string());
+        }
 
         // Store with newline (line delete)
-        self.registers.insert(register, format!("{}\n", line_text));
+        let content = deleted_lines.join("\n") + "\n";
+        self.registers.insert(register, content);
 
-        // Delete the line
-        if line_count > 1 {
-            // Remove the line by setting text
+        // Delete the lines
+        if actual_count < line_count {
+            // Remove lines by setting text
             let mut lines: Vec<String> = Vec::new();
             for i in 0..line_count {
-                if i != line_idx {
+                if i < line_idx || i >= end_line {
                     lines.push(editor.get_line(i).to_string());
                 }
             }
@@ -3854,15 +3910,17 @@ impl GodotNeovimPlugin {
                 .unwrap_or(0);
             editor.set_caret_column(first_non_blank as i32);
         } else {
-            // Last line - just clear it
-            editor.set_line(0, "");
+            // All lines deleted - just clear
+            editor.set_text("");
+            editor.set_caret_line(0);
             editor.set_caret_column(0);
         }
 
         self.sync_buffer_to_neovim();
         crate::verbose_print!(
-            "[godot-neovim] \"{}: Deleted line {} to register",
+            "[godot-neovim] \"{}: Deleted {} line(s) from line {} to register",
             register,
+            actual_count,
             line_idx + 1
         );
     }
