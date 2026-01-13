@@ -1559,8 +1559,8 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle 'q' for macro recording (start/stop)
-        if keycode == Key::Q && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+        // Handle 'q' for macro recording (start/stop) - but not after 'g' (that's gq for format)
+        if keycode == Key::Q && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() && self.last_key != "g" {
             if self.recording_macro.is_some() {
                 // Stop recording
                 self.stop_macro_recording();
