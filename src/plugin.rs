@@ -2402,9 +2402,11 @@ impl GodotNeovimPlugin {
                 else if cmd == "registers" || cmd == "reg" {
                     self.cmd_show_registers();
                 }
-                // Check for :e[dit] {file} command
-                else if cmd.starts_with("e ") || cmd.starts_with("edit ") {
-                    let file_path = if cmd.starts_with("edit ") {
+                // Check for :e[dit] {file} command (or just :e to open quick open)
+                else if cmd == "e" || cmd == "edit" || cmd.starts_with("e ") || cmd.starts_with("edit ") {
+                    let file_path = if cmd == "e" || cmd == "edit" {
+                        ""
+                    } else if cmd.starts_with("edit ") {
                         cmd.strip_prefix("edit ").unwrap_or("").trim()
                     } else {
                         cmd.strip_prefix("e ").unwrap_or("").trim()
