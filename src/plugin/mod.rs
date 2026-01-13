@@ -1566,6 +1566,11 @@ impl GodotNeovimPlugin {
                         self.repeat_substitute();
                         true
                     }
+                    "J" => {
+                        // gJ - join lines without space
+                        self.join_lines_no_space();
+                        true
+                    }
                     _ => false,
                 };
 

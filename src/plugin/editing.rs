@@ -400,6 +400,59 @@ impl GodotNeovimPlugin {
         );
     }
 
+    /// Join lines without space (gJ command)
+    pub(super) fn join_lines_no_space(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let line_count = editor.get_line_count();
+
+        if line_idx >= line_count - 1 {
+            crate::verbose_print!("[godot-neovim] gJ: Already on last line");
+            return;
+        }
+
+        let current_line = editor.get_line(line_idx).to_string();
+        let next_line = editor.get_line(line_idx + 1).to_string();
+
+        // Join without space (only trim leading whitespace from next line)
+        let next_trimmed = next_line.trim_start();
+        let new_line = format!("{}{}", current_line, next_trimmed);
+
+        // Position cursor at the join point
+        let join_col = current_line.chars().count();
+
+        // Update text
+        editor.set_line(line_idx, &new_line);
+
+        // Remove the next line
+        let full_text = editor.get_text().to_string();
+        let lines: Vec<&str> = full_text.lines().collect();
+        let mut new_lines: Vec<&str> = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            if i as i32 == line_idx {
+                new_lines.push(&new_line);
+            } else if i as i32 != line_idx + 1 {
+                new_lines.push(line);
+            }
+        }
+        let new_text = new_lines.join("\n");
+        editor.set_text(&new_text);
+
+        // Restore cursor position
+        editor.set_caret_line(line_idx);
+        editor.set_caret_column(join_col as i32);
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] gJ: Joined lines {} and {} without space",
+            line_idx + 1,
+            line_idx + 2
+        );
+    }
+
     /// Go to definition (gd command) - uses Godot's built-in
     pub(super) fn go_to_definition(&self) {
         // Simulate F12 or Ctrl+Click to go to definition
