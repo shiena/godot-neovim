@@ -371,7 +371,7 @@ Features requiring plugin-side implementation (in priority order):
 | High | Global command | `:g/{pattern}/{cmd}` | ⭐⭐ Medium | Execute command on matching lines |
 | High | Confirm substitute | `:%s/old/new/gc` | ⭐⭐⭐ Hard | Confirm each replacement (requires UI) |
 | Medium | Open URL/path | `gx` | ⭐ Easy | Open URL under cursor in browser |
-| Medium | Auto-indent | `=`, `==`, `=G` | ⭐ Easy | Auto-indent lines |
+| Medium | Auto-indent | `=`, `==`, `=G` | ⭐⭐⭐ Hard | Requires GDScript syntax parsing (keyword analysis for `func`, `if`, `for`, etc.) |
 | Medium | Backward search | `?{pattern}` | ⭐ Easy | Search backward in file |
 | Medium | Indent-aware paste | `[p`, `]p` | ⭐ Easy | Paste with indent adjustment |
 | Medium | Entire buffer object | `ae`, `ie` | ⭐ Easy | Select entire buffer |

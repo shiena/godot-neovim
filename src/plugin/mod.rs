@@ -1356,34 +1356,6 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle '==' for auto-indent current line, '=G' for indent to end of file
-        if unicode_char == Some('=') {
-            if self.last_key == "=" {
-                self.auto_indent_line();
-                self.last_key.clear();
-            } else {
-                self.last_key = "=".to_string();
-            }
-            if let Some(mut viewport) = self.base().get_viewport() {
-                viewport.set_input_as_handled();
-            }
-            return;
-        }
-
-        // Handle '=G' (auto-indent to end of file)
-        if self.last_key == "="
-            && keycode == Key::G
-            && key_event.is_shift_pressed()
-            && !key_event.is_ctrl_pressed()
-        {
-            self.auto_indent_to_end();
-            self.last_key.clear();
-            if let Some(mut viewport) = self.base().get_viewport() {
-                viewport.set_input_as_handled();
-            }
-            return;
-        }
-
         // Handle '[p' for paste before with indent adjustment
         if unicode_char == Some('[') {
             self.last_key = "[".to_string();
