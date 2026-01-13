@@ -19,6 +19,7 @@ use godot::classes::{
 };
 use godot::global::Key;
 use godot::prelude::*;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -120,6 +121,13 @@ pub struct GodotNeovimPlugin {
     /// Last insert position: (line, col) for gi command
     #[init(val = None)]
     last_insert_position: Option<(i32, i32)>,
+    /// Flag indicating script changed signal was received (for deferred processing)
+    /// Uses Cell for interior mutability to avoid borrow conflicts with signal callbacks
+    #[init(val = Cell::new(false))]
+    script_changed_pending: Cell<bool>,
+    /// Pending documentation lookup word (for deferred goto_help to avoid borrow conflicts)
+    #[init(val = None)]
+    pending_help_word: Option<String>,
 }
 
 #[godot_api]
@@ -194,6 +202,42 @@ impl IEditorPlugin for GodotNeovimPlugin {
     }
 
     fn process(&mut self, _delta: f64) {
+        // Handle deferred script change (set by on_script_changed to avoid borrow conflicts)
+        if self.script_changed_pending.get() {
+            self.script_changed_pending.set(false);
+            self.handle_script_changed();
+        }
+
+        // Handle deferred documentation lookup (K command)
+        // goto_help() triggers editor_script_changed signal synchronously, which would
+        // cause a borrow conflict. We temporarily disconnect from the signal, call
+        // goto_help(), then reconnect and manually trigger the handler.
+        if let Some(word) = self.pending_help_word.take() {
+            let editor_interface = EditorInterface::singleton();
+            if let Some(mut script_editor) = editor_interface.get_script_editor() {
+                // Temporarily disconnect from signal to avoid borrow conflict
+                let callable = self.base().callable("on_script_changed");
+                script_editor.disconnect("editor_script_changed", &callable);
+
+                // Now safe to call goto_help()
+                // Only class names (uppercase start) are supported - method lookup requires
+                // knowing the parent class, which we don't have context for
+                if word.chars().next().is_some_and(|c| c.is_uppercase()) {
+                    let help_query = format!("class_name:{}", word);
+                    script_editor.goto_help(&help_query);
+                    crate::verbose_print!("[godot-neovim] K: Opening help for class '{}' (deferred)", word);
+                } else {
+                    crate::verbose_print!("[godot-neovim] K: Skipping help for '{}' (not a class name)", word);
+                }
+
+                // Reconnect to signal
+                script_editor.connect("editor_script_changed", &callable);
+
+                // Manually handle the script change since we missed the signal
+                self.handle_script_changed();
+            }
+        }
+
         // Check for pending updates from Neovim redraw events
         self.process_neovim_updates();
     }
@@ -354,8 +398,14 @@ impl GodotNeovimPlugin {
     }
 
     #[func]
-    fn on_script_changed(&mut self, _script: Gd<godot::classes::Script>) {
-        crate::verbose_print!("[godot-neovim] Script changed");
+    fn on_script_changed(&self, _script: Gd<godot::classes::Script>) {
+        // Only set flag - actual handling deferred to process() to avoid borrow conflicts
+        // when signals are emitted during input processing (e.g., K command opening docs)
+        self.script_changed_pending.set(true);
+    }
+
+    fn handle_script_changed(&mut self) {
+        crate::verbose_print!("[godot-neovim] Script changed (deferred processing)");
         self.find_current_code_edit();
         self.reposition_mode_label();
         self.sync_buffer_to_neovim();

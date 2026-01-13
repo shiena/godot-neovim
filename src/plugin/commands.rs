@@ -1002,7 +1002,9 @@ impl GodotNeovimPlugin {
     }
 
     /// K - Open documentation for word under cursor
-    pub(super) fn open_documentation(&self) {
+    /// Note: Actual goto_help() call is deferred to process() to avoid borrow conflicts
+    /// (goto_help triggers editor_script_changed signal synchronously)
+    pub(super) fn open_documentation(&mut self) {
         let Some(ref editor) = self.current_editor else {
             return;
         };
@@ -1033,12 +1035,9 @@ impl GodotNeovimPlugin {
         }
 
         let word: String = chars[start..end].iter().collect();
+        crate::verbose_print!("[godot-neovim] K: Queueing help lookup for '{}'", word);
 
-        // Try to open Godot's built-in help for this word
-        let editor_interface = EditorInterface::singleton();
-        if let Some(mut script_editor) = editor_interface.get_script_editor() {
-            script_editor.goto_help(&format!("class_name:{}", word));
-            crate::verbose_print!("[godot-neovim] K: Opening help for '{}'", word);
-        }
+        // Queue the word for deferred lookup in process()
+        self.pending_help_word = Some(word);
     }
 }

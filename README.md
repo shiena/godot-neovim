@@ -232,7 +232,7 @@ Once the plugin is enabled:
 | `gd` | Go to definition |
 | `gf` | Go to file under cursor |
 | `gx` | Open URL/path under cursor in browser |
-| `K` | Open Godot documentation for word under cursor |
+| `K` | Open Godot documentation for class name under cursor |
 
 #### Editing
 
