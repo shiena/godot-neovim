@@ -1,8 +1,7 @@
 //! Editing operations: undo, redo, delete, replace, indent, join
 
 use super::GodotNeovimPlugin;
-use godot::classes::{EditorInterface, Input, Os};
-use godot::global::Key;
+use godot::classes::{EditorInterface, Os};
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
@@ -450,15 +449,150 @@ impl GodotNeovimPlugin {
         );
     }
 
-    /// Go to definition (gd command) - uses Godot's built-in
-    pub(super) fn go_to_definition(&self) {
-        // Simulate F12 or Ctrl+Click to go to definition
-        let mut key_event = godot::classes::InputEventKey::new_gd();
-        key_event.set_keycode(Key::F12);
-        key_event.set_pressed(true);
+    /// Go to definition using LSP (gd command)
+    pub(super) fn go_to_definition_lsp(&mut self) {
+        use godot::classes::ProjectSettings;
 
-        Input::singleton().parse_input_event(&key_event);
-        crate::verbose_print!("[godot-neovim] gd: Go to definition (F12)");
+        let Some(ref lsp) = self.godot_lsp else {
+            self.show_status_message("gd: Enable 'Use Thread' in Editor Settings");
+            return;
+        };
+
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        // Get current position and buffer content
+        let line = editor.get_caret_line() as u32;
+        let col = editor.get_caret_column() as u32;
+        let text = editor.get_text().to_string();
+
+        // Get absolute file path and convert to URI
+        let abs_path = if self.current_script_path.starts_with("res://") {
+            ProjectSettings::singleton()
+                .globalize_path(&self.current_script_path)
+                .to_string()
+        } else {
+            self.current_script_path.clone()
+        };
+
+        // Convert to file:// URI (handle Windows paths)
+        let uri = if abs_path.starts_with('/') {
+            format!("file://{}", abs_path)
+        } else {
+            // Windows path: C:/... -> file:///C:/...
+            format!("file:///{}", abs_path.replace('\\', "/"))
+        };
+
+        // Get project root for LSP initialization
+        let project_root = ProjectSettings::singleton()
+            .globalize_path("res://")
+            .to_string();
+        let root_uri = if project_root.starts_with('/') {
+            format!("file://{}", project_root)
+        } else {
+            format!("file:///{}", project_root.replace('\\', "/"))
+        };
+
+        crate::verbose_print!("[godot-neovim] gd: Requesting definition at {}:{}:{}", uri, line, col);
+
+        // Ensure connected
+        if !lsp.is_connected() {
+            if let Err(e) = lsp.connect(6005) {
+                self.show_status_message(&format!("LSP connect failed: {}", e));
+                return;
+            }
+            crate::verbose_print!("[godot-neovim] gd: Connected to LSP");
+        }
+
+        // Ensure initialized
+        if !lsp.is_initialized() {
+            if let Err(e) = lsp.initialize(&root_uri) {
+                self.show_status_message(&format!("LSP init failed: {}", e));
+                return;
+            }
+            crate::verbose_print!("[godot-neovim] gd: LSP initialized");
+        }
+
+        // Send didOpen to ensure LSP knows about the file
+        if let Err(e) = lsp.did_open(&uri, &text) {
+            crate::verbose_print!("[godot-neovim] gd: didOpen warning: {}", e);
+            // Continue anyway - file might already be open
+        }
+
+        // Request definition
+        let result = lsp.goto_definition(&uri, line, col);
+
+        match result {
+            Ok(Some(location)) => {
+                // Convert URI back to file path (handles URL decoding and Windows paths)
+                let path = match location.uri.to_file_path() {
+                    Ok(p) => p.to_string_lossy().to_string(),
+                    Err(_) => {
+                        crate::verbose_print!("[godot-neovim] gd: Failed to convert URI to path");
+                        self.show_status_message("Failed to parse definition path");
+                        return;
+                    }
+                };
+
+                // Normalize path separators for comparison (Windows uses backslash, Godot uses forward slash)
+                let path_normalized = path.replace('\\', "/");
+
+                let target_line = location.range.start.line as i64 + 1; // 1-indexed
+                let target_col = location.range.start.character as i64;
+
+                crate::verbose_print!(
+                    "[godot-neovim] gd: LSP returned {}:{}:{}",
+                    path_normalized,
+                    target_line,
+                    target_col
+                );
+
+                // Check if same file or different file
+                if path_normalized == self.current_script_path || path_normalized == abs_path {
+                    // Same file - just move cursor
+                    if let Some(ref mut editor) = self.current_editor {
+                        let target_line_i32 = (target_line - 1).max(0) as i32;
+                        let target_col_i32 = target_col.max(0) as i32;
+                        editor.set_caret_line(target_line_i32);
+                        editor.set_caret_column(target_col_i32);
+                        self.sync_cursor_to_neovim();
+                        crate::verbose_print!(
+                            "[godot-neovim] gd: Jumped to line {}, col {}",
+                            target_line,
+                            target_col
+                        );
+                    }
+                } else {
+                    // Different file - open it and jump to position
+                    let res_path = ProjectSettings::singleton()
+                        .localize_path(&path_normalized)
+                        .to_string();
+                    let res_path = if res_path.starts_with("res://") {
+                        res_path
+                    } else {
+                        path_normalized.clone()
+                    };
+
+                    crate::verbose_print!(
+                        "[godot-neovim] gd: Opening different file: {}",
+                        res_path
+                    );
+
+                    // Queue file open with position
+                    self.pending_file_path = Some(res_path);
+                    // TODO: Also store line/col for after file opens
+                }
+            }
+            Ok(None) => {
+                crate::verbose_print!("[godot-neovim] gd: No definition found");
+                self.show_status_message("Definition not found");
+            }
+            Err(e) => {
+                crate::verbose_print!("[godot-neovim] gd: LSP error: {}", e);
+                self.show_status_message(&format!("LSP error: {}", e));
+            }
+        }
     }
 
     /// Show character info under cursor (ga command)

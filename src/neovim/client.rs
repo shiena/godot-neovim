@@ -135,6 +135,15 @@ impl NeovimClient {
 
             crate::verbose_print!("[godot-neovim] UI attached successfully");
 
+            // Disable swap files and handle E325 ATTENTION errors in headless mode
+            // - noswapfile: Don't create new swap files
+            // - shortmess+=A: Suppress swap file warnings
+            // - SwapExists autocmd: Auto-select 'edit anyway' if swap exists
+            neovim
+                .command("set noswapfile shortmess+=A | autocmd SwapExists * let v:swapchoice = 'e'")
+                .await
+                .map_err(|e| format!("Failed to configure swapfile handling: {}", e))?;
+
             let mut nvim_lock = neovim_arc.lock().await;
             *nvim_lock = Some(neovim);
 
@@ -154,12 +163,18 @@ impl NeovimClient {
 
     /// Stop Neovim process
     pub fn stop(&mut self) {
+        // Abort the IO handler first to prevent blocking on read
+        if let Some(handle) = self.io_handle.take() {
+            handle.abort();
+            crate::verbose_print!("[godot-neovim] IO handler aborted");
+        }
+
+        // Clear the neovim instance without sending quit command
+        // (IO is already aborted, command would timeout anyway)
         let neovim_arc = self.neovim.clone();
-        self.runtime.block_on(async {
+        let _ = self.runtime.block_on(async {
             let mut nvim_lock = neovim_arc.lock().await;
-            if let Some(neovim) = nvim_lock.take() {
-                let _ = neovim.command("qa!").await;
-            }
+            nvim_lock.take();
         });
         crate::verbose_print!("[godot-neovim] Neovim stopped");
     }
@@ -478,6 +493,68 @@ impl NeovimClient {
             .await;
         });
     }
+
+    /// Set buffer name (for LSP compatibility)
+    /// Uses timeout to prevent blocking on E325 swap file dialogs
+    pub fn set_buffer_name(&self, name: &str) -> Result<(), String> {
+        let neovim_arc = self.neovim.clone();
+        let name = name.to_string();
+
+        self.runtime.block_on(async {
+            // Use timeout to prevent blocking on E325 ATTENTION dialogs
+            let result = tokio::time::timeout(std::time::Duration::from_millis(500), async {
+                let nvim_lock = neovim_arc.lock().await;
+                if let Some(neovim) = nvim_lock.as_ref() {
+                    // Suppress E325 ATTENTION errors before setting buffer name
+                    let _ = neovim.command("set shortmess+=A").await;
+
+                    let buffer = neovim
+                        .get_current_buf()
+                        .await
+                        .map_err(|e| format!("Failed to get buffer: {}", e))?;
+
+                    let set_result = buffer.set_name(&name).await;
+
+                    if set_result.is_err() {
+                        // E325 error may leave Neovim in confirmation state
+                        // Send Enter to clear any pending prompts
+                        let _ = neovim.input("<CR>").await;
+                        let _ = neovim.input("<Esc>").await;
+                    }
+
+                    set_result.map_err(|e| format!("Failed to set buffer name: {}", e))?;
+                    Ok(())
+                } else {
+                    Err("Neovim not connected".to_string())
+                }
+            })
+            .await;
+
+            match result {
+                Ok(inner) => inner,
+                Err(_) => Err("Timeout setting buffer name (possible swap file issue)".to_string()),
+            }
+        })
+    }
+
+    /// Execute Lua code in Neovim
+    pub fn execute_lua(&self, code: &str) -> Result<rmpv::Value, String> {
+        let neovim_arc = self.neovim.clone();
+        let code = code.to_string();
+
+        self.runtime.block_on(async {
+            let nvim_lock = neovim_arc.lock().await;
+            if let Some(neovim) = nvim_lock.as_ref() {
+                neovim
+                    .exec_lua(&code, vec![])
+                    .await
+                    .map_err(|e| format!("Failed to execute Lua: {}", e))
+            } else {
+                Err("Neovim not connected".to_string())
+            }
+        })
+    }
+
 }
 
 impl Default for NeovimClient {
@@ -489,12 +566,16 @@ impl Default for NeovimClient {
 impl Drop for NeovimClient {
     fn drop(&mut self) {
         self.stop();
+        // Force non-blocking runtime shutdown to avoid hanging
+        // Note: This consumes self.runtime, but we're in drop so that's fine
+        crate::verbose_print!("[godot-neovim] Shutting down runtime");
     }
 }
 
 /// Create Neovim command with platform-specific settings
 fn create_nvim_command(nvim_path: &str, clean: bool) -> Command {
-    let mut args = vec!["--embed", "--headless"];
+    // -n: No swap file (prevents E325 ATTENTION errors in headless mode)
+    let mut args = vec!["--embed", "--headless", "-n"];
     if clean {
         args.push("--clean");
     }

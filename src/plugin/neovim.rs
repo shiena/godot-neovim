@@ -41,7 +41,42 @@ impl GodotNeovimPlugin {
             client.set_buffer_not_modified();
             crate::verbose_print!("[godot-neovim] Buffer synced to Neovim successfully");
         }
+
+        // Set buffer name for LSP compatibility (if path changed)
+        if !self.current_script_path.is_empty() {
+            // Convert res:// path to absolute path for LSP
+            use godot::classes::ProjectSettings;
+            let abs_path = if self.current_script_path.starts_with("res://") {
+                ProjectSettings::singleton()
+                    .globalize_path(&self.current_script_path)
+                    .to_string()
+            } else {
+                self.current_script_path.clone()
+            };
+
+            // Try to set buffer name, but don't block on errors (E325 swap file issues)
+            match client.set_buffer_name(&abs_path) {
+                Ok(()) => {
+                    crate::verbose_print!(
+                        "[godot-neovim] Buffer name set to: {}",
+                        abs_path
+                    );
+                    // Set filetype for syntax highlighting
+                    let _ = client.command("set filetype=gdscript");
+                }
+                Err(e) => {
+                    // Log warning but continue - editing will still work
+                    crate::verbose_print!(
+                        "[godot-neovim] Buffer name not set: {}",
+                        e
+                    );
+                    // Still set filetype for syntax highlighting
+                    let _ = client.command("set filetype=gdscript");
+                }
+            }
+        }
     }
+
 
     /// Sync cursor position from Godot editor to Neovim
     pub(super) fn sync_cursor_to_neovim(&mut self) {
@@ -352,6 +387,44 @@ impl GodotNeovimPlugin {
 
         editor.set_caret_line(target_line);
         editor.set_caret_column(target_col);
+    }
+
+    /// Immediately get cursor position from Neovim and sync to Godot
+    /// Used for commands like gd where we need to reflect Neovim's cursor movement
+    pub(super) fn sync_cursor_from_neovim_immediate(&mut self) {
+        let Some(ref neovim) = self.neovim else {
+            return;
+        };
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let client = neovim.lock().unwrap();
+        let Ok((line, col)) = client.get_cursor() else {
+            crate::verbose_print!("[godot-neovim] Failed to get cursor from Neovim");
+            return;
+        };
+        drop(client);
+
+        // Neovim uses 1-indexed lines, 0-indexed columns
+        let target_line = (line - 1).max(0) as i32;
+        let target_col = col.max(0) as i32;
+
+        let line_count = editor.get_line_count();
+        let safe_line = target_line.min(line_count - 1).max(0);
+
+        editor.set_caret_line(safe_line);
+        editor.set_caret_column(target_col);
+
+        // Update cached cursor position
+        self.current_cursor = (line - 1, col);
+
+        crate::verbose_print!(
+            "[godot-neovim] Synced cursor from Neovim: line {}, col {}",
+            safe_line + 1,
+            target_col
+        );
     }
 
     /// Sync buffer from Neovim to Godot editor

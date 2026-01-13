@@ -158,6 +158,16 @@ You can choose how insert mode input is handled:
 
 **Strict mode** provides a more authentic Neovim experience where all keystrokes are processed by Neovim, but IME input is not supported.
 
+### Go to Definition (gd)
+
+The `gd` command uses Godot's built-in LSP server for accurate navigation. To enable this feature:
+
+1. Open `Editor > Editor Settings`
+2. Navigate to `Network > Language Server`
+3. Enable **Use Thread** option
+
+When this setting is disabled, `gd` will show a message prompting you to enable it.
+
 ## Usage
 
 Once the plugin is enabled:
@@ -229,7 +239,7 @@ Once the plugin is enabled:
 | `T{char}` | Move to after character backward |
 | `;` | Repeat last f/F/t/T (same direction) |
 | `,` | Repeat last f/F/t/T (opposite direction) |
-| `gd` | Go to definition |
+| `gd` | Go to definition (requires LSP, see below) |
 | `gf` | Go to file under cursor |
 | `gx` | Open URL/path under cursor in browser |
 | `K` | Open Godot documentation for class name under cursor |
@@ -448,6 +458,11 @@ These features may already work through Neovim backend:
 │ ┌─────────────────┐ │  Mode Changes         │             │
 │ │  Mode Label     │◄├──────────────────────►│   Mode      │
 │ └─────────────────┘ │                       │             │
+│                     │                       └─────────────┘
+│ ┌─────────────────┐ │  TCP (JSON-RPC)       ┌─────────────┐
+│ │  LSP Client     │◄├──────────────────────►│ Godot LSP   │
+│ │  (gd command)   │ │                       │ (port 6005) │
+│ └─────────────────┘ │                       │             │
 └─────────────────────┘                       └─────────────┘
 ```
 
@@ -456,6 +471,7 @@ These features may already work through Neovim backend:
 - [godot-rust/gdext](https://github.com/godot-rust/gdext) - Rust bindings for Godot 4
 - [nvim-rs](https://github.com/KillTheMule/nvim-rs) - Neovim msgpack-RPC client for Rust
 - [tokio](https://tokio.rs/) - Async runtime for Rust
+- [lsp-types](https://github.com/gluon-lang/lsp-types) - LSP protocol types for Godot LSP integration
 
 ## Related Projects
 

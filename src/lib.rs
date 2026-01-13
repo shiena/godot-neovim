@@ -1,3 +1,4 @@
+mod lsp;
 mod neovim;
 mod plugin;
 mod settings;

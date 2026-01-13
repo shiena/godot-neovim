@@ -11,8 +11,10 @@ mod registers;
 mod search;
 mod visual;
 
+use crate::lsp::GodotLspClient;
 use crate::neovim::NeovimClient;
 use crate::settings;
+use std::sync::Arc;
 use godot::classes::text_edit::CaretType;
 use godot::classes::{
     CodeEdit, Control, EditorInterface, EditorPlugin, IEditorPlugin, Label,
@@ -137,6 +139,15 @@ pub struct GodotNeovimPlugin {
     /// Retry count for finding the correct CodeEdit after script change
     #[init(val = 0)]
     script_change_retry_count: u32,
+    /// Current script path (for LSP and buffer name)
+    #[init(val = String::new())]
+    current_script_path: String,
+    /// Whether LSP is connected
+    #[init(val = false)]
+    lsp_connected: bool,
+    /// Direct LSP client for Godot LSP server
+    #[init(val = None)]
+    godot_lsp: Option<Arc<GodotLspClient>>,
 }
 
 #[godot_api]
@@ -160,7 +171,29 @@ impl IEditorPlugin for GodotNeovimPlugin {
                     godot_error!("[godot-neovim] Failed to start Neovim: {}", e);
                     return;
                 }
+
                 self.neovim = Some(Mutex::new(client));
+
+                // Create LSP client only if use_thread is enabled in editor settings
+                // (LSP server won't respond without threading enabled)
+                let use_thread = EditorInterface::singleton()
+                    .get_editor_settings()
+                    .map(|settings| {
+                        settings
+                            .get_setting("network/language_server/use_thread")
+                            .try_to::<bool>()
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+
+                if use_thread {
+                    let lsp_client = Arc::new(GodotLspClient::new());
+                    self.godot_lsp = Some(lsp_client);
+                    self.lsp_connected = true;
+                    crate::verbose_print!("[godot-neovim] LSP client initialized (use_thread=true)");
+                } else {
+                    crate::verbose_print!("[godot-neovim] LSP disabled (use_thread=false)");
+                }
             }
             Err(e) => {
                 godot_error!("[godot-neovim] Failed to create Neovim client: {}", e);
@@ -206,8 +239,16 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Clear current editor reference
         self.current_editor = None;
 
-        // Neovim client will be stopped when dropped
+        // Disconnect and clear LSP client
+        if let Some(ref lsp) = self.godot_lsp {
+            lsp.disconnect();
+        }
+        self.godot_lsp = None;
+
+        // Neovim client will be stopped when dropped (with timeout)
         self.neovim = None;
+
+        crate::verbose_print!("[godot-neovim] Plugin exit complete");
     }
 
     fn process(&mut self, _delta: f64) {
@@ -556,6 +597,9 @@ impl GodotNeovimPlugin {
         // Clear the expected path
         self.expected_script_path = None;
 
+        // Update current script path for LSP
+        self.current_script_path = current_script_path.clone();
+
         self.reposition_mode_label();
         self.sync_buffer_to_neovim();
         self.update_cursor_from_editor();
@@ -589,6 +633,11 @@ impl GodotNeovimPlugin {
 
         // Check if label needs to be moved to status bar
         if let Some(code_edit) = &self.current_editor {
+            // Verify the CodeEdit is still valid (may have been freed when script closed)
+            if !code_edit.is_instance_valid() {
+                self.current_editor = None;
+                return;
+            }
             if let Some(mut status_bar) = self.find_status_bar(code_edit.clone().upcast()) {
                 // Check if already in this status bar
                 if let Some(mut parent) = label.get_parent() {
@@ -608,6 +657,9 @@ impl GodotNeovimPlugin {
     }
 
     fn find_current_code_edit(&mut self) {
+        // Clear the reference first to avoid use-after-free when script is closed
+        self.current_editor = None;
+
         let editor = EditorInterface::singleton();
         if let Some(script_editor) = editor.get_script_editor() {
             // Try to find the currently focused CodeEdit first
@@ -1886,11 +1938,23 @@ impl GodotNeovimPlugin {
         if let Some(keys) = self.key_event_to_nvim_string(key_event) {
             // Intercept g-prefix commands that conflict with Neovim's built-in commands
             // (e.g., gx opens URL via netrw, gf opens file via netrw - both can freeze)
+            // gd uses Godot LSP for proper "go to definition"
             if self.last_key == "g" {
                 match keys.as_str() {
                     "x" => {
-                        // Cancel Neovim's pending 'g' operator before handling locally
+                        // Save cursor position before canceling pending operator
+                        let saved_cursor = self.current_editor.as_ref().map(|e| {
+                            (e.get_caret_line(), e.get_caret_column())
+                        });
+                        // Cancel Neovim's pending 'g' operator
                         self.send_keys("<Esc>");
+                        // Restore cursor position
+                        if let (Some((line, col)), Some(ref mut editor)) =
+                            (saved_cursor, self.current_editor.as_mut())
+                        {
+                            editor.set_caret_line(line);
+                            editor.set_caret_column(col);
+                        }
                         self.open_url_under_cursor();
                         self.last_key.clear();
                         if let Some(mut viewport) = self.base().get_viewport() {
@@ -1902,6 +1966,35 @@ impl GodotNeovimPlugin {
                         // Cancel Neovim's pending 'g' operator before handling locally
                         self.send_keys("<Esc>");
                         self.go_to_file_under_cursor();
+                        self.last_key.clear();
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    }
+                    "d" => {
+                        // Save cursor position before Esc (which may move cursor)
+                        let saved_cursor = if let Some(ref editor) = self.current_editor {
+                            Some((editor.get_caret_line(), editor.get_caret_column()))
+                        } else {
+                            None
+                        };
+
+                        // Cancel Neovim's pending 'g' operator (use input directly to avoid cursor sync)
+                        if let Some(ref neovim) = self.neovim {
+                            if let Ok(client) = neovim.try_lock() {
+                                let _ = client.input("<Esc>");
+                            }
+                        }
+
+                        // Restore cursor position
+                        if let (Some((line, col)), Some(ref mut editor)) = (saved_cursor, self.current_editor.as_mut()) {
+                            editor.set_caret_line(line);
+                            editor.set_caret_column(col);
+                        }
+
+                        self.add_to_jump_list();
+                        self.go_to_definition_lsp();
                         self.last_key.clear();
                         if let Some(mut viewport) = self.base().get_viewport() {
                             viewport.set_input_as_handled();
@@ -1927,14 +2020,9 @@ impl GodotNeovimPlugin {
             };
 
             // Handle g-prefixed commands
+            // Note: gd, gf, gx are intercepted before sending to Neovim (above)
             if completed && self.last_key == "g" {
                 let handled = match keys.as_str() {
-                    "d" => {
-                        // gd - go to definition (use Godot's built-in)
-                        self.add_to_jump_list();
-                        self.go_to_definition();
-                        true
-                    }
                     "v" => {
                         // gv - enter visual block mode (alternative to Ctrl+V)
                         self.send_keys("<C-v>");
