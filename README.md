@@ -363,32 +363,31 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 
 Features requiring plugin-side implementation (in priority order):
 
-| Priority | Feature | Commands | Description |
-|----------|---------|----------|-------------|
-| High | System clipboard | `"+p`, `"*y` | Integration with OS clipboard |
-| High | Global command | `:g/{pattern}/{cmd}` | Execute command on matching lines |
-| High | Confirm substitute | `:%s/old/new/gc` | Confirm each replacement |
-| High | Special registers | `"_d`, `"0p` | Black hole register / Yank register |
-| High | Insert at last position | `gi` | Return to last insert position and insert |
-| Medium | Hover info | `gh` | Show hover information (Godot integration) |
-| Medium | Open URL/path | `gx` | Open URL under cursor in browser |
-| Medium | Line operations | `:sort`, `:t`, `:m` | Sort, copy, move lines |
-| Medium | Documentation | `K` | Open Godot docs for word under cursor |
-| Medium | Format operator | `gq{motion}`, `gqq` | Format/wrap text (useful for comments) |
-| Medium | Auto-indent | `=`, `==`, `=G` | Auto-indent lines |
-| Medium | Change list | `g;`, `g,` | Navigate through change positions |
-| Medium | Sequential increment | `gCtrl+A`, `gCtrl+X` | Generate number sequence in visual block |
-| Medium | Buffer navigation | `:bn`, `:bp`, `:bd`, `:ls` | Navigate/manage script tabs |
-| Medium | Backward search | `?{pattern}` | Search backward in file |
-| Medium | Block jump | `[{`, `]}`, `[(`, `])` | Jump to block start/end |
-| Medium | Indent-aware paste | `[p`, `]p` | Paste with indent adjustment |
-| Medium | Argument text object | `ia`, `aa` | Select function argument |
-| Medium | Indent text object | `ii`, `ai` | Select by indentation level |
-| Medium | Entire buffer object | `ae`, `ie` | Select entire buffer |
-| Low | Visual block insert | `I`/`A` (v-block) | Insert/append on multiple lines |
-| Low | Display line motion | `gj`, `gk` | Move by display lines (wrapped) |
-| Low | Folding | `za`, `zo`, `zc`, `zR`, `zM` | Code folding operations |
-| Low | Method jump | `[m`, `]m` | Jump to method start/end |
+| Priority | Feature | Commands | Difficulty | Description |
+|----------|---------|----------|------------|-------------|
+| High | System clipboard | `"+p`, `"*y` | ⭐ Easy | Integration with OS clipboard |
+| High | Special registers | `"_d`, `"0p` | ⭐ Easy | Black hole register / Yank register |
+| High | Insert at last position | `gi` | ⭐ Easy | Return to last insert position and insert |
+| High | Global command | `:g/{pattern}/{cmd}` | ⭐⭐ Medium | Execute command on matching lines |
+| High | Confirm substitute | `:%s/old/new/gc` | ⭐⭐⭐ Hard | Confirm each replacement (requires UI) |
+| Medium | Open URL/path | `gx` | ⭐ Easy | Open URL under cursor in browser |
+| Medium | Auto-indent | `=`, `==`, `=G` | ⭐ Easy | Auto-indent lines |
+| Medium | Backward search | `?{pattern}` | ⭐ Easy | Search backward in file |
+| Medium | Indent-aware paste | `[p`, `]p` | ⭐ Easy | Paste with indent adjustment |
+| Medium | Entire buffer object | `ae`, `ie` | ⭐ Easy | Select entire buffer |
+| Medium | Line operations | `:sort`, `:t`, `:m` | ⭐⭐ Medium | Sort, copy, move lines |
+| Medium | Documentation | `K` | ⭐⭐ Medium | Open Godot docs for word under cursor |
+| Medium | Format operator | `gq{motion}`, `gqq` | ⭐⭐ Medium | Format/wrap text (useful for comments) |
+| Medium | Change list | `g;`, `g,` | ⭐⭐ Medium | Navigate through change positions |
+| Medium | Sequential increment | `gCtrl+A`, `gCtrl+X` | ⭐⭐ Medium | Generate number sequence in visual block |
+| Medium | Buffer navigation | `:bn`, `:bp`, `:bd`, `:ls` | ⭐⭐ Medium | Navigate/manage script tabs |
+| Medium | Block jump | `[{`, `]}`, `[(`, `])` | ⭐⭐ Medium | Jump to block start/end |
+| Medium | Indent text object | `ii`, `ai` | ⭐⭐ Medium | Select by indentation level |
+| Medium | Argument text object | `ia`, `aa` | ⭐⭐⭐ Hard | Select function argument (requires parsing) |
+| Low | Folding | `za`, `zo`, `zc`, `zR`, `zM` | ⭐ Easy | Code folding operations |
+| Low | Display line motion | `gj`, `gk` | ⭐⭐ Medium | Move by display lines (wrapped) |
+| Low | Method jump | `[m`, `]m` | ⭐⭐ Medium | Jump to method start/end |
+| Low | Visual block insert | `I`/`A` (v-block) | ⭐⭐⭐ Hard | Insert/append on multiple lines |
 
 #### Likely Already Working (Testing Needed)
 
