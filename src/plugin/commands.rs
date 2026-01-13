@@ -509,6 +509,9 @@ impl GodotNeovimPlugin {
         let replacement = parts[1];
         let _flags = parts.get(2).unwrap_or(&"");
 
+        // Save for g& command
+        self.last_substitute = Some((pattern.to_string(), replacement.to_string()));
+
         crate::verbose_print!(
             "[godot-neovim] Substitute: '{}' -> '{}'",
             pattern,
@@ -542,6 +545,48 @@ impl GodotNeovimPlugin {
             crate::verbose_print!("[godot-neovim] Substitution complete");
         } else {
             crate::verbose_print!("[godot-neovim] No matches found for '{}'", pattern);
+        }
+    }
+
+    /// g& - Repeat last substitution on entire buffer
+    pub(super) fn repeat_substitute(&mut self) {
+        let Some((ref pattern, ref replacement)) = self.last_substitute.clone() else {
+            crate::verbose_print!("[godot-neovim] g&: No previous substitution");
+            return;
+        };
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        crate::verbose_print!(
+            "[godot-neovim] g&: Repeating '{}' -> '{}'",
+            pattern,
+            replacement
+        );
+
+        // Get all text, replace, and set back
+        let text = editor.get_text().to_string();
+        let new_text = text.replace(pattern, replacement);
+
+        if text != new_text {
+            // Save cursor position
+            let line = editor.get_caret_line();
+            let col = editor.get_caret_column();
+
+            editor.set_text(&new_text);
+
+            // Restore cursor position (clamped to valid range)
+            let max_line = editor.get_line_count() - 1;
+            editor.set_caret_line(line.min(max_line));
+            editor.set_caret_column(col);
+
+            // Sync to Neovim
+            self.sync_buffer_to_neovim();
+
+            crate::verbose_print!("[godot-neovim] g&: Substitution complete");
+        } else {
+            crate::verbose_print!("[godot-neovim] g&: No matches found");
         }
     }
 

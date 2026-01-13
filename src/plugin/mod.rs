@@ -114,6 +114,9 @@ pub struct GodotNeovimPlugin {
     /// Count prefix buffer for commands like 3dd, 5yy
     #[init(val = String::new())]
     count_buffer: String,
+    /// Last substitution: (pattern, replacement) for g& command
+    #[init(val = None)]
+    last_substitute: Option<(String, String)>,
 }
 
 #[godot_api]
@@ -1502,6 +1505,11 @@ impl GodotNeovimPlugin {
                     "a" => {
                         // ga - show character info under cursor
                         self.show_char_info();
+                        true
+                    }
+                    "&" => {
+                        // g& - repeat last substitution on entire buffer
+                        self.repeat_substitute();
                         true
                     }
                     _ => false,
