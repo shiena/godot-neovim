@@ -176,6 +176,10 @@ Once the plugin is enabled:
 2. The mode indicator will appear showing the current Neovim mode
 3. Use Neovim keybindings to edit your code
 
+### In-Editor Help
+
+Press `F1` in Godot and search for **"GodotNeovim"** to view the command reference directly in the editor.
+
 ### Mode Indicator Colors
 
 | Mode    | Color  |
