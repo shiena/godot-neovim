@@ -331,6 +331,25 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 
 ### Roadmap
 
+#### Implementation Candidates
+
+Features requiring plugin-side implementation (in priority order):
+
+| Priority | Feature | Commands | Description |
+|----------|---------|----------|-------------|
+| High | Change/substitute | `s`, `S`, `cc` | Delete char and insert / Replace entire line |
+| High | Change/delete to EOL | `C`, `D` | Change/delete from cursor to end of line |
+| High | Visual mode toggle | `o` (visual) | Jump to other end of selection |
+| High | System clipboard | `"+p`, `"*y` | Integration with OS clipboard |
+| Medium | Word end backward | `ge` | Move to end of previous word |
+| Medium | Join without space | `gJ` | Join lines without adding space |
+| Medium | File info | `Ctrl+G` | Show filename and line count |
+| Medium | Open URL/path | `gx` | Open URL under cursor in browser |
+| Medium | Line operations | `:sort`, `:t`, `:m` | Sort, copy, move lines |
+| Medium | Documentation | `K` | Open Godot docs for word under cursor |
+| Low | Visual block insert | `I`/`A` (v-block) | Insert/append on multiple lines |
+| Low | Display line motion | `gj`, `gk` | Move by display lines (wrapped) |
+
 #### Likely Already Working (Testing Needed)
 
 These features may already work through Neovim backend:
