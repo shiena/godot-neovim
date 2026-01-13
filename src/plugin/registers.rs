@@ -1,6 +1,7 @@
 //! Named registers for yank, delete, and paste
 
 use super::GodotNeovimPlugin;
+use godot::prelude::*;
 
 impl GodotNeovimPlugin {
     /// Yank current line to named register
@@ -217,5 +218,120 @@ impl GodotNeovimPlugin {
             "[godot-neovim] \"{}P: Pasted from register (before)",
             register
         );
+    }
+
+    /// Paste from clipboard and move cursor after pasted text (gp command)
+    pub(super) fn paste_and_move_after(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let content = godot::classes::DisplayServer::singleton()
+            .clipboard_get()
+            .to_string();
+        if content.is_empty() {
+            return;
+        }
+
+        // Check if it's a line paste (ends with newline)
+        if content.ends_with('\n') {
+            let line_idx = editor.get_caret_line();
+            let line_count = editor.get_line_count();
+            let paste_lines: Vec<&str> = content.trim_end_matches('\n').lines().collect();
+
+            // Build new text with inserted lines
+            let mut lines: Vec<String> = Vec::new();
+            for i in 0..line_count {
+                lines.push(editor.get_line(i).to_string());
+                if i == line_idx {
+                    for paste_line in &paste_lines {
+                        lines.push(paste_line.to_string());
+                    }
+                }
+            }
+            editor.set_text(&lines.join("\n"));
+
+            // Move cursor to line after pasted content
+            let target_line = line_idx + paste_lines.len() as i32 + 1;
+            let max_line = editor.get_line_count() - 1;
+            editor.set_caret_line(target_line.min(max_line));
+            editor.set_caret_column(0);
+        } else {
+            // Character paste - insert after cursor and move to end
+            let line_idx = editor.get_caret_line();
+            let col_idx = editor.get_caret_column();
+            let line_text = editor.get_line(line_idx).to_string();
+
+            let mut chars: Vec<char> = line_text.chars().collect();
+            let insert_pos = ((col_idx + 1) as usize).min(chars.len());
+            for (i, c) in content.chars().enumerate() {
+                chars.insert(insert_pos + i, c);
+            }
+            let new_line: String = chars.into_iter().collect();
+            editor.set_line(line_idx, &new_line);
+
+            // Move cursor after pasted content
+            editor.set_caret_column(insert_pos as i32 + content.len() as i32);
+        }
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!("[godot-neovim] gp: Pasted and moved after");
+    }
+
+    /// Paste from clipboard before and move cursor after pasted text (gP command)
+    pub(super) fn paste_before_and_move_after(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let content = godot::classes::DisplayServer::singleton()
+            .clipboard_get()
+            .to_string();
+        if content.is_empty() {
+            return;
+        }
+
+        // Check if it's a line paste (ends with newline)
+        if content.ends_with('\n') {
+            let line_idx = editor.get_caret_line();
+            let line_count = editor.get_line_count();
+            let paste_lines: Vec<&str> = content.trim_end_matches('\n').lines().collect();
+
+            // Build new text with inserted lines before current
+            let mut lines: Vec<String> = Vec::new();
+            for i in 0..line_count {
+                if i == line_idx {
+                    for paste_line in &paste_lines {
+                        lines.push(paste_line.to_string());
+                    }
+                }
+                lines.push(editor.get_line(i).to_string());
+            }
+            editor.set_text(&lines.join("\n"));
+
+            // Move cursor to line after pasted content (which is original line position + paste count)
+            let target_line = line_idx + paste_lines.len() as i32;
+            editor.set_caret_line(target_line);
+            editor.set_caret_column(0);
+        } else {
+            // Character paste - insert before cursor and move to end
+            let line_idx = editor.get_caret_line();
+            let col_idx = editor.get_caret_column();
+            let line_text = editor.get_line(line_idx).to_string();
+
+            let mut chars: Vec<char> = line_text.chars().collect();
+            let insert_pos = (col_idx as usize).min(chars.len());
+            for (i, c) in content.chars().enumerate() {
+                chars.insert(insert_pos + i, c);
+            }
+            let new_line: String = chars.into_iter().collect();
+            editor.set_line(line_idx, &new_line);
+
+            // Move cursor after pasted content
+            editor.set_caret_column(insert_pos as i32 + content.len() as i32);
+        }
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!("[godot-neovim] gP: Pasted before and moved after");
     }
 }

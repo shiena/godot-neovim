@@ -1571,6 +1571,16 @@ impl GodotNeovimPlugin {
                         self.join_lines_no_space();
                         true
                     }
+                    "p" => {
+                        // gp - paste and move cursor after pasted text
+                        self.paste_and_move_after();
+                        true
+                    }
+                    "P" => {
+                        // gP - paste before and move cursor after pasted text
+                        self.paste_before_and_move_after();
+                        true
+                    }
                     _ => false,
                 };
 
