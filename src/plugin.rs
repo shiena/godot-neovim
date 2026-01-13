@@ -2296,6 +2296,14 @@ impl GodotNeovimPlugin {
                 if let Ok(line_num) = cmd.parse::<i32>() {
                     self.cmd_goto_line(line_num);
                 }
+                // Check for :marks - show marks
+                else if cmd == "marks" {
+                    self.cmd_show_marks();
+                }
+                // Check for :registers or :reg - show registers
+                else if cmd == "registers" || cmd == "reg" {
+                    self.cmd_show_registers();
+                }
                 // Check for :e[dit] {file} command
                 else if cmd.starts_with("e ") || cmd.starts_with("edit ") {
                     let file_path = if cmd.starts_with("edit ") {
@@ -2342,6 +2350,49 @@ impl GodotNeovimPlugin {
 
         self.sync_cursor_to_neovim();
         crate::verbose_print!("[godot-neovim] :{}: Jumped to line {}", line_num, target_line + 1);
+    }
+
+    /// :marks - Show all marks
+    fn cmd_show_marks(&self) {
+        if self.marks.is_empty() {
+            godot_print!("[godot-neovim] :marks - No marks set");
+            return;
+        }
+
+        godot_print!("[godot-neovim] :marks");
+        godot_print!("mark  line  col");
+
+        // Sort marks by character
+        let mut marks: Vec<_> = self.marks.iter().collect();
+        marks.sort_by_key(|(k, _)| *k);
+
+        for (mark, (line, col)) in marks {
+            godot_print!(" {}    {:>4}  {:>3}", mark, line + 1, col);
+        }
+    }
+
+    /// :registers or :reg - Show all registers
+    fn cmd_show_registers(&self) {
+        if self.registers.is_empty() {
+            godot_print!("[godot-neovim] :registers - No registers set");
+            return;
+        }
+
+        godot_print!("[godot-neovim] :registers");
+
+        // Sort registers by character
+        let mut regs: Vec<_> = self.registers.iter().collect();
+        regs.sort_by_key(|(k, _)| *k);
+
+        for (reg, content) in regs {
+            // Truncate long content and show preview
+            let preview = if content.len() > 50 {
+                format!("{}...", &content[..47])
+            } else {
+                content.replace('\n', "^J")
+            };
+            godot_print!("\"{}   {}", reg, preview);
+        }
     }
 
     /// :e[dit] {file} - Open a file in the script editor
