@@ -56,6 +56,8 @@ This plugin is in early development. The following features are implemented:
 - ✅ Marks (`m{a-z}`, `'{a-z}`, `` `{a-z} ``)
 - ✅ Macros (`q{a-z}`, `@{a-z}`, `@@`)
 - ✅ Named registers (`"{a-z}yy`, `"{a-z}dd`, `"{a-z}p`)
+- ✅ Number increment/decrement (`Ctrl+A`, `Ctrl+X`)
+- ✅ Jump list navigation (`Ctrl+O`, `Ctrl+I`)
 
 ## Requirements
 
@@ -257,6 +259,20 @@ Once the plugin is enabled:
 | `"{a-z}p` | Paste from named register (after) |
 | `"{a-z}P` | Paste from named register (before) |
 
+#### Number Operations
+
+| Command | Description |
+|---------|-------------|
+| `Ctrl+A` | Increment number under/after cursor |
+| `Ctrl+X` | Decrement number under/after cursor |
+
+#### Jump List
+
+| Command | Description |
+|---------|-------------|
+| `Ctrl+O` | Jump back to previous position |
+| `Ctrl+I` | Jump forward to newer position |
+
 #### Mode Switching
 
 | Command | Description |
@@ -314,8 +330,6 @@ Features requiring plugin-side implementation (in priority order):
 
 | Priority | Feature | Commands | Description |
 |----------|---------|----------|-------------|
-| High | Number increment | `Ctrl+A`, `Ctrl+X` | Increment/decrement number under cursor |
-| High | Jump list | `Ctrl+O`, `Ctrl+I` | Navigate cursor position history |
 | Medium | Replace mode | `R` | Overwrite mode (typing replaces characters) |
 | Medium | Go to file | `gf` | Open file path under cursor |
 | Medium | Line jump | `:{number}` | Jump to specific line (e.g., `:123`) |

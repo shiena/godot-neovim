@@ -93,6 +93,12 @@ pub struct GodotNeovimPlugin {
     /// Currently selected register for next yank/paste (None = default/system clipboard)
     #[init(val = None)]
     selected_register: Option<char>,
+    /// Jump list: stores (line, col) positions for Ctrl+O/Ctrl+I navigation
+    #[init(val = Vec::new())]
+    jump_list: Vec<(i32, i32)>,
+    /// Current position in jump list (index into jump_list, or len() if at end)
+    #[init(val = 0)]
+    jump_list_pos: usize,
 }
 
 #[godot_api]
@@ -465,6 +471,42 @@ impl IEditorPlugin for GodotNeovimPlugin {
             } else {
                 self.scroll_viewport_down();
             }
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle Ctrl+A for increment number under cursor
+        if key_event.is_ctrl_pressed() && keycode == Key::A {
+            self.increment_number(1);
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle Ctrl+X for decrement number under cursor
+        if key_event.is_ctrl_pressed() && keycode == Key::X {
+            self.increment_number(-1);
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle Ctrl+O for jump back in jump list
+        if key_event.is_ctrl_pressed() && keycode == Key::O {
+            self.jump_back();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle Ctrl+I (Tab) for jump forward in jump list
+        if key_event.is_ctrl_pressed() && keycode == Key::I {
+            self.jump_forward();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1867,6 +1909,7 @@ impl GodotNeovimPlugin {
             let handled = match keys {
                 "d" => {
                     // gd - go to definition (use Godot's built-in)
+                    self.add_to_jump_list();
                     self.go_to_definition();
                     true
                 }
@@ -2611,6 +2654,9 @@ impl GodotNeovimPlugin {
 
     /// Search forward for word under cursor (*)
     fn search_word_forward(&mut self) {
+        // Add to jump list before searching
+        self.add_to_jump_list();
+
         let Some(word) = self.get_word_under_cursor() else {
             crate::verbose_print!("[godot-neovim] *: No word under cursor");
             return;
@@ -2668,6 +2714,9 @@ impl GodotNeovimPlugin {
 
     /// Search backward for word under cursor (#)
     fn search_word_backward(&mut self) {
+        // Add to jump list before searching
+        self.add_to_jump_list();
+
         let Some(word) = self.get_word_under_cursor() else {
             crate::verbose_print!("[godot-neovim] #: No word under cursor");
             return;
@@ -3059,6 +3108,9 @@ impl GodotNeovimPlugin {
 
     /// Jump to matching bracket (% command)
     fn jump_to_matching_bracket(&mut self) {
+        // Add to jump list before jumping
+        self.add_to_jump_list();
+
         let Some(ref editor) = self.current_editor else {
             return;
         };
@@ -3457,6 +3509,9 @@ impl GodotNeovimPlugin {
 
     /// Jump to mark line ('{a-z})
     fn jump_to_mark_line(&mut self, mark: char) {
+        // Add to jump list before jumping
+        self.add_to_jump_list();
+
         let Some((line, _)) = self.marks.get(&mark).copied() else {
             crate::verbose_print!("[godot-neovim] '{}: Mark not set", mark);
             return;
@@ -3488,6 +3543,9 @@ impl GodotNeovimPlugin {
 
     /// Jump to exact mark position (`{a-z})
     fn jump_to_mark_position(&mut self, mark: char) {
+        // Add to jump list before jumping
+        self.add_to_jump_list();
+
         let Some((line, col)) = self.marks.get(&mark).copied() else {
             crate::verbose_print!("[godot-neovim] `{}: Mark not set", mark);
             return;
@@ -3822,6 +3880,203 @@ impl GodotNeovimPlugin {
 
         self.sync_buffer_to_neovim();
         crate::verbose_print!("[godot-neovim] <<: Unindented line {}", line_idx + 1);
+    }
+
+    /// Increment or decrement the number under/after cursor (Ctrl+A / Ctrl+X)
+    fn increment_number(&mut self, delta: i32) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column() as usize;
+        let line_text = editor.get_line(line_idx).to_string();
+        let chars: Vec<char> = line_text.chars().collect();
+
+        // Find number at or after cursor
+        let mut num_start = None;
+        let mut num_end = None;
+
+        // Search for number starting at or after cursor position
+        for i in col_idx..chars.len() {
+            if chars[i].is_ascii_digit() {
+                // Found start of number, check for negative sign before it
+                if i > 0 && chars[i - 1] == '-' {
+                    num_start = Some(i - 1);
+                } else {
+                    num_start = Some(i);
+                }
+                // Find end of number
+                for j in i..=chars.len() {
+                    if j == chars.len() || !chars[j].is_ascii_digit() {
+                        num_end = Some(j);
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+
+        // If no number found after cursor, search from beginning
+        if num_start.is_none() {
+            for i in 0..col_idx.min(chars.len()) {
+                if chars[i].is_ascii_digit() {
+                    if i > 0 && chars[i - 1] == '-' {
+                        num_start = Some(i - 1);
+                    } else {
+                        num_start = Some(i);
+                    }
+                    for j in i..=chars.len() {
+                        if j == chars.len() || !chars[j].is_ascii_digit() {
+                            num_end = Some(j);
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        let (start, end) = match (num_start, num_end) {
+            (Some(s), Some(e)) => (s, e),
+            _ => {
+                crate::verbose_print!("[godot-neovim] Ctrl+A/X: No number found");
+                return;
+            }
+        };
+
+        // Parse the number
+        let num_str: String = chars[start..end].iter().collect();
+        let Ok(num) = num_str.parse::<i64>() else {
+            crate::verbose_print!("[godot-neovim] Ctrl+A/X: Failed to parse number");
+            return;
+        };
+
+        // Calculate new value
+        let new_num = num + delta as i64;
+        let new_num_str = new_num.to_string();
+
+        // Build new line
+        let prefix: String = chars[..start].iter().collect();
+        let suffix: String = chars[end..].iter().collect();
+        let new_line = format!("{}{}{}", prefix, new_num_str, suffix);
+
+        editor.set_line(line_idx, &new_line);
+
+        // Position cursor at end of number
+        let new_end = start + new_num_str.len();
+        editor.set_caret_column((new_end - 1) as i32);
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] Ctrl+{}: {} -> {}",
+            if delta > 0 { "A" } else { "X" },
+            num,
+            new_num
+        );
+    }
+
+    /// Add current position to jump list
+    fn add_to_jump_list(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line = editor.get_caret_line();
+        let col = editor.get_caret_column();
+
+        // Don't add duplicate consecutive entries
+        if let Some(&last) = self.jump_list.last() {
+            if last == (line, col) {
+                return;
+            }
+        }
+
+        // If we're not at the end of the list, truncate
+        if self.jump_list_pos < self.jump_list.len() {
+            self.jump_list.truncate(self.jump_list_pos);
+        }
+
+        self.jump_list.push((line, col));
+        self.jump_list_pos = self.jump_list.len();
+
+        // Limit jump list size
+        const MAX_JUMP_LIST: usize = 100;
+        if self.jump_list.len() > MAX_JUMP_LIST {
+            self.jump_list.remove(0);
+            self.jump_list_pos = self.jump_list.len();
+        }
+    }
+
+    /// Jump back in jump list (Ctrl+O)
+    fn jump_back(&mut self) {
+        if self.jump_list.is_empty() {
+            crate::verbose_print!("[godot-neovim] Ctrl+O: Jump list empty");
+            return;
+        }
+
+        // Save current position before jumping
+        if self.jump_list_pos == self.jump_list.len() {
+            self.add_to_jump_list();
+            self.jump_list_pos = self.jump_list.len();
+        }
+
+        if self.jump_list_pos == 0 {
+            crate::verbose_print!("[godot-neovim] Ctrl+O: Already at oldest position");
+            return;
+        }
+
+        self.jump_list_pos -= 1;
+        let (line, col) = self.jump_list[self.jump_list_pos];
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_count = editor.get_line_count();
+        let target_line = line.min(line_count - 1);
+        editor.set_caret_line(target_line);
+
+        let line_length = editor.get_line(target_line).len() as i32;
+        let target_col = col.min(line_length.max(0));
+        editor.set_caret_column(target_col);
+
+        self.sync_cursor_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] Ctrl+O: Jumped back to line {}, col {}",
+            target_line + 1,
+            target_col
+        );
+    }
+
+    /// Jump forward in jump list (Ctrl+I)
+    fn jump_forward(&mut self) {
+        if self.jump_list.is_empty() || self.jump_list_pos >= self.jump_list.len() - 1 {
+            crate::verbose_print!("[godot-neovim] Ctrl+I: No newer position");
+            return;
+        }
+
+        self.jump_list_pos += 1;
+        let (line, col) = self.jump_list[self.jump_list_pos];
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_count = editor.get_line_count();
+        let target_line = line.min(line_count - 1);
+        editor.set_caret_line(target_line);
+
+        let line_length = editor.get_line(target_line).len() as i32;
+        let target_col = col.min(line_length.max(0));
+        editor.set_caret_column(target_col);
+
+        self.sync_cursor_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] Ctrl+I: Jumped forward to line {}, col {}",
+            target_line + 1,
+            target_col
+        );
     }
 
     /// Join current line with next line (J command)
