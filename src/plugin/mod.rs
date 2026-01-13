@@ -493,7 +493,13 @@ impl GodotNeovimPlugin {
     }
 
     #[func]
-    fn on_script_changed(&mut self, script: Gd<godot::classes::Script>) {
+    fn on_script_changed(&mut self, script: Option<Gd<godot::classes::Script>>) {
+        // Handle null script (e.g., when no script is selected)
+        let Some(script) = script else {
+            crate::verbose_print!("[godot-neovim] on_script_changed: null script");
+            return;
+        };
+
         // Store the expected script path for verification in deferred handler
         let script_path = script.get_path().to_string();
         crate::verbose_print!("[godot-neovim] on_script_changed: {}", script_path);
