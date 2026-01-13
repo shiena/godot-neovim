@@ -424,10 +424,7 @@ impl GodotNeovimPlugin {
         // Position cursor at the join point
         let join_col = current_line.chars().count();
 
-        // Update text
-        editor.set_line(line_idx, &new_line);
-
-        // Remove the next line
+        // Rebuild text without the next line
         let full_text = editor.get_text().to_string();
         let lines: Vec<&str> = full_text.lines().collect();
         let mut new_lines: Vec<&str> = Vec::new();

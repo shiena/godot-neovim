@@ -331,29 +331,9 @@ impl GodotNeovimPlugin {
             }
         }
 
-        // Now find the end of the word (we're on a non-whitespace char)
-        // Move to start of current word, then the end is our current position
-        let end_col = col;
-        let end_line = line;
-
-        // Check if we're on a word character
-        let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
-        let current_is_word = is_word_char(chars[col]);
-
-        // Move backward to find start of current word/non-word sequence
-        while col > 0 {
-            let prev_char = chars[col - 1];
-            let prev_is_word = is_word_char(prev_char);
-
-            if prev_is_word != current_is_word || prev_char.is_whitespace() {
-                break;
-            }
-            col -= 1;
-        }
-
-        // The end of the previous word is at end_col on end_line
-        self.move_cursor_to(end_line, end_col as i32);
-        crate::verbose_print!("[godot-neovim] ge: Moved to word end at {}:{}", end_line + 1, end_col);
+        // We're now on a non-whitespace char - this is the end of the previous word
+        self.move_cursor_to(line, col as i32);
+        crate::verbose_print!("[godot-neovim] ge: Moved to word end at {}:{}", line + 1, col);
     }
 
     /// Move cursor to specified position and sync with Neovim
