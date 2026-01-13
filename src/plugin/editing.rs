@@ -522,6 +522,55 @@ impl GodotNeovimPlugin {
         );
     }
 
+    /// Substitute character under cursor (s command)
+    pub(super) fn substitute_char(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column() as usize;
+        let line_text = editor.get_line(line_idx).to_string();
+        let chars: Vec<char> = line_text.chars().collect();
+
+        if col_idx < chars.len() {
+            // Delete the character
+            let mut new_chars = chars.clone();
+            new_chars.remove(col_idx);
+            let new_line: String = new_chars.into_iter().collect();
+            editor.set_line(line_idx, &new_line);
+        }
+
+        // Enter insert mode
+        self.sync_buffer_to_neovim();
+        self.sync_cursor_to_neovim();
+        self.send_keys("i");
+        crate::verbose_print!("[godot-neovim] s: Substitute char at col {}", col_idx);
+    }
+
+    /// Substitute entire line (S/cc command)
+    pub(super) fn substitute_line(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let line_text = editor.get_line(line_idx).to_string();
+
+        // Preserve indentation
+        let indent: String = line_text.chars().take_while(|c| c.is_whitespace()).collect();
+
+        // Replace line with just the indentation
+        editor.set_line(line_idx, &indent);
+        editor.set_caret_column(indent.len() as i32);
+
+        // Enter insert mode
+        self.sync_buffer_to_neovim();
+        self.sync_cursor_to_neovim();
+        self.send_keys("i");
+        crate::verbose_print!("[godot-neovim] S/cc: Substitute line {}", line_idx + 1);
+    }
+
     /// Delete from cursor to end of line (D command)
     pub(super) fn delete_to_eol(&mut self) {
         let Some(ref mut editor) = self.current_editor else {

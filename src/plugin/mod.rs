@@ -1173,6 +1173,42 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        // Handle 's' for substitute char (delete char and enter insert mode)
+        if keycode == Key::S && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.substitute_char();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'S' for substitute line (delete line content and enter insert mode)
+        if keycode == Key::S && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.substitute_line();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'cc' for substitute line (same as S)
+        if keycode == Key::C && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            if self.last_key == "c" {
+                self.substitute_line();
+                self.last_key.clear();
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            } else {
+                self.last_key = "c".to_string();
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
+        }
+
         // Handle 'r' for replace char
         if keycode == Key::R && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
             self.pending_char_op = Some('r');
