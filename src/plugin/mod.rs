@@ -128,6 +128,15 @@ pub struct GodotNeovimPlugin {
     /// Pending documentation lookup word (for deferred goto_help to avoid borrow conflicts)
     #[init(val = None)]
     pending_help_word: Option<String>,
+    /// Pending file path to open (for deferred cmd_edit to avoid borrow conflicts)
+    #[init(val = None)]
+    pending_file_path: Option<String>,
+    /// Expected script path after script change (for verifying correct CodeEdit)
+    #[init(val = None)]
+    expected_script_path: Option<String>,
+    /// Retry count for finding the correct CodeEdit after script change
+    #[init(val = 0)]
+    script_change_retry_count: u32,
 }
 
 #[godot_api]
@@ -234,6 +243,43 @@ impl IEditorPlugin for GodotNeovimPlugin {
                 script_editor.connect("editor_script_changed", &callable);
 
                 // Manually handle the script change since we missed the signal
+                self.handle_script_changed();
+            }
+        }
+
+        // Handle deferred file open (gf command)
+        // cmd_edit() triggers editor_script_changed signal synchronously, which would
+        // cause a borrow conflict. We temporarily disconnect from the signal.
+        if let Some(path) = self.pending_file_path.take() {
+            let editor_interface = EditorInterface::singleton();
+            if let Some(mut script_editor) = editor_interface.get_script_editor() {
+                // Temporarily disconnect from signal to avoid borrow conflict
+                let callable = self.base().callable("on_script_changed");
+                script_editor.disconnect("editor_script_changed", &callable);
+
+                // Set expected script path for verification
+                // Convert relative path to res:// path if needed
+                let expected_path = if path.starts_with("res://") {
+                    path.clone()
+                } else {
+                    format!("res://{}", path)
+                };
+                self.expected_script_path = Some(expected_path.clone());
+                self.script_change_retry_count = 0;
+                crate::verbose_print!(
+                    "[godot-neovim] gf: Expected script path: '{}'",
+                    expected_path
+                );
+
+                // Now safe to open the file
+                crate::verbose_print!("[godot-neovim] gf: Opening file '{}' (deferred)", path);
+                self.cmd_edit(&path);
+
+                // Reconnect to signal
+                script_editor.connect("editor_script_changed", &callable);
+
+                // Manually trigger handle_script_changed since we missed the signal
+                crate::verbose_print!("[godot-neovim] gf: Triggering manual script change handling");
                 self.handle_script_changed();
             }
         }
@@ -398,19 +444,129 @@ impl GodotNeovimPlugin {
     }
 
     #[func]
-    fn on_script_changed(&self, _script: Gd<godot::classes::Script>) {
+    fn on_script_changed(&mut self, script: Gd<godot::classes::Script>) {
+        // Store the expected script path for verification in deferred handler
+        let script_path = script.get_path().to_string();
+        crate::verbose_print!("[godot-neovim] on_script_changed: {}", script_path);
+        self.expected_script_path = Some(script_path);
+        self.script_change_retry_count = 0;
+
         // Only set flag - actual handling deferred to process() to avoid borrow conflicts
         // when signals are emitted during input processing (e.g., K command opening docs)
         self.script_changed_pending.set(true);
     }
 
-    fn handle_script_changed(&mut self) {
+    #[func]
+    fn handle_script_changed_deferred(&mut self) {
         crate::verbose_print!("[godot-neovim] Script changed (deferred processing)");
+
+        // Verify we're on the expected script before syncing
+        let editor = EditorInterface::singleton();
+        let Some(mut script_editor) = editor.get_script_editor() else {
+            crate::verbose_print!("[godot-neovim] No script editor found");
+            return;
+        };
+
+        // Get the current script path from ScriptEditor (source of truth)
+        let current_script_path = script_editor
+            .get_current_script()
+            .map(|s| s.get_path().to_string())
+            .unwrap_or_default();
+
+        crate::verbose_print!(
+            "[godot-neovim] Current script: '{}', Expected: '{}'",
+            current_script_path,
+            self.expected_script_path.as_deref().unwrap_or("(none)")
+        );
+
+        // If we have an expected path and it doesn't match, retry up to 3 times
+        if let Some(ref expected_path) = self.expected_script_path {
+            if !current_script_path.is_empty()
+                && !expected_path.is_empty()
+                && current_script_path != *expected_path
+            {
+                self.script_change_retry_count += 1;
+                if self.script_change_retry_count < 3 {
+                    crate::verbose_print!(
+                        "[godot-neovim] Script mismatch, retrying ({}/3)...",
+                        self.script_change_retry_count
+                    );
+                    // Retry in the next deferred call
+                    self.base_mut()
+                        .call_deferred("handle_script_changed_deferred", &[]);
+                    return;
+                }
+                crate::verbose_print!(
+                    "[godot-neovim] Script mismatch after retries, proceeding anyway"
+                );
+            }
+        }
+
         self.find_current_code_edit();
+
+        // Verify CodeEdit content matches current script
+        // If mismatch, retry instead of syncing wrong buffer
+        if let Some(ref editor) = self.current_editor {
+            let editor_lines = editor.get_line_count();
+            let editor_first_line = if editor_lines > 0 {
+                editor.get_line(0).to_string()
+            } else {
+                String::new()
+            };
+
+            // Get current script's source for comparison
+            if let Some(current_script) = script_editor.get_current_script() {
+                let script_source = current_script.get_source_code().to_string();
+                let script_first_line = script_source.lines().next().unwrap_or("");
+                let script_lines = script_source.lines().count();
+
+                crate::verbose_print!(
+                    "[godot-neovim] Verification - CodeEdit: {} lines, first='{}'; Script: {} lines, first='{}'",
+                    editor_lines,
+                    editor_first_line.chars().take(30).collect::<String>(),
+                    script_lines,
+                    script_first_line.chars().take(30).collect::<String>()
+                );
+
+                // If content doesn't match, the CodeEdit is stale - retry
+                let content_matches = editor_first_line.trim() == script_first_line.trim()
+                    || editor_lines as usize == script_lines.max(1);
+
+                if !content_matches {
+                    self.script_change_retry_count += 1;
+                    if self.script_change_retry_count < 5 {
+                        crate::verbose_print!(
+                            "[godot-neovim] Content mismatch, retrying ({}/5)...",
+                            self.script_change_retry_count
+                        );
+                        // Clear expected path to prevent path-based retry
+                        self.expected_script_path = None;
+                        // Retry
+                        self.base_mut()
+                            .call_deferred("handle_script_changed_deferred", &[]);
+                        return;
+                    }
+                    crate::verbose_print!(
+                        "[godot-neovim] Content mismatch after retries, proceeding anyway"
+                    );
+                }
+            }
+        }
+
+        // Clear the expected path
+        self.expected_script_path = None;
+
         self.reposition_mode_label();
         self.sync_buffer_to_neovim();
         self.update_cursor_from_editor();
         self.sync_cursor_to_neovim();
+    }
+
+    fn handle_script_changed(&mut self) {
+        // Use call_deferred to ensure Godot has fully switched to the new script
+        // before we try to find the CodeEdit and sync buffer
+        self.base_mut()
+            .call_deferred("handle_script_changed_deferred", &[]);
     }
 
     fn reposition_mode_label(&mut self) {
@@ -1100,8 +1256,12 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle 'f' for find char forward
-        if keycode == Key::F && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+        // Handle 'f' for find char forward (but not after 'g' - that's 'gf' for go to file)
+        if keycode == Key::F
+            && !key_event.is_shift_pressed()
+            && !key_event.is_ctrl_pressed()
+            && self.last_key != "g"
+        {
             self.pending_char_op = Some('f');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1725,14 +1885,31 @@ impl GodotNeovimPlugin {
         // Forward key to Neovim (normal/visual/etc modes)
         if let Some(keys) = self.key_event_to_nvim_string(key_event) {
             // Intercept g-prefix commands that conflict with Neovim's built-in commands
-            // (e.g., gx opens URL via netrw in Neovim which can freeze)
-            if self.last_key == "g" && keys == "x" {
-                self.open_url_under_cursor();
-                self.last_key.clear();
-                if let Some(mut viewport) = self.base().get_viewport() {
-                    viewport.set_input_as_handled();
+            // (e.g., gx opens URL via netrw, gf opens file via netrw - both can freeze)
+            if self.last_key == "g" {
+                match keys.as_str() {
+                    "x" => {
+                        // Cancel Neovim's pending 'g' operator before handling locally
+                        self.send_keys("<Esc>");
+                        self.open_url_under_cursor();
+                        self.last_key.clear();
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    }
+                    "f" => {
+                        // Cancel Neovim's pending 'g' operator before handling locally
+                        self.send_keys("<Esc>");
+                        self.go_to_file_under_cursor();
+                        self.last_key.clear();
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    }
+                    _ => {}
                 }
-                return;
             }
 
             // Record key for macro if recording (and not playing back)
@@ -1773,11 +1950,8 @@ impl GodotNeovimPlugin {
                         self.prev_script_tab();
                         true
                     }
-                    "f" => {
-                        // gf - go to file under cursor
-                        self.go_to_file_under_cursor();
-                        true
-                    }
+                    // Note: "gf" is intercepted before sending to Neovim (above)
+                    // to avoid Neovim's built-in gf (netrw) which can freeze
                     "I" => {
                         // gI - insert at column 0
                         self.insert_at_column_zero();

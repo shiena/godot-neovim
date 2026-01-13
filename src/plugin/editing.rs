@@ -803,10 +803,11 @@ impl GodotNeovimPlugin {
         }
 
         let path: String = chars[start..end].iter().collect();
-        crate::verbose_print!("[godot-neovim] gf: Extracted path: {}", path);
+        crate::verbose_print!("[godot-neovim] gf: Queueing file open for '{}'", path);
 
-        // Try to open the file
-        self.cmd_edit(&path);
+        // Queue the file path for deferred opening in process()
+        // cmd_edit() triggers editor_script_changed signal synchronously
+        self.pending_file_path = Some(path);
     }
 
     /// Open URL or path under cursor in browser (gx command)
