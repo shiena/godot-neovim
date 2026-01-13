@@ -11,7 +11,7 @@ repository = "https://github.com/shiena/godot-neovim"
 crate-type = ["cdylib"]
 
 [dependencies]
-godot = { git = "https://github.com/godot-rust/gdext", branch = "master" }
+godot = { git = "https://github.com/godot-rust/gdext", tag = "v0.4.5" }
 nvim-rs = { version = "0.9", features = ["use_tokio"] }
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
