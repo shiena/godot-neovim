@@ -929,6 +929,15 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        // Handle Ctrl+G for file info
+        if key_event.is_ctrl_pressed() && keycode == Key::G {
+            self.show_file_info();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
         // Handle '/' for search - open Godot's find dialog
         if keycode == Key::SLASH && !key_event.is_ctrl_pressed() && !key_event.is_shift_pressed() {
             self.open_find_dialog();

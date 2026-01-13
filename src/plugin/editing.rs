@@ -1,7 +1,7 @@
 //! Editing operations: undo, redo, delete, replace, indent, join
 
 use super::GodotNeovimPlugin;
-use godot::classes::Input;
+use godot::classes::{EditorInterface, Input};
 use godot::global::Key;
 use godot::prelude::*;
 
@@ -447,6 +447,49 @@ impl GodotNeovimPlugin {
 
         self.show_status_message(&msg);
         crate::verbose_print!("[godot-neovim] ga: {}", msg);
+    }
+
+    /// Show file info (Ctrl+G command)
+    pub(super) fn show_file_info(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            self.show_status_message("No file");
+            return;
+        };
+
+        let current_line = editor.get_caret_line() + 1; // 1-indexed for display
+        let total_lines = editor.get_line_count();
+        let percent = if total_lines > 0 {
+            (current_line * 100) / total_lines
+        } else {
+            0
+        };
+
+        // Try to get the script path
+        let file_name = if let Some(mut script_edit) =
+            EditorInterface::singleton().get_script_editor()
+        {
+            if let Some(current_script) = script_edit.get_current_script() {
+                let path = current_script.get_path().to_string();
+                if path.is_empty() {
+                    "[New File]".to_string()
+                } else {
+                    // Extract just the filename from path
+                    path.split('/').last().unwrap_or(&path).to_string()
+                }
+            } else {
+                "[No Script]".to_string()
+            }
+        } else {
+            "[Unknown]".to_string()
+        };
+
+        let msg = format!(
+            "\"{}\" line {} of {} --{}%--",
+            file_name, current_line, total_lines, percent
+        );
+
+        self.show_status_message(&msg);
+        crate::verbose_print!("[godot-neovim] Ctrl+G: {}", msg);
     }
 
     /// Show a temporary message in the status line
