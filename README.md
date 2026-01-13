@@ -338,17 +338,29 @@ Features requiring plugin-side implementation (in priority order):
 | Priority | Feature | Commands | Description |
 |----------|---------|----------|-------------|
 | High | Change/substitute | `s`, `S`, `cc` | Delete char and insert / Replace entire line |
-| High | Change/delete to EOL | `C`, `D` | Change/delete from cursor to end of line |
+| High | Change/delete/yank to EOL | `C`, `D`, `Y` | Change/delete/yank from cursor to end of line |
 | High | Visual mode toggle | `o` (visual) | Jump to other end of selection |
 | High | System clipboard | `"+p`, `"*y` | Integration with OS clipboard |
+| High | Global command | `:g/{pattern}/{cmd}` | Execute command on matching lines |
+| High | Confirm substitute | `:%s/old/new/gc` | Confirm each replacement |
+| High | Special registers | `"_d`, `"0p` | Black hole register / Yank register |
 | Medium | Word end backward | `ge` | Move to end of previous word |
 | Medium | Join without space | `gJ` | Join lines without adding space |
 | Medium | File info | `Ctrl+G` | Show filename and line count |
 | Medium | Open URL/path | `gx` | Open URL under cursor in browser |
 | Medium | Line operations | `:sort`, `:t`, `:m` | Sort, copy, move lines |
 | Medium | Documentation | `K` | Open Godot docs for word under cursor |
+| Medium | Format operator | `gq{motion}`, `gqq` | Format/wrap text (useful for comments) |
+| Medium | Auto-indent | `=`, `==`, `=G` | Auto-indent lines |
+| Medium | Change list | `g;`, `g,` | Navigate through change positions |
+| Medium | Sequential increment | `gCtrl+A`, `gCtrl+X` | Generate number sequence in visual block |
+| Medium | Buffer navigation | `:bn`, `:bp`, `:bd`, `:ls` | Navigate/manage script tabs |
+| Medium | Backward search | `?{pattern}` | Search backward in file |
+| Medium | Block jump | `[{`, `]}`, `[(`, `])` | Jump to block start/end |
 | Low | Visual block insert | `I`/`A` (v-block) | Insert/append on multiple lines |
 | Low | Display line motion | `gj`, `gk` | Move by display lines (wrapped) |
+| Low | Folding | `za`, `zo`, `zc`, `zR`, `zM` | Code folding operations |
+| Low | Method jump | `[m`, `]m` | Jump to method start/end |
 
 #### Likely Already Working (Testing Needed)
 
