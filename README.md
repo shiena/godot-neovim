@@ -344,9 +344,13 @@ Features requiring plugin-side implementation (in priority order):
 | High | Global command | `:g/{pattern}/{cmd}` | Execute command on matching lines |
 | High | Confirm substitute | `:%s/old/new/gc` | Confirm each replacement |
 | High | Special registers | `"_d`, `"0p` | Black hole register / Yank register |
+| High | Insert at last position | `gi` | Return to last insert position and insert |
+| High | Paste and move cursor | `gp`, `gP` | Paste and move cursor after pasted text |
+| High | Repeat last Ex command | `@:` | Repeat the last `:command` |
 | Medium | Word end backward | `ge` | Move to end of previous word |
 | Medium | Join without space | `gJ` | Join lines without adding space |
 | Medium | File info | `Ctrl+G` | Show filename and line count |
+| Medium | Hover info | `gh` | Show hover information (Godot integration) |
 | Medium | Open URL/path | `gx` | Open URL under cursor in browser |
 | Medium | Line operations | `:sort`, `:t`, `:m` | Sort, copy, move lines |
 | Medium | Documentation | `K` | Open Godot docs for word under cursor |
@@ -357,10 +361,20 @@ Features requiring plugin-side implementation (in priority order):
 | Medium | Buffer navigation | `:bn`, `:bp`, `:bd`, `:ls` | Navigate/manage script tabs |
 | Medium | Backward search | `?{pattern}` | Search backward in file |
 | Medium | Block jump | `[{`, `]}`, `[(`, `])` | Jump to block start/end |
+| Medium | Insert at column 0 | `gI` | Insert at column 0 (ignore indent) |
+| Medium | Indent-aware paste | `[p`, `]p` | Paste with indent adjustment |
+| Medium | Global repeat subst | `g&` | Repeat last `:s` on entire file |
+| Medium | Save all buffers | `:wa`, `:wqa` | Save all open script tabs |
+| Medium | Reload file | `:e!` | Discard changes and reload |
+| Medium | Show lists | `:changes`, `:jumps` | Display change/jump list |
+| Medium | Argument text object | `ia`, `aa` | Select function argument |
+| Medium | Indent text object | `ii`, `ai` | Select by indentation level |
+| Medium | Entire buffer object | `ae`, `ie` | Select entire buffer |
 | Low | Visual block insert | `I`/`A` (v-block) | Insert/append on multiple lines |
 | Low | Display line motion | `gj`, `gk` | Move by display lines (wrapped) |
 | Low | Folding | `za`, `zo`, `zc`, `zR`, `zM` | Code folding operations |
 | Low | Method jump | `[m`, `]m` | Jump to method start/end |
+| Low | Show char code | `ga` | Display ASCII/Unicode of char under cursor |
 
 #### Likely Already Working (Testing Needed)
 
