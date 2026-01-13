@@ -7,6 +7,7 @@ use godot::classes::{
 };
 use godot::global::Key;
 use godot::prelude::*;
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 /// Main editor plugin for godot-neovim
@@ -62,6 +63,12 @@ pub struct GodotNeovimPlugin {
     /// Temporary buffer for current input when browsing history
     #[init(val = String::new())]
     command_history_temp: String,
+    /// Marks storage: char -> (line, col) - 0-indexed
+    #[init(val = HashMap::new())]
+    marks: HashMap<char, (i32, i32)>,
+    /// Pending mark operation: Some('m') for set mark, Some('\'') for jump to line, Some('`') for jump to position
+    #[init(val = None)]
+    pending_mark_op: Option<char>,
 }
 
 #[godot_api]
@@ -239,6 +246,40 @@ impl IEditorPlugin for GodotNeovimPlugin {
                         viewport.set_input_as_handled();
                     }
                     return;
+                }
+            }
+        }
+
+        // Handle pending mark operation (m, ', `)
+        if let Some(op) = self.pending_mark_op {
+            let keycode = key_event.get_keycode();
+
+            // Cancel on Escape
+            if keycode == Key::ESCAPE {
+                self.pending_mark_op = None;
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
+
+            // Get the character (must be a-z for marks)
+            let unicode = key_event.get_unicode();
+            if unicode > 0 {
+                if let Some(c) = char::from_u32(unicode) {
+                    if c.is_ascii_lowercase() {
+                        self.pending_mark_op = None;
+                        match op {
+                            'm' => self.set_mark(c),
+                            '\'' => self.jump_to_mark_line(c),
+                            '`' => self.jump_to_mark_position(c),
+                            _ => {}
+                        }
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    }
                 }
             }
         }
@@ -548,6 +589,33 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Handle '~' for toggle case (use unicode for keyboard layout independence)
         if unicode_char == Some('~') {
             self.toggle_case();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'm' for set mark
+        if keycode == Key::M && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.pending_mark_op = Some('m');
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '\'' (single quote) for jump to mark line
+        if unicode_char == Some('\'') && !key_event.is_ctrl_pressed() {
+            self.pending_mark_op = Some('\'');
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '`' (backtick) for jump to mark position
+        if unicode_char == Some('`') && !key_event.is_ctrl_pressed() {
+            self.pending_mark_op = Some('`');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -3150,6 +3218,82 @@ impl GodotNeovimPlugin {
             self.sync_buffer_to_neovim();
             crate::verbose_print!("[godot-neovim] ~: Toggled case at col {}", col_idx);
         }
+    }
+
+    /// Set a mark at current position (m{a-z})
+    fn set_mark(&mut self, mark: char) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line = editor.get_caret_line();
+        let col = editor.get_caret_column();
+        self.marks.insert(mark, (line, col));
+        crate::verbose_print!(
+            "[godot-neovim] m{}: Set mark at line {}, col {}",
+            mark,
+            line + 1,
+            col
+        );
+    }
+
+    /// Jump to mark line ('{a-z})
+    fn jump_to_mark_line(&mut self, mark: char) {
+        let Some((line, _)) = self.marks.get(&mark).copied() else {
+            crate::verbose_print!("[godot-neovim] '{}: Mark not set", mark);
+            return;
+        };
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_count = editor.get_line_count();
+        let target_line = line.min(line_count - 1);
+        editor.set_caret_line(target_line);
+
+        // Move to first non-blank character (Vim behavior for ')
+        let line_text = editor.get_line(target_line).to_string();
+        let first_non_blank = line_text
+            .chars()
+            .position(|c| !c.is_whitespace())
+            .unwrap_or(0);
+        editor.set_caret_column(first_non_blank as i32);
+
+        self.sync_cursor_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] '{}: Jumped to line {}",
+            mark,
+            target_line + 1
+        );
+    }
+
+    /// Jump to exact mark position (`{a-z})
+    fn jump_to_mark_position(&mut self, mark: char) {
+        let Some((line, col)) = self.marks.get(&mark).copied() else {
+            crate::verbose_print!("[godot-neovim] `{}: Mark not set", mark);
+            return;
+        };
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_count = editor.get_line_count();
+        let target_line = line.min(line_count - 1);
+        editor.set_caret_line(target_line);
+
+        let line_length = editor.get_line(target_line).len() as i32;
+        let target_col = col.min(line_length.max(0));
+        editor.set_caret_column(target_col);
+
+        self.sync_cursor_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] `{}: Jumped to line {}, col {}",
+            mark,
+            target_line + 1,
+            target_col
+        );
     }
 
     /// Indent current line (>> command)
