@@ -58,6 +58,7 @@ This plugin is in early development. The following features are implemented:
 - ✅ Named registers (`"{a-z}yy`, `"{a-z}dd`, `"{a-z}p`)
 - ✅ Number increment/decrement (`Ctrl+A`, `Ctrl+X`)
 - ✅ Jump list navigation (`Ctrl+O`, `Ctrl+I`)
+- ✅ Replace mode (`R`)
 
 ## Requirements
 
@@ -279,6 +280,7 @@ Once the plugin is enabled:
 | Command | Description |
 |---------|-------------|
 | `i`, `a`, `o`, `O` | Enter insert mode |
+| `R` | Enter replace mode (overwrite) |
 | `v` | Enter visual mode |
 | `V` | Enter visual line mode |
 | `gv` | Enter visual block mode |
@@ -334,7 +336,6 @@ Features requiring plugin-side implementation (in priority order):
 
 | Priority | Feature | Commands | Description |
 |----------|---------|----------|-------------|
-| Medium | Replace mode | `R` | Overwrite mode (typing replaces characters) |
 | Low | Count operations | `3dd`, `5yy` | Delete/yank multiple lines |
 
 #### Likely Already Working (Testing Needed)

@@ -436,6 +436,56 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
+        // In replace mode, behavior depends on input mode setting
+        if self.is_replace_mode() {
+            // Intercept Escape or Ctrl+[ to exit replace mode (always)
+            let is_escape = key_event.get_keycode() == Key::ESCAPE;
+            let is_ctrl_bracket =
+                key_event.is_ctrl_pressed() && key_event.get_keycode() == Key::BRACKETLEFT;
+
+            if is_escape || is_ctrl_bracket {
+                self.send_escape();
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
+
+            // Check input mode setting
+            let input_mode = settings::get_input_mode();
+            if input_mode == settings::InputMode::Hybrid {
+                // Hybrid mode: implement overwrite behavior
+                // Delete character at cursor position, then let Godot insert the new one
+                let unicode = key_event.get_unicode();
+                if unicode > 0 {
+                    if let Some(ref mut editor) = self.current_editor {
+                        let line = editor.get_caret_line();
+                        let col = editor.get_caret_column();
+                        let line_text: String = editor.get_line(line).to_string();
+
+                        // Only delete if we're not at end of line
+                        if (col as usize) < line_text.chars().count() {
+                            // Delete character at cursor
+                            editor.select(line, col, line, col + 1);
+                            editor.delete_selection();
+                        }
+                    }
+                }
+                // Let Godot insert the character
+                return;
+            }
+
+            // Strict mode: Send keys to Neovim
+            let nvim_key = self.key_event_to_nvim_notation(&key_event);
+            if !nvim_key.is_empty() {
+                self.send_keys_insert_mode(&nvim_key);
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+            }
+            return;
+        }
+
         // Handle Ctrl+B: visual block in visual mode, page up in normal mode
         let keycode = key_event.get_keycode();
         if key_event.is_ctrl_pressed() && keycode == Key::B {
@@ -719,6 +769,15 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Handle 'r' for replace char
         if keycode == Key::R && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
             self.pending_char_op = Some('r');
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'R' for replace mode (continuous overwrite)
+        if keycode == Key::R && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.enter_replace_mode();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1353,6 +1412,11 @@ impl GodotNeovimPlugin {
         self.current_mode == "i"
     }
 
+    /// Check if currently in replace mode
+    fn is_replace_mode(&self) -> bool {
+        self.current_mode == "R"
+    }
+
     /// Check if mode is a visual mode (v, V, or Ctrl+V)
     fn is_visual_mode(mode: &str) -> bool {
         matches!(mode, "v" | "V" | "\x16" | "^V" | "CTRL-V")
@@ -1521,8 +1585,8 @@ impl GodotNeovimPlugin {
             // Sync cursor to Godot editor
             self.sync_cursor_from_grid(cursor);
 
-            // If exiting insert mode, sync buffer from Godot to Neovim
-            if old_mode == "i" && mode != "i" {
+            // If exiting insert or replace mode, sync buffer from Godot to Neovim
+            if (old_mode == "i" && mode != "i") || (old_mode == "R" && mode != "R") {
                 self.sync_buffer_to_neovim();
             }
 
@@ -1654,9 +1718,9 @@ impl GodotNeovimPlugin {
         self.current_mode = mode.clone();
 
         if blocking {
-            // Insert mode is "blocking" but we should update mode display
-            if mode == "i" {
-                crate::verbose_print!("[godot-neovim] Entered insert mode");
+            // Insert/replace mode is "blocking" but we should update mode display
+            if mode == "i" || mode == "R" {
+                crate::verbose_print!("[godot-neovim] Entered {} mode", if mode == "i" { "insert" } else { "replace" });
                 drop(client);
                 self.update_mode_display_with_cursor(&mode, None);
                 return true;
@@ -3575,6 +3639,16 @@ impl GodotNeovimPlugin {
             self.sync_buffer_to_neovim();
             crate::verbose_print!("[godot-neovim] ~: Toggled case at col {}", col_idx);
         }
+    }
+
+    /// Enter replace mode (R command)
+    fn enter_replace_mode(&mut self) {
+        // Send 'R' to Neovim to enter replace mode
+        let completed = self.send_keys("R");
+        if completed {
+            self.last_key.clear();
+        }
+        crate::verbose_print!("[godot-neovim] R: Entered replace mode");
     }
 
     /// Set a mark at current position (m{a-z})
