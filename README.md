@@ -60,6 +60,12 @@ This plugin is in early development. The following features are implemented:
 - ✅ Jump list navigation (`Ctrl+O`, `Ctrl+I`)
 - ✅ Replace mode (`R`)
 - ✅ Count operations with registers (`"{a-z}3dd`, `"{a-z}5yy`)
+- ✅ Change/substitute commands (`s`, `S`, `cc`, `C`, `D`, `Y`)
+- ✅ Visual mode selection toggle (`o`)
+- ✅ Additional g-commands (`gI`, `ga`, `gJ`, `ge`, `gp`, `gP`, `g&`)
+- ✅ File operations (`:wa`, `:wqa`, `:e!`, `Ctrl+G`)
+- ✅ Repeat last Ex command (`@:`)
+- ✅ Show jump/change list (`:jumps`, `:changes`)
 
 ## Requirements
 
@@ -165,7 +171,7 @@ Once the plugin is enabled:
 | Command | Description |
 |---------|-------------|
 | `h`, `j`, `k`, `l` | Basic cursor movement |
-| `w`, `b`, `e` | Word movement |
+| `w`, `b`, `e`, `ge` | Word movement |
 | `0` | Go to start of line |
 | `^` | Go to first non-blank character |
 | `$` | Go to end of line |
@@ -211,18 +217,28 @@ Once the plugin is enabled:
 |---------|-------------|
 | `x` | Delete character under cursor |
 | `X` | Delete character before cursor |
+| `s` | Delete character and enter insert mode |
 | `r{char}` | Replace character under cursor |
 | `~` | Toggle case of character |
 | `dd` | Delete line |
+| `D` | Delete to end of line |
 | `yy` | Yank (copy) line |
-| `p` | Paste |
+| `Y` | Yank to end of line |
+| `cc`, `S` | Change entire line |
+| `C` | Change to end of line |
+| `p` | Paste after cursor |
+| `P` | Paste before cursor |
+| `gp` | Paste after and move cursor after text |
+| `gP` | Paste before and move cursor after text |
 | `J` | Join current line with next |
+| `gJ` | Join lines without adding space |
 | `>>` | Indent line |
 | `<<` | Unindent line |
 | `.` | Repeat last change |
 | `gu{motion}` | Convert to lowercase |
 | `gU{motion}` | Convert to uppercase |
 | `g~{motion}` | Toggle case |
+| `ga` | Display ASCII/Unicode of char under cursor |
 
 #### Text Objects
 
@@ -281,10 +297,12 @@ Once the plugin is enabled:
 | Command | Description |
 |---------|-------------|
 | `i`, `a`, `o`, `O` | Enter insert mode |
+| `gI` | Insert at column 0 (ignore indent) |
 | `R` | Enter replace mode (overwrite) |
 | `v` | Enter visual mode |
 | `V` | Enter visual line mode |
 | `gv` | Enter visual block mode |
+| `o` (visual) | Toggle selection direction |
 | `Escape`, `Ctrl+[` | Return to normal mode |
 | `:` | Enter command-line mode |
 
@@ -294,16 +312,24 @@ Once the plugin is enabled:
 |---------|-------------|
 | `:e` | Open quick open dialog for scripts |
 | `:e {file}` | Open specified script file |
+| `:e!` | Discard changes and reload |
 | `:w` | Save file |
+| `:wa` | Save all open files |
 | `:q` | Close current script tab |
 | `:qa`, `:qall` | Close all script tabs |
 | `:wq`, `:x` | Save and close |
+| `:wqa` | Save all and close all |
 | `ZZ` | Save and close (normal mode) |
 | `ZQ` | Close without saving (discard changes) |
 | `:%s/old/new/g` | Substitute all occurrences |
+| `g&` | Repeat last `:s` on entire file |
 | `:{number}` | Jump to line number (e.g., `:123`) |
 | `:marks` | Show all marks (output to console) |
 | `:registers`, `:reg` | Show all registers (output to console) |
+| `:jumps` | Show jump list (output to console) |
+| `:changes` | Show change list (output to console) |
+| `@:` | Repeat last Ex command |
+| `Ctrl+G` | Show file info |
 | `Up`/`Down` | Browse command history |
 
 ### Limitations
@@ -339,19 +365,11 @@ Features requiring plugin-side implementation (in priority order):
 
 | Priority | Feature | Commands | Description |
 |----------|---------|----------|-------------|
-| High | Change/substitute | `s`, `S`, `cc` | Delete char and insert / Replace entire line |
-| High | Change/delete/yank to EOL | `C`, `D`, `Y` | Change/delete/yank from cursor to end of line |
-| High | Visual mode toggle | `o` (visual) | Jump to other end of selection |
 | High | System clipboard | `"+p`, `"*y` | Integration with OS clipboard |
 | High | Global command | `:g/{pattern}/{cmd}` | Execute command on matching lines |
 | High | Confirm substitute | `:%s/old/new/gc` | Confirm each replacement |
 | High | Special registers | `"_d`, `"0p` | Black hole register / Yank register |
 | High | Insert at last position | `gi` | Return to last insert position and insert |
-| High | Paste and move cursor | `gp`, `gP` | Paste and move cursor after pasted text |
-| High | Repeat last Ex command | `@:` | Repeat the last `:command` |
-| Medium | Word end backward | `ge` | Move to end of previous word |
-| Medium | Join without space | `gJ` | Join lines without adding space |
-| Medium | File info | `Ctrl+G` | Show filename and line count |
 | Medium | Hover info | `gh` | Show hover information (Godot integration) |
 | Medium | Open URL/path | `gx` | Open URL under cursor in browser |
 | Medium | Line operations | `:sort`, `:t`, `:m` | Sort, copy, move lines |
@@ -363,12 +381,7 @@ Features requiring plugin-side implementation (in priority order):
 | Medium | Buffer navigation | `:bn`, `:bp`, `:bd`, `:ls` | Navigate/manage script tabs |
 | Medium | Backward search | `?{pattern}` | Search backward in file |
 | Medium | Block jump | `[{`, `]}`, `[(`, `])` | Jump to block start/end |
-| Medium | Insert at column 0 | `gI` | Insert at column 0 (ignore indent) |
 | Medium | Indent-aware paste | `[p`, `]p` | Paste with indent adjustment |
-| Medium | Global repeat subst | `g&` | Repeat last `:s` on entire file |
-| Medium | Save all buffers | `:wa`, `:wqa` | Save all open script tabs |
-| Medium | Reload file | `:e!` | Discard changes and reload |
-| Medium | Show lists | `:changes`, `:jumps` | Display change/jump list |
 | Medium | Argument text object | `ia`, `aa` | Select function argument |
 | Medium | Indent text object | `ii`, `ai` | Select by indentation level |
 | Medium | Entire buffer object | `ae`, `ie` | Select entire buffer |
@@ -376,7 +389,6 @@ Features requiring plugin-side implementation (in priority order):
 | Low | Display line motion | `gj`, `gk` | Move by display lines (wrapped) |
 | Low | Folding | `za`, `zo`, `zc`, `zR`, `zM` | Code folding operations |
 | Low | Method jump | `[m`, `]m` | Jump to method start/end |
-| Low | Show char code | `ga` | Display ASCII/Unicode of char under cursor |
 
 #### Likely Already Working (Testing Needed)
 
@@ -384,9 +396,8 @@ These features may already work through Neovim backend:
 
 | Category | Commands |
 |----------|----------|
-| Motions | `ge`, `gj`, `gk`, `g0`, `g$`, `(`, `)`, `[[`, `]]` |
+| Motions | `gj`, `gk`, `g0`, `g$`, `(`, `)`, `[[`, `]]` |
 | Text Objects | `is`, `as` (sentence), `ip`, `ap` (paragraph), `it`, `at` (tag) |
-| Operators | `C`, `D`, `Y`, `s`, `S`, `gJ` |
 | Line Range | `:1,10d`, `:g/pattern/d`, `:.,$s/old/new/g` |
 
 ## Architecture
