@@ -705,6 +705,9 @@ impl GodotNeovimPlugin {
                         if c == '@' {
                             // @@ - replay last macro
                             self.replay_last_macro();
+                        } else if c == ':' {
+                            // @: - repeat last Ex command
+                            self.repeat_last_ex_command();
                         } else if c.is_ascii_lowercase() {
                             // @{a-z} - play specific macro
                             self.play_macro(c);

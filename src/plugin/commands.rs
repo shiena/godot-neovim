@@ -78,6 +78,17 @@ impl GodotNeovimPlugin {
         self.update_command_display();
     }
 
+    /// @: - Repeat the last Ex command
+    pub(super) fn repeat_last_ex_command(&mut self) {
+        if let Some(last_cmd) = self.command_history.last().cloned() {
+            self.command_buffer = format!(":{}", last_cmd);
+            crate::verbose_print!("[godot-neovim] @: Repeating last command: {}", last_cmd);
+            self.execute_command();
+        } else {
+            crate::verbose_print!("[godot-neovim] @: No previous command");
+        }
+    }
+
     /// Execute the current command
     pub(super) fn execute_command(&mut self) {
         let command = self.command_buffer.clone();
