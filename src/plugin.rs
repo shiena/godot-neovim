@@ -1928,6 +1928,11 @@ impl GodotNeovimPlugin {
                     self.prev_script_tab();
                     true
                 }
+                "f" => {
+                    // gf - go to file under cursor
+                    self.go_to_file_under_cursor();
+                    true
+                }
                 _ => false,
             };
 
@@ -4332,5 +4337,54 @@ impl GodotNeovimPlugin {
 
         Input::singleton().parse_input_event(&key_event);
         crate::verbose_print!("[godot-neovim] gd: Go to definition (F12)");
+    }
+
+    /// Go to file under cursor (gf command)
+    fn go_to_file_under_cursor(&mut self) {
+        // Add to jump list before jumping
+        self.add_to_jump_list();
+
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column() as usize;
+        let line_text = editor.get_line(line_idx).to_string();
+
+        // Extract file path from around cursor position
+        // Look for patterns like: "res://path/to/file.gd", 'path/file.gd', path/file
+        let chars: Vec<char> = line_text.chars().collect();
+
+        if col_idx >= chars.len() {
+            crate::verbose_print!("[godot-neovim] gf: Cursor at end of line");
+            return;
+        }
+
+        // Find start and end of path-like text
+        let path_chars = |c: char| {
+            c.is_alphanumeric() || c == '/' || c == '.' || c == '_' || c == '-' || c == ':'
+        };
+
+        let mut start = col_idx;
+        while start > 0 && path_chars(chars[start - 1]) {
+            start -= 1;
+        }
+
+        let mut end = col_idx;
+        while end < chars.len() && path_chars(chars[end]) {
+            end += 1;
+        }
+
+        if start == end {
+            crate::verbose_print!("[godot-neovim] gf: No file path under cursor");
+            return;
+        }
+
+        let path: String = chars[start..end].iter().collect();
+        crate::verbose_print!("[godot-neovim] gf: Extracted path: {}", path);
+
+        // Try to open the file
+        self.cmd_edit(&path);
     }
 }

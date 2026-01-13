@@ -201,6 +201,7 @@ Once the plugin is enabled:
 | `;` | Repeat last f/F/t/T (same direction) |
 | `,` | Repeat last f/F/t/T (opposite direction) |
 | `gd` | Go to definition |
+| `gf` | Go to file under cursor |
 
 #### Editing
 
@@ -334,7 +335,6 @@ Features requiring plugin-side implementation (in priority order):
 | Priority | Feature | Commands | Description |
 |----------|---------|----------|-------------|
 | Medium | Replace mode | `R` | Overwrite mode (typing replaces characters) |
-| Medium | Go to file | `gf` | Open file path under cursor |
 | Low | Count operations | `3dd`, `5yy` | Delete/yank multiple lines |
 
 #### Likely Already Working (Testing Needed)
