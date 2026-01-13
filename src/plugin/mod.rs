@@ -1208,8 +1208,12 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle 'x' for delete char under cursor
-        if keycode == Key::X && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+        // Handle 'x' for delete char under cursor (but not after 'g' - that's 'gx' for open URL)
+        if keycode == Key::X
+            && !key_event.is_shift_pressed()
+            && !key_event.is_ctrl_pressed()
+            && self.last_key != "g"
+        {
             self.delete_char_forward();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1720,6 +1724,17 @@ impl GodotNeovimPlugin {
 
         // Forward key to Neovim (normal/visual/etc modes)
         if let Some(keys) = self.key_event_to_nvim_string(key_event) {
+            // Intercept g-prefix commands that conflict with Neovim's built-in commands
+            // (e.g., gx opens URL via netrw in Neovim which can freeze)
+            if self.last_key == "g" && keys == "x" {
+                self.open_url_under_cursor();
+                self.last_key.clear();
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
+
             // Record key for macro if recording (and not playing back)
             if self.recording_macro.is_some() && !self.playing_macro {
                 self.macro_buffer.push(keys.clone());
@@ -1803,11 +1818,8 @@ impl GodotNeovimPlugin {
                         self.move_to_word_end_backward();
                         true
                     }
-                    "x" => {
-                        // gx - open URL under cursor in browser
-                        self.open_url_under_cursor();
-                        true
-                    }
+                    // Note: "gx" is intercepted before sending to Neovim (above)
+                    // to avoid Neovim's built-in gx (netrw) which can freeze
                     "j" => {
                         // gj - move down by display line (wrapped line)
                         self.move_display_line_down();
