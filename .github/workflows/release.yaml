@@ -75,6 +75,15 @@ jobs:
         with:
           path: artifacts
 
+      - name: Update plugin version
+        run: |
+          # Strip leading 'v' from version if present (v0.1.0 -> 0.1.0)
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          sed -i "s/^version=\".*\"/version=\"${VERSION}\"/" addons/godot-neovim/plugin.cfg
+          echo "Updated plugin.cfg to version ${VERSION}"
+          cat addons/godot-neovim/plugin.cfg
+
       - name: Prepare release archive
         run: |
           # Copy all libraries to addons/godot-neovim/
