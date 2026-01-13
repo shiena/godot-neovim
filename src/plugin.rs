@@ -53,6 +53,15 @@ pub struct GodotNeovimPlugin {
     /// Pending operator waiting for character input (f, F, t, T, r)
     #[init(val = None)]
     pending_char_op: Option<char>,
+    /// Command history for ':' commands
+    #[init(val = Vec::new())]
+    command_history: Vec<String>,
+    /// Current position in command history (None = not browsing history)
+    #[init(val = None)]
+    command_history_index: Option<usize>,
+    /// Temporary buffer for current input when browsing history
+    #[init(val = String::new())]
+    command_history_temp: String,
 }
 
 #[godot_api]
@@ -173,6 +182,14 @@ impl IEditorPlugin for GodotNeovimPlugin {
                     self.command_buffer.pop();
                     self.update_command_display();
                 }
+                // Reset history browsing when editing
+                self.command_history_index = None;
+            } else if keycode == Key::UP {
+                // Browse command history (older)
+                self.command_history_up();
+            } else if keycode == Key::DOWN {
+                // Browse command history (newer)
+                self.command_history_down();
             } else {
                 // Append character to command buffer
                 let unicode = key_event.get_unicode();
@@ -180,6 +197,8 @@ impl IEditorPlugin for GodotNeovimPlugin {
                     if let Some(c) = char::from_u32(unicode) {
                         self.command_buffer.push(c);
                         self.update_command_display();
+                        // Reset history browsing when typing
+                        self.command_history_index = None;
                     }
                 }
             }
@@ -369,8 +388,12 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
-        // Handle 'u' for undo
-        if keycode == Key::U && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+        // Handle 'u' for undo (but not after 'g' - that's 'gu' for lowercase)
+        if keycode == Key::U
+            && !key_event.is_shift_pressed()
+            && !key_event.is_ctrl_pressed()
+            && self.last_key != "g"
+        {
             self.undo();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1822,8 +1845,64 @@ impl GodotNeovimPlugin {
     fn open_command_line(&mut self) {
         self.command_buffer = ":".to_string();
         self.command_mode = true;
+        self.command_history_index = None;
+        self.command_history_temp.clear();
         self.update_command_display();
         crate::verbose_print!("[godot-neovim] Command line opened");
+    }
+
+    /// Browse command history (older - Up key)
+    fn command_history_up(&mut self) {
+        if self.command_history.is_empty() {
+            return;
+        }
+
+        match self.command_history_index {
+            None => {
+                // Start browsing history - save current input
+                self.command_history_temp = self
+                    .command_buffer
+                    .strip_prefix(':')
+                    .unwrap_or("")
+                    .to_string();
+                self.command_history_index = Some(self.command_history.len() - 1);
+            }
+            Some(idx) => {
+                // Move to older entry
+                if idx > 0 {
+                    self.command_history_index = Some(idx - 1);
+                }
+            }
+        }
+
+        // Update command buffer with history entry
+        if let Some(idx) = self.command_history_index {
+            if let Some(cmd) = self.command_history.get(idx) {
+                self.command_buffer = format!(":{}", cmd);
+                self.update_command_display();
+            }
+        }
+    }
+
+    /// Browse command history (newer - Down key)
+    fn command_history_down(&mut self) {
+        let Some(idx) = self.command_history_index else {
+            return;
+        };
+
+        if idx < self.command_history.len() - 1 {
+            // Move to newer entry
+            self.command_history_index = Some(idx + 1);
+            if let Some(cmd) = self.command_history.get(idx + 1) {
+                self.command_buffer = format!(":{}", cmd);
+                self.update_command_display();
+            }
+        } else {
+            // Return to current input
+            self.command_history_index = None;
+            self.command_buffer = format!(":{}", self.command_history_temp);
+            self.update_command_display();
+        }
     }
 
     /// Update command display in mode label
@@ -1839,6 +1918,8 @@ impl GodotNeovimPlugin {
     fn close_command_line(&mut self) {
         self.command_buffer.clear();
         self.command_mode = false;
+        self.command_history_index = None;
+        self.command_history_temp.clear();
 
         // Restore normal mode display
         let cursor = (self.current_cursor.0 + 1, self.current_cursor.1);
@@ -1853,6 +1934,17 @@ impl GodotNeovimPlugin {
 
         // Remove the leading ':'
         let cmd = command.strip_prefix(':').unwrap_or(&command).trim();
+
+        // Save to command history (avoid duplicates of last command)
+        if !cmd.is_empty() {
+            let cmd_string = cmd.to_string();
+            if self.command_history.last() != Some(&cmd_string) {
+                self.command_history.push(cmd_string);
+            }
+        }
+        // Reset history browsing
+        self.command_history_index = None;
+        self.command_history_temp.clear();
 
         crate::verbose_print!("[godot-neovim] Executing command: {}", cmd);
 

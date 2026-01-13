@@ -51,6 +51,8 @@ This plugin is in early development. The following features are implemented:
 - ✅ Go to definition (`gd`)
 - ✅ Dot repeat (`.`)
 - ✅ Text objects (`ciw`, `di"`, `ya{`, etc.)
+- ✅ Case operators (`gu`, `gU`, `g~` + motion)
+- ✅ Command history (Up/Down in command-line mode)
 
 ## Requirements
 
@@ -210,6 +212,9 @@ Once the plugin is enabled:
 | `>>` | Indent line |
 | `<<` | Unindent line |
 | `.` | Repeat last change |
+| `gu{motion}` | Convert to lowercase |
+| `gU{motion}` | Convert to uppercase |
+| `g~{motion}` | Toggle case |
 
 #### Text Objects
 
@@ -245,6 +250,7 @@ Once the plugin is enabled:
 | `ZZ` | Save and close (normal mode) |
 | `ZQ` | Close without saving (discard changes) |
 | `:%s/old/new/g` | Substitute all occurrences |
+| `Up`/`Down` | Browse command history |
 
 ### Limitations
 
@@ -283,8 +289,6 @@ Features requiring plugin-side implementation (in priority order):
 1. **Macros** - `q{a-z}` to record, `@{a-z}` to replay, `@@` to repeat last macro
 2. **Marks** - `m{a-z}` to set mark, `'{a-z}` to jump to mark line, `` `{a-z} `` to jump to exact position
 3. **Named Registers** - `"{a-z}` to specify register for yank/paste operations
-4. **Command History** - Up/Down arrows in command-line mode to browse history
-5. **Case Operators** - `g~`, `gu`, `gU` + motion for case conversion
 
 #### Likely Already Working (Testing Needed)
 
