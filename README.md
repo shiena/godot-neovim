@@ -417,6 +417,12 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 | Neovim undo | Uses Godot's undo system |
 | Neovim config | `init.lua` and plugins are not loaded |
 
+### Known Issues
+
+| Issue | Workaround |
+|-------|------------|
+| Dirty flag not set after some operations (named register paste, macro playback) | Switch to another script tab and back (`gt` then `gT`) |
+
 ## Roadmap
 
 ### Implementation Candidates
