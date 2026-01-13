@@ -411,6 +411,35 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] gd: Go to definition (F12)");
     }
 
+    /// Yank from cursor to end of line (Y command)
+    pub(super) fn yank_to_eol(&mut self) {
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column() as usize;
+        let line_text = editor.get_line(line_idx).to_string();
+        let chars: Vec<char> = line_text.chars().collect();
+
+        if col_idx >= chars.len() {
+            crate::verbose_print!("[godot-neovim] Y: Cursor at end of line, nothing to yank");
+            return;
+        }
+
+        // Get text from cursor to end of line
+        let yanked: String = chars[col_idx..].iter().collect();
+
+        // Copy to system clipboard (no trailing newline - this is a character yank)
+        godot::classes::DisplayServer::singleton().clipboard_set(&yanked);
+
+        crate::verbose_print!(
+            "[godot-neovim] Y: Yanked {} chars from col {} to EOL",
+            yanked.len(),
+            col_idx
+        );
+    }
+
     /// Go to file under cursor (gf command)
     pub(super) fn go_to_file_under_cursor(&mut self) {
         // Add to jump list before jumping

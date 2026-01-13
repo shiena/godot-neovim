@@ -1131,6 +1131,15 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        // Handle 'Y' for yank to end of line
+        if keycode == Key::Y && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.yank_to_eol();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
         // Handle 'r' for replace char
         if keycode == Key::R && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
             self.pending_char_op = Some('r');
