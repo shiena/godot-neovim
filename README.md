@@ -450,6 +450,53 @@ These features may already work through Neovim backend:
 - [godot-vim](https://github.com/igorgue/godot-vim) - Vim keybinding emulator for Godot (GDScript)
 - [vscode-neovim](https://github.com/vscode-neovim/vscode-neovim) - VSCode extension with Neovim backend
 
+### Comparison with godot-vim
+
+| Category | Feature | godot-neovim | godot-vim |
+|----------|---------|:------------:|:---------:|
+| **Architecture** | Backend | Neovim (RPC) | GDScript |
+| | Language | Rust (GDExtension) | GDScript |
+| | IME Support | Yes (hybrid mode) | No |
+| **Modes** | Normal, Insert, Visual, V-Line | Yes | Yes |
+| | Visual Block | Yes (`gv`) | No |
+| | Replace | Yes (`R`) | No |
+| | Command-line | Yes (`:` commands) | No |
+| **Navigation** | Basic (hjkl, w, b, e, gg, G) | Yes | Yes |
+| | Paragraph (`{`, `}`) | Yes | No |
+| | Display lines (`gj`, `gk`) | Yes | No |
+| | Block jump (`[{`, `]}`) | Yes | No |
+| | Method jump (`[m`, `]m`) | Yes | No |
+| **Scrolling** | Ctrl+F/B/D/U | Yes | Yes |
+| | Ctrl+Y/E, zz/zt/zb | Yes | No |
+| **Search** | `/`, `?` | Yes | `/` only |
+| | `gd` (go to definition) | Yes | No |
+| | `gx` (open URL) | Yes | No |
+| | `K` (documentation) | Yes | No |
+| **Editing** | Basic (x, dd, yy, p, J, etc.) | Yes | Yes |
+| | `gp`, `gP`, `[p`, `]p` | Yes | No |
+| | `Ctrl+A`/`Ctrl+X` (numbers) | Yes | No |
+| | `ga`, `gqq` | Yes | No |
+| **Text Objects** | Words, quotes, brackets | Yes | Yes |
+| | Entire buffer (`ie`, `ae`) | Yes | No |
+| **Registers** | Named (`"{a-z}`) | Yes | No |
+| | Clipboard (`"+`, `"*`) | Yes | No |
+| | Black hole (`"_`), Yank (`"0`) | Yes | No |
+| **Marks** | `m{a-z}`, `'{a-z}` | Yes | Yes |
+| | Exact position (`` `{a-z} ``) | Yes | No |
+| **Macros** | `q{a-z}`, `@{a-z}`, `@@` | Yes | Yes |
+| **Folding** | `za`, `zo`, `zc`, `zM`, `zR` | Yes | `za`, `zM`, `zR` |
+| **Ex Commands** | `:w`, `:q`, `:wq`, `:x` | Yes | No |
+| | `:e`, `:e!`, `:wa`, `:qa` | Yes | No |
+| | `:%s/old/new/g` | Yes | No |
+| | `:g/{pattern}/d` | Yes | No |
+| | `:sort`, `:t`, `:m` | Yes | No |
+| | `:bn`, `:bp`, `:bd`, `:ls` | Yes | No |
+| | `ZZ`, `ZQ`, `@:`, `Ctrl+G` | Yes | No |
+
+**Summary:**
+- **godot-neovim**: Full Neovim backend with Ex commands, registers, IME support. Requires Neovim installation.
+- **godot-vim**: Pure GDScript, easy setup, basic Vim keybindings. No external dependencies.
+
 ## License
 
 Apache License 2.0 - See [LICENSE](LICENSE) for details.
