@@ -31,46 +31,52 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 - Configurable Neovim executable path via Editor Settings
 - Path validation on startup and settings change
 
-### Current Status
+## Comparison with godot-vim
 
-This plugin is in early development. The following features are implemented:
+| Category | Feature | godot-neovim | godot-vim |
+|----------|---------|:------------:|:---------:|
+| **Architecture** | Backend | Neovim (RPC) | GDScript |
+| | Language | Rust (GDExtension) | GDScript |
+| | IME Support | ✅ (hybrid mode) | ❌ |
+| **Modes** | Normal, Insert, Visual, V-Line | ✅ | ✅ |
+| | Visual Block | ✅ (`gv`) | ❌ |
+| | Replace | ✅ (`R`) | ❌ |
+| | Command-line | ✅ (`:` commands) | ❌ |
+| **Navigation** | Basic (hjkl, w, b, e, gg, G) | ✅ | ✅ |
+| | Paragraph (`{`, `}`) | ✅ | ❌ |
+| | Display lines (`gj`, `gk`) | ✅ | ❌ |
+| | Block jump (`[{`, `]}`) | ✅ | ❌ |
+| | Method jump (`[m`, `]m`) | ✅ | ❌ |
+| **Scrolling** | Ctrl+F/B/D/U | ✅ | ✅ |
+| | Ctrl+Y/E, zz/zt/zb | ✅ | ❌ |
+| **Search** | `/`, `?` | ✅ | `/` only |
+| | `gd` (go to definition) | ✅ | ❌ |
+| | `gx` (open URL) | ✅ | ❌ |
+| | `K` (documentation) | ✅ | ❌ |
+| **Editing** | Basic (x, dd, yy, p, J, etc.) | ✅ | ✅ |
+| | `gp`, `gP`, `[p`, `]p` | ✅ | ❌ |
+| | `Ctrl+A`/`Ctrl+X` (numbers) | ✅ | ❌ |
+| | `ga`, `gqq` | ✅ | ❌ |
+| **Text Objects** | Words, quotes, brackets | ✅ | ✅ |
+| | Entire buffer (`ie`, `ae`) | ✅ | ❌ |
+| **Registers** | Named (`"{a-z}`) | ✅ | ❌ |
+| | Clipboard (`"+`, `"*`) | ✅ | ❌ |
+| | Black hole (`"_`), Yank (`"0`) | ✅ | ❌ |
+| **Marks** | `m{a-z}`, `'{a-z}` | ✅ | ✅ |
+| | Exact position (`` `{a-z} ``) | ✅ | ❌ |
+| **Macros** | `q{a-z}`, `@{a-z}`, `@@` | ✅ | ✅ |
+| **Folding** | `za`, `zo`, `zc`, `zM`, `zR` | ✅ | `za`, `zM`, `zR` |
+| **Ex Commands** | `:w`, `:q`, `:wq`, `:x` | ✅ | ❌ |
+| | `:e`, `:e!`, `:wa`, `:qa` | ✅ | ❌ |
+| | `:%s/old/new/g` | ✅ | ❌ |
+| | `:g/{pattern}/d` | ✅ | ❌ |
+| | `:sort`, `:t`, `:m` | ✅ | ❌ |
+| | `:bn`, `:bp`, `:bd`, `:ls` | ✅ | ❌ |
+| | `ZZ`, `ZQ`, `@:`, `Ctrl+G` | ✅ | ❌ |
 
-- ✅ Normal mode navigation (`h`, `j`, `k`, `l`, `gg`, `G`, `w`, `b`, etc.)
-- ✅ Mode switching (`i`, `a`, `o`, `v`, `Escape`, `Ctrl+[`, etc.)
-- ✅ Mode indicator display with line:column
-- ✅ Cursor position synchronization (Neovim ↔ Godot)
-- ✅ Buffer synchronization (Godot ↔ Neovim, bidirectional)
-- ✅ Operator-pending commands with timeout handling (`gg`, `dd`, `yy`, etc.)
-- ✅ Insert mode with configurable input handling (hybrid/strict modes)
-- ✅ Normal mode edits reflected in Godot (`dd`, `yy`, `p`, etc.)
-- ✅ Visual mode selection display (`v`, `V`)
-- ✅ Command-line mode (`:w`, `:q`, `:wq`, `ZZ`, `ZQ`, `:%s/old/new/g`)
-- ✅ Search word under cursor (`*` forward, `#` backward, `n`/`N` repeat)
-- ✅ Character find (`f`/`F`/`t`/`T`, `;`/`,` repeat)
-- ✅ Line navigation (`0`, `^`, `$`)
-- ✅ Paragraph movement (`{`, `}`)
-- ✅ Bracket matching (`%`)
-- ✅ Character editing (`x`, `X`, `r`, `~`)
-- ✅ Line operations (`J` join, `>>` indent, `<<` unindent)
-- ✅ Full/half page scrolling (`Ctrl+F`, `Ctrl+B`, `Ctrl+D`, `Ctrl+U`)
-- ✅ Go to definition (`gd`)
-- ✅ Dot repeat (`.`)
-- ✅ Text objects (`ciw`, `di"`, `ya{`, etc.)
-- ✅ Case operators (`gu`, `gU`, `g~` + motion)
-- ✅ Command history (Up/Down in command-line mode)
-- ✅ Marks (`m{a-z}`, `'{a-z}`, `` `{a-z} ``)
-- ✅ Macros (`q{a-z}`, `@{a-z}`, `@@`)
-- ✅ Named registers (`"{a-z}yy`, `"{a-z}dd`, `"{a-z}p`)
-- ✅ Number increment/decrement (`Ctrl+A`, `Ctrl+X`)
-- ✅ Jump list navigation (`Ctrl+O`, `Ctrl+I`)
-- ✅ Replace mode (`R`)
-- ✅ Count operations with registers (`"{a-z}3dd`, `"{a-z}5yy`)
-- ✅ Change/substitute commands (`s`, `S`, `cc`, `C`, `D`, `Y`)
-- ✅ Visual mode selection toggle (`o`)
-- ✅ Additional g-commands (`gI`, `ga`, `gJ`, `ge`, `gp`, `gP`, `g&`)
-- ✅ File operations (`:wa`, `:wqa`, `:e!`, `Ctrl+G`)
-- ✅ Repeat last Ex command (`@:`)
-- ✅ Show jump/change list (`:jumps`, `:changes`)
+**Summary:**
+- **godot-neovim**: Full Neovim backend with Ex commands, registers, IME support. Requires Neovim installation.
+- **godot-vim**: Pure GDScript, easy setup, basic Vim keybindings. No external dependencies.
 
 ## Requirements
 
@@ -375,11 +381,11 @@ Once the plugin is enabled:
 | `Ctrl+G` | Show file info |
 | `Up`/`Down` | Browse command history |
 
-### Limitations
+## Limitations
 
 This plugin has architectural limitations due to using Godot's native CodeEdit for text editing.
 
-#### Insert Mode (Hybrid Mode)
+### Insert Mode (Hybrid Mode)
 
 In hybrid mode (default), insert mode uses Godot's native input system to support IME and auto-completion. As a result, Vim's insert mode commands are **not available**:
 
@@ -392,7 +398,7 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 | `Ctrl+A` | Insert previously inserted text |
 | `Ctrl+N/P` | Keyword completion (use Godot's auto-completion instead) |
 
-#### Not Implemented
+### Not Implemented
 
 | Feature | Description |
 |---------|-------------|
@@ -400,9 +406,9 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 | Neovim undo | Uses Godot's undo system |
 | Neovim config | `init.lua` and plugins are not loaded |
 
-### Roadmap
+## Roadmap
 
-#### Implementation Candidates
+### Implementation Candidates
 
 Features requiring plugin-side implementation:
 
@@ -416,7 +422,7 @@ Features requiring plugin-side implementation:
 | Medium | Argument text object | `ia`, `aa` | ⭐⭐⭐ Hard | Select function argument (requires parsing) |
 | Low | Visual block insert | `I`/`A` (v-block) | ⭐⭐⭐ Hard | Insert/append on multiple lines |
 
-#### Likely Already Working (Testing Needed)
+### Likely Already Working (Testing Needed)
 
 These features may already work through Neovim backend:
 
@@ -454,53 +460,6 @@ These features may already work through Neovim backend:
 
 - [godot-vim](https://github.com/igorgue/godot-vim) - Vim keybinding emulator for Godot (GDScript)
 - [vscode-neovim](https://github.com/vscode-neovim/vscode-neovim) - VSCode extension with Neovim backend
-
-### Comparison with godot-vim
-
-| Category | Feature | godot-neovim | godot-vim |
-|----------|---------|:------------:|:---------:|
-| **Architecture** | Backend | Neovim (RPC) | GDScript |
-| | Language | Rust (GDExtension) | GDScript |
-| | IME Support | ✅ (hybrid mode) | ❌ |
-| **Modes** | Normal, Insert, Visual, V-Line | ✅ | ✅ |
-| | Visual Block | ✅ (`gv`) | ❌ |
-| | Replace | ✅ (`R`) | ❌ |
-| | Command-line | ✅ (`:` commands) | ❌ |
-| **Navigation** | Basic (hjkl, w, b, e, gg, G) | ✅ | ✅ |
-| | Paragraph (`{`, `}`) | ✅ | ❌ |
-| | Display lines (`gj`, `gk`) | ✅ | ❌ |
-| | Block jump (`[{`, `]}`) | ✅ | ❌ |
-| | Method jump (`[m`, `]m`) | ✅ | ❌ |
-| **Scrolling** | Ctrl+F/B/D/U | ✅ | ✅ |
-| | Ctrl+Y/E, zz/zt/zb | ✅ | ❌ |
-| **Search** | `/`, `?` | ✅ | `/` only |
-| | `gd` (go to definition) | ✅ | ❌ |
-| | `gx` (open URL) | ✅ | ❌ |
-| | `K` (documentation) | ✅ | ❌ |
-| **Editing** | Basic (x, dd, yy, p, J, etc.) | ✅ | ✅ |
-| | `gp`, `gP`, `[p`, `]p` | ✅ | ❌ |
-| | `Ctrl+A`/`Ctrl+X` (numbers) | ✅ | ❌ |
-| | `ga`, `gqq` | ✅ | ❌ |
-| **Text Objects** | Words, quotes, brackets | ✅ | ✅ |
-| | Entire buffer (`ie`, `ae`) | ✅ | ❌ |
-| **Registers** | Named (`"{a-z}`) | ✅ | ❌ |
-| | Clipboard (`"+`, `"*`) | ✅ | ❌ |
-| | Black hole (`"_`), Yank (`"0`) | ✅ | ❌ |
-| **Marks** | `m{a-z}`, `'{a-z}` | ✅ | ✅ |
-| | Exact position (`` `{a-z} ``) | ✅ | ❌ |
-| **Macros** | `q{a-z}`, `@{a-z}`, `@@` | ✅ | ✅ |
-| **Folding** | `za`, `zo`, `zc`, `zM`, `zR` | ✅ | `za`, `zM`, `zR` |
-| **Ex Commands** | `:w`, `:q`, `:wq`, `:x` | ✅ | ❌ |
-| | `:e`, `:e!`, `:wa`, `:qa` | ✅ | ❌ |
-| | `:%s/old/new/g` | ✅ | ❌ |
-| | `:g/{pattern}/d` | ✅ | ❌ |
-| | `:sort`, `:t`, `:m` | ✅ | ❌ |
-| | `:bn`, `:bp`, `:bd`, `:ls` | ✅ | ❌ |
-| | `ZZ`, `ZQ`, `@:`, `Ctrl+G` | ✅ | ❌ |
-
-**Summary:**
-- **godot-neovim**: Full Neovim backend with Ex commands, registers, IME support. Requires Neovim installation.
-- **godot-vim**: Pure GDScript, easy setup, basic Vim keybindings. No external dependencies.
 
 ## License
 
