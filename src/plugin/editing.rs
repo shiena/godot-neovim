@@ -522,6 +522,60 @@ impl GodotNeovimPlugin {
         );
     }
 
+    /// Delete from cursor to end of line (D command)
+    pub(super) fn delete_to_eol(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column() as usize;
+        let line_text = editor.get_line(line_idx).to_string();
+        let chars: Vec<char> = line_text.chars().collect();
+
+        if col_idx >= chars.len() {
+            return;
+        }
+
+        // Delete from cursor to end
+        let new_line: String = chars[..col_idx].iter().collect();
+        editor.set_line(line_idx, &new_line);
+
+        // Adjust cursor if needed
+        let new_len = new_line.chars().count();
+        if new_len > 0 {
+            editor.set_caret_column((new_len - 1) as i32);
+        } else {
+            editor.set_caret_column(0);
+        }
+
+        self.sync_buffer_to_neovim();
+        crate::verbose_print!("[godot-neovim] D: Deleted to end of line from col {}", col_idx);
+    }
+
+    /// Change from cursor to end of line (C command)
+    pub(super) fn change_to_eol(&mut self) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        let line_idx = editor.get_caret_line();
+        let col_idx = editor.get_caret_column() as usize;
+        let line_text = editor.get_line(line_idx).to_string();
+        let chars: Vec<char> = line_text.chars().collect();
+
+        // Delete from cursor to end
+        let new_line: String = chars[..col_idx].iter().collect();
+        editor.set_line(line_idx, &new_line);
+        editor.set_caret_column(col_idx as i32);
+
+        // Sync buffer and enter insert mode
+        self.sync_buffer_to_neovim();
+        self.sync_cursor_to_neovim();
+        self.send_keys("i");
+        crate::verbose_print!("[godot-neovim] C: Changed to end of line from col {}", col_idx);
+    }
+
     /// Yank from cursor to end of line (Y command)
     pub(super) fn yank_to_eol(&mut self) {
         let Some(ref editor) = self.current_editor else {

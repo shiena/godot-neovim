@@ -1155,6 +1155,24 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        // Handle 'D' for delete to end of line
+        if keycode == Key::D && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.delete_to_eol();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle 'C' for change to end of line
+        if keycode == Key::C && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.change_to_eol();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
         // Handle 'r' for replace char
         if keycode == Key::R && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
             self.pending_char_op = Some('r');
