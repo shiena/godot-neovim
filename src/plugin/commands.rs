@@ -136,6 +136,14 @@ impl GodotNeovimPlugin {
                 else if cmd == "registers" || cmd == "reg" {
                     self.cmd_show_registers();
                 }
+                // Check for :jumps - show jump list
+                else if cmd == "jumps" || cmd == "ju" {
+                    self.cmd_show_jumps();
+                }
+                // Check for :changes - show change list
+                else if cmd == "changes" {
+                    self.cmd_show_changes();
+                }
                 // Check for :e[dit] {file} command (or just :e to open quick open)
                 else if cmd == "e" || cmd == "edit" || cmd.starts_with("e ") || cmd.starts_with("edit ") {
                     let file_path = if cmd == "e" || cmd == "edit" {
@@ -227,6 +235,33 @@ impl GodotNeovimPlugin {
             };
             godot_print!("\"{}   {}", reg, preview);
         }
+    }
+
+    /// :jumps - Show the jump list
+    pub(super) fn cmd_show_jumps(&self) {
+        godot_print!("[godot-neovim] :jumps");
+        godot_print!(" jump line  col");
+
+        if self.jump_list.is_empty() {
+            godot_print!("   (empty)");
+            return;
+        }
+
+        for (i, (line, col)) in self.jump_list.iter().enumerate() {
+            let marker = if i == self.jump_list_pos { ">" } else { " " };
+            godot_print!("{}{:>4}  {:>4}  {:>3}", marker, i + 1, line + 1, col);
+        }
+
+        if self.jump_list_pos >= self.jump_list.len() {
+            godot_print!(">          (current)");
+        }
+    }
+
+    /// :changes - Show the change list (simplified - we don't track changes)
+    pub(super) fn cmd_show_changes(&self) {
+        godot_print!("[godot-neovim] :changes");
+        godot_print!("   (change list not tracked)");
+        godot_print!("   Use undo/redo (u/Ctrl+R) for changes");
     }
 
     /// :e[dit] {file} - Open a file in the script editor
