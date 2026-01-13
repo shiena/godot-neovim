@@ -292,6 +292,8 @@ Once the plugin is enabled:
 
 | Command | Description |
 |---------|-------------|
+| `:e` | Open quick open dialog for scripts |
+| `:e {file}` | Open specified script file |
 | `:w` | Save file |
 | `:q` | Close current script tab |
 | `:qa`, `:qall` | Close all script tabs |

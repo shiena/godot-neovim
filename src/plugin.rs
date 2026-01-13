@@ -2494,13 +2494,44 @@ impl GodotNeovimPlugin {
     }
 
     /// :e[dit] {file} - Open a file in the script editor
+    /// If no file is specified, opens the quick open dialog
     fn cmd_edit(&self, file_path: &str) {
+        let mut editor = EditorInterface::singleton();
+
         if file_path.is_empty() {
-            godot_warn!("[godot-neovim] :e requires a file path");
+            // No file specified - open quick open dialog
+            let callback = Callable::from_fn("quick_open_callback", |args: &[&Variant]| {
+                if let Some(path_var) = args.first() {
+                    let path: String = path_var.to::<String>();
+                    if !path.is_empty() {
+                        // Load and open the selected script
+                        let resource =
+                            godot::classes::ResourceLoader::singleton().load(&path);
+                        if let Some(res) = resource {
+                            if let Ok(script) = res.try_cast::<godot::classes::Script>() {
+                                let mut ed = EditorInterface::singleton();
+                                ed.edit_script(&script);
+                                crate::verbose_print!(
+                                    "[godot-neovim] :e - Opened script from quick open: {}",
+                                    path
+                                );
+                            }
+                        }
+                    }
+                }
+                Variant::nil()
+            });
+
+            // Filter for Script types
+            let mut base_types: Array<StringName> = Array::new();
+            base_types.push(&StringName::from("Script"));
+            editor
+                .popup_quick_open_ex(&callback)
+                .base_types(&base_types)
+                .done();
+            crate::verbose_print!("[godot-neovim] :e - Opened quick open dialog");
             return;
         }
-
-        let mut editor = EditorInterface::singleton();
 
         // Try to load the resource
         let path = if file_path.starts_with("res://") {
