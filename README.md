@@ -461,42 +461,42 @@ These features may already work through Neovim backend:
 |----------|---------|:------------:|:---------:|
 | **Architecture** | Backend | Neovim (RPC) | GDScript |
 | | Language | Rust (GDExtension) | GDScript |
-| | IME Support | Yes (hybrid mode) | No |
-| **Modes** | Normal, Insert, Visual, V-Line | Yes | Yes |
-| | Visual Block | Yes (`gv`) | No |
-| | Replace | Yes (`R`) | No |
-| | Command-line | Yes (`:` commands) | No |
-| **Navigation** | Basic (hjkl, w, b, e, gg, G) | Yes | Yes |
-| | Paragraph (`{`, `}`) | Yes | No |
-| | Display lines (`gj`, `gk`) | Yes | No |
-| | Block jump (`[{`, `]}`) | Yes | No |
-| | Method jump (`[m`, `]m`) | Yes | No |
-| **Scrolling** | Ctrl+F/B/D/U | Yes | Yes |
-| | Ctrl+Y/E, zz/zt/zb | Yes | No |
-| **Search** | `/`, `?` | Yes | `/` only |
-| | `gd` (go to definition) | Yes | No |
-| | `gx` (open URL) | Yes | No |
-| | `K` (documentation) | Yes | No |
-| **Editing** | Basic (x, dd, yy, p, J, etc.) | Yes | Yes |
-| | `gp`, `gP`, `[p`, `]p` | Yes | No |
-| | `Ctrl+A`/`Ctrl+X` (numbers) | Yes | No |
-| | `ga`, `gqq` | Yes | No |
-| **Text Objects** | Words, quotes, brackets | Yes | Yes |
-| | Entire buffer (`ie`, `ae`) | Yes | No |
-| **Registers** | Named (`"{a-z}`) | Yes | No |
-| | Clipboard (`"+`, `"*`) | Yes | No |
-| | Black hole (`"_`), Yank (`"0`) | Yes | No |
-| **Marks** | `m{a-z}`, `'{a-z}` | Yes | Yes |
-| | Exact position (`` `{a-z} ``) | Yes | No |
-| **Macros** | `q{a-z}`, `@{a-z}`, `@@` | Yes | Yes |
-| **Folding** | `za`, `zo`, `zc`, `zM`, `zR` | Yes | `za`, `zM`, `zR` |
-| **Ex Commands** | `:w`, `:q`, `:wq`, `:x` | Yes | No |
-| | `:e`, `:e!`, `:wa`, `:qa` | Yes | No |
-| | `:%s/old/new/g` | Yes | No |
-| | `:g/{pattern}/d` | Yes | No |
-| | `:sort`, `:t`, `:m` | Yes | No |
-| | `:bn`, `:bp`, `:bd`, `:ls` | Yes | No |
-| | `ZZ`, `ZQ`, `@:`, `Ctrl+G` | Yes | No |
+| | IME Support | ✅ (hybrid mode) | ❌ |
+| **Modes** | Normal, Insert, Visual, V-Line | ✅ | ✅ |
+| | Visual Block | ✅ (`gv`) | ❌ |
+| | Replace | ✅ (`R`) | ❌ |
+| | Command-line | ✅ (`:` commands) | ❌ |
+| **Navigation** | Basic (hjkl, w, b, e, gg, G) | ✅ | ✅ |
+| | Paragraph (`{`, `}`) | ✅ | ❌ |
+| | Display lines (`gj`, `gk`) | ✅ | ❌ |
+| | Block jump (`[{`, `]}`) | ✅ | ❌ |
+| | Method jump (`[m`, `]m`) | ✅ | ❌ |
+| **Scrolling** | Ctrl+F/B/D/U | ✅ | ✅ |
+| | Ctrl+Y/E, zz/zt/zb | ✅ | ❌ |
+| **Search** | `/`, `?` | ✅ | `/` only |
+| | `gd` (go to definition) | ✅ | ❌ |
+| | `gx` (open URL) | ✅ | ❌ |
+| | `K` (documentation) | ✅ | ❌ |
+| **Editing** | Basic (x, dd, yy, p, J, etc.) | ✅ | ✅ |
+| | `gp`, `gP`, `[p`, `]p` | ✅ | ❌ |
+| | `Ctrl+A`/`Ctrl+X` (numbers) | ✅ | ❌ |
+| | `ga`, `gqq` | ✅ | ❌ |
+| **Text Objects** | Words, quotes, brackets | ✅ | ✅ |
+| | Entire buffer (`ie`, `ae`) | ✅ | ❌ |
+| **Registers** | Named (`"{a-z}`) | ✅ | ❌ |
+| | Clipboard (`"+`, `"*`) | ✅ | ❌ |
+| | Black hole (`"_`), Yank (`"0`) | ✅ | ❌ |
+| **Marks** | `m{a-z}`, `'{a-z}` | ✅ | ✅ |
+| | Exact position (`` `{a-z} ``) | ✅ | ❌ |
+| **Macros** | `q{a-z}`, `@{a-z}`, `@@` | ✅ | ✅ |
+| **Folding** | `za`, `zo`, `zc`, `zM`, `zR` | ✅ | `za`, `zM`, `zR` |
+| **Ex Commands** | `:w`, `:q`, `:wq`, `:x` | ✅ | ❌ |
+| | `:e`, `:e!`, `:wa`, `:qa` | ✅ | ❌ |
+| | `:%s/old/new/g` | ✅ | ❌ |
+| | `:g/{pattern}/d` | ✅ | ❌ |
+| | `:sort`, `:t`, `:m` | ✅ | ❌ |
+| | `:bn`, `:bp`, `:bd`, `:ls` | ✅ | ❌ |
+| | `ZZ`, `ZQ`, `@:`, `Ctrl+G` | ✅ | ❌ |
 
 **Summary:**
 - **godot-neovim**: Full Neovim backend with Ex commands, registers, IME support. Requires Neovim installation.
