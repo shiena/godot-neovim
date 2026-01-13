@@ -65,8 +65,20 @@ impl GodotNeovimPlugin {
         let col = editor.get_caret_column();
 
         // Neovim uses 1-indexed lines, 0-indexed columns
-        let nvim_line = (line + 1) as i64;
+        let mut nvim_line = (line + 1) as i64;
         let nvim_col = col as i64;
+
+        // Clamp line to Neovim buffer range to handle line count differences
+        if let Ok(nvim_line_count) = client.get_line_count() {
+            if nvim_line > nvim_line_count {
+                crate::verbose_print!(
+                    "[godot-neovim] Clamping line {} to Neovim max {}",
+                    nvim_line,
+                    nvim_line_count
+                );
+                nvim_line = nvim_line_count;
+            }
+        }
 
         crate::verbose_print!(
             "[godot-neovim] Syncing cursor to Neovim: line={}, col={}",
@@ -352,7 +364,12 @@ impl GodotNeovimPlugin {
         let text = lines.join("\n");
         let current_text = editor.get_text().to_string();
 
-        if text != current_text {
+        // Normalize trailing newlines for comparison to avoid false dirty flags
+        // Neovim has implicit trailing newline (eol option), Godot may or may not include it
+        let text_normalized = text.trim_end_matches('\n');
+        let current_normalized = current_text.trim_end_matches('\n');
+
+        if text_normalized != current_normalized {
             editor.set_text(&text);
             crate::verbose_print!("[godot-neovim] Buffer synced from Neovim ({} lines)", lines.len());
         }

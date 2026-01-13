@@ -290,6 +290,28 @@ impl NeovimClient {
         })
     }
 
+    /// Get buffer line count
+    pub fn get_line_count(&self) -> Result<i64, String> {
+        let neovim_arc = self.neovim.clone();
+
+        self.runtime.block_on(async {
+            let nvim_lock = neovim_arc.lock().await;
+            if let Some(neovim) = nvim_lock.as_ref() {
+                let buffer = neovim
+                    .get_current_buf()
+                    .await
+                    .map_err(|e| format!("Failed to get buffer: {}", e))?;
+                let count = buffer
+                    .line_count()
+                    .await
+                    .map_err(|e| format!("Failed to get line count: {}", e))?;
+                Ok(count)
+            } else {
+                Err("Neovim not connected".to_string())
+            }
+        })
+    }
+
     /// Set buffer content
     pub fn set_buffer_lines(&self, start: i64, end: i64, lines: Vec<String>) -> Result<(), String> {
         let neovim_arc = self.neovim.clone();
