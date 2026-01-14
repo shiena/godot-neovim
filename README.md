@@ -235,8 +235,8 @@ Press `F1` in Godot and search for **"GodotNeovim"** to view the command referen
 
 | Command | Description |
 |---------|-------------|
-| `/` | Open find dialog |
-| `?` | Search backward (open find dialog) |
+| `/` | Search forward |
+| `?` | Search backward |
 | `*` | Search forward for word under cursor |
 | `#` | Search backward for word under cursor |
 | `n` | Repeat last search (same direction) |
@@ -421,7 +421,6 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 
 | Feature | Description |
 |---------|-------------|
-| Neovim search | `/` opens Godot's find dialog |
 | Neovim undo | Uses Godot's undo system |
 | Neovim config | `init.lua` and plugins are not loaded |
 | `K` for signals | Signal documentation lookup not supported (class/method/property/constant only) |

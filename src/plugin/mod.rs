@@ -142,6 +142,15 @@ pub struct GodotNeovimPlugin {
     /// Temporary buffer for current input when browsing history
     #[init(val = String::new())]
     command_history_temp: String,
+    /// Flag indicating search mode is active (/ or ?)
+    #[init(val = false)]
+    search_mode: bool,
+    /// Search input buffer for '/' and '?' commands
+    #[init(val = String::new())]
+    search_buffer: String,
+    /// Search direction (true = forward /, false = backward ?)
+    #[init(val = true)]
+    search_forward: bool,
     /// Marks storage: char -> (line, col) - 0-indexed
     #[init(val = HashMap::new())]
     marks: HashMap<char, (i32, i32)>,
@@ -425,6 +434,12 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Handle command-line mode input
         if self.command_mode {
             self.handle_command_mode_input(&key_event);
+            return;
+        }
+
+        // Handle search mode input (/ or ?)
+        if self.search_mode {
+            self.handle_search_mode_input(&key_event);
             return;
         }
 
@@ -933,6 +948,35 @@ impl GodotNeovimPlugin {
         }
     }
 
+    fn handle_search_mode_input(&mut self, key_event: &Gd<godot::classes::InputEventKey>) {
+        let keycode = key_event.get_keycode();
+
+        if keycode == Key::ESCAPE {
+            self.close_search_mode();
+        } else if keycode == Key::ENTER {
+            self.execute_search();
+        } else if keycode == Key::BACKSPACE {
+            // Remove last character (but keep the '/' or '?')
+            if self.search_buffer.len() > 1 {
+                self.search_buffer.pop();
+                self.update_search_display();
+            }
+        } else {
+            // Append character to search buffer
+            let unicode = key_event.get_unicode();
+            if unicode > 0 {
+                if let Some(c) = char::from_u32(unicode) {
+                    self.search_buffer.push(c);
+                    self.update_search_display();
+                }
+            }
+        }
+
+        if let Some(mut viewport) = self.base().get_viewport() {
+            viewport.set_input_as_handled();
+        }
+    }
+
     fn handle_pending_char_op(&mut self, key_event: &Gd<godot::classes::InputEventKey>) -> bool {
         let Some(op) = self.pending_char_op else {
             return false;
@@ -1301,9 +1345,18 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle '/' for search - open Godot's find dialog
-        if keycode == Key::SLASH && !key_event.is_ctrl_pressed() && !key_event.is_shift_pressed() {
-            self.open_find_dialog();
+        // Handle '/' for forward search mode
+        if unicode_char == Some('/') && !key_event.is_ctrl_pressed() {
+            self.open_search_mode(true);
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '?' for backward search mode
+        if unicode_char == Some('?') && !key_event.is_ctrl_pressed() {
+            self.open_search_mode(false);
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1319,36 +1372,36 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle '*' for search forward word under cursor (use unicode for JIS keyboard support)
+        // Handle '*' for search forward word under cursor (send to Neovim)
         if unicode_char == Some('*') {
-            self.search_word_forward();
+            self.search_word("*");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
             return;
         }
 
-        // Handle '#' for search backward word under cursor
+        // Handle '#' for search backward word under cursor (send to Neovim)
         if unicode_char == Some('#') {
-            self.search_word_backward();
+            self.search_word("#");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
             return;
         }
 
-        // Handle 'n' for repeat search forward
+        // Handle 'n' for repeat search forward (send to Neovim)
         if keycode == Key::N && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
-            self.repeat_search(true);
+            self.search_next(true);
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
             return;
         }
 
-        // Handle 'N' for repeat search backward
+        // Handle 'N' for repeat search backward (send to Neovim)
         if keycode == Key::N && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
-            self.repeat_search(false);
+            self.search_next(false);
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
