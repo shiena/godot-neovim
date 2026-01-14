@@ -116,6 +116,10 @@ jobs:
           git commit -m "chore: bump version to ${{ inputs.version }}"
           git push origin main
 
+          # Create and push tag so git-cliff can use it
+          git tag ${{ inputs.version }}
+          git push origin ${{ inputs.version }}
+
       - name: Prepare release archive
         run: |
           # Copy all libraries to addons/godot-neovim/
