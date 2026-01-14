@@ -87,6 +87,32 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate version
+        run: |
+          INPUT_VERSION="${{ inputs.version }}"
+          # Strip leading 'v' for comparison
+          INPUT_VERSION="${INPUT_VERSION#v}"
+
+          # Get latest tag (sorted by version)
+          LATEST_TAG=$(git tag -l 'v*' | sort -V | tail -n1)
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No existing tags found. Proceeding with release."
+            exit 0
+          fi
+
+          LATEST_VERSION="${LATEST_TAG#v}"
+          echo "Input version: $INPUT_VERSION"
+          echo "Latest version: $LATEST_VERSION"
+
+          # Compare versions using sort -V
+          HIGHER=$(printf '%s\n%s' "$LATEST_VERSION" "$INPUT_VERSION" | sort -V | tail -n1)
+          if [ "$HIGHER" = "$LATEST_VERSION" ]; then
+            echo "::error::Input version ($INPUT_VERSION) must be greater than latest version ($LATEST_VERSION)"
+            exit 1
+          fi
+
+          echo "Version check passed: $INPUT_VERSION > $LATEST_VERSION"
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
