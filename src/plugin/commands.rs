@@ -161,7 +161,13 @@ impl GodotNeovimPlugin {
                     } else {
                         cmd.strip_prefix("e ").unwrap_or("").trim()
                     };
-                    self.cmd_edit(file_path);
+                    if file_path.is_empty() {
+                        // No file path - open quick open dialog immediately
+                        self.cmd_edit(file_path);
+                    } else {
+                        // Defer file open to avoid borrow conflict with on_script_changed
+                        self.pending_file_path = Some(file_path.to_string());
+                    }
                 }
                 // Check for substitution command :%s/old/new/g
                 else if cmd.starts_with("%s/") || cmd.starts_with("s/") {
