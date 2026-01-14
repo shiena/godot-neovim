@@ -47,6 +47,7 @@ pub enum HelpMemberType {
     /// Property documentation (class_property:ClassName:property)
     Property,
     /// Signal documentation (class_signal:ClassName:signal)
+    #[allow(dead_code)]
     Signal,
     /// Constant documentation (class_constant:ClassName:constant)
     Constant,
@@ -115,12 +116,6 @@ pub struct GodotNeovimPlugin {
     /// Flag indicating command-line mode is active
     #[init(val = false)]
     command_mode: bool,
-    /// Last searched word (for n/N repeat)
-    #[init(val = String::new())]
-    last_search_word: String,
-    /// Last search direction (true = forward, false = backward)
-    #[init(val = true)]
-    last_search_forward: bool,
     /// Last find character (for ;/, repeat)
     #[init(val = None)]
     last_find_char: Option<char>,

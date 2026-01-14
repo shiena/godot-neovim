@@ -1098,10 +1098,7 @@ impl GodotNeovimPlugin {
                     );
                     self.pending_help_query = Some(query);
                 } else {
-                    crate::verbose_print!(
-                        "[godot-neovim] K: Could not parse hover for '{}'",
-                        word
-                    );
+                    crate::verbose_print!("[godot-neovim] K: Could not parse hover for '{}'", word);
                 }
             }
             Ok(None) => {
@@ -1114,10 +1111,7 @@ impl GodotNeovimPlugin {
     }
 
     /// Parse LSP hover response to extract class/member information for goto_help()
-    fn parse_hover_for_help(
-        hover: &lsp_types::Hover,
-        word: &str,
-    ) -> Option<super::HelpQuery> {
+    fn parse_hover_for_help(hover: &lsp_types::Hover, word: &str) -> Option<super::HelpQuery> {
         use super::{HelpMemberType, HelpQuery};
         use lsp_types::{HoverContents, MarkedString, MarkupContent};
 
@@ -1127,15 +1121,14 @@ impl GodotNeovimPlugin {
                 MarkedString::String(s) => s.clone(),
                 MarkedString::LanguageString(ls) => ls.value.clone(),
             },
-            HoverContents::Array(arr) => {
-                arr.iter()
-                    .filter_map(|m| match m {
-                        MarkedString::String(s) => Some(s.as_str()),
-                        MarkedString::LanguageString(ls) => Some(ls.value.as_str()),
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            }
+            HoverContents::Array(arr) => arr
+                .iter()
+                .map(|m| match m {
+                    MarkedString::String(s) => s.as_str(),
+                    MarkedString::LanguageString(ls) => ls.value.as_str(),
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
             HoverContents::Markup(MarkupContent { value, .. }) => value.clone(),
         };
 
