@@ -3,6 +3,7 @@ use crate::settings;
 use godot::prelude::godot_warn;
 use nvim_rs::create::tokio as create;
 use nvim_rs::{Neovim, UiAttachOptions};
+use std::fmt;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -45,10 +46,11 @@ impl NeovimVersion {
         // minor is equal
         self.patch >= patch
     }
+}
 
-    /// Format as version string
-    pub fn to_string(&self) -> String {
-        format!("{}.{}.{}", self.major, self.minor, self.patch)
+impl fmt::Display for NeovimVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
     }
 }
 
@@ -192,18 +194,12 @@ impl NeovimClient {
             let (req_major, req_minor, req_patch) = NEOVIM_REQUIRED_VERSION;
 
             if let Some(ref ver) = version {
-                crate::verbose_print!(
-                    "[godot-neovim] Neovim version: {}",
-                    ver.to_string()
-                );
+                crate::verbose_print!("[godot-neovim] Neovim version: {}", ver);
 
                 if !ver.meets_requirement(req_major, req_minor, req_patch) {
                     let msg = format!(
                         "Neovim version {} is below minimum required {}.{}.{}. Some features may not work correctly.",
-                        ver.to_string(),
-                        req_major,
-                        req_minor,
-                        req_patch
+                        ver, req_major, req_minor, req_patch
                     );
                     godot_warn!("[godot-neovim] {}", msg);
                 }
