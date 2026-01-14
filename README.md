@@ -91,7 +91,11 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 
 1. Download the latest release for your platform
 2. Extract to your Godot project's `addons/godot-neovim/` directory
-3. Enable the plugin in `Project > Project Settings > Plugins`
+3. **macOS only**: Remove the quarantine attribute to avoid Gatekeeper blocking:
+   ```bash
+   xattr -rc addons/godot-neovim
+   ```
+4. Enable the plugin in `Project > Project Settings > Plugins`
 
 ### Building from Source
 
