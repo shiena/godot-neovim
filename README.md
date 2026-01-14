@@ -493,6 +493,7 @@ These features may already work through Neovim backend:
 
 ### Other
 - [vscode-neovim](https://github.com/vscode-neovim/vscode-neovim) - VSCode extension with Neovim backend
+- [neovide](https://github.com/neovide/neovide) - Neovim GUI client in Rust (architecture reference)
 
 ## License
 
