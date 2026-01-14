@@ -17,6 +17,12 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// Minimum required Neovim version (major, minor, patch)
 const NEOVIM_REQUIRED_VERSION: (u64, u64, u64) = (0, 9, 0);
 
+/// Default timeout for RPC commands (milliseconds)
+const RPC_TIMEOUT_MS: u64 = 50;
+
+/// Extended timeout for operations that may trigger dialogs (e.g., swap file)
+const RPC_EXTENDED_TIMEOUT_MS: u64 = 500;
+
 type Writer = nvim_rs::compat::tokio::Compat<tokio::process::ChildStdin>;
 
 /// Neovim version information
@@ -249,15 +255,16 @@ impl NeovimClient {
 
         self.runtime.block_on(async {
             // Use timeout to avoid blocking on operator-pending commands like 'g'
-            let result = tokio::time::timeout(std::time::Duration::from_millis(50), async {
-                let nvim_lock = neovim_arc.lock().await;
-                if let Some(neovim) = nvim_lock.as_ref() {
-                    neovim.get_mode().await.ok()
-                } else {
-                    None
-                }
-            })
-            .await;
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        neovim.get_mode().await.ok()
+                    } else {
+                        None
+                    }
+                })
+                .await;
 
             match result {
                 Ok(Some(mode_info)) => {
@@ -451,16 +458,17 @@ impl NeovimClient {
 
         self.runtime.block_on(async {
             // Use timeout to avoid blocking on operator-pending commands
-            let result = tokio::time::timeout(std::time::Duration::from_millis(50), async {
-                let nvim_lock = neovim_arc.lock().await;
-                if let Some(neovim) = nvim_lock.as_ref() {
-                    let window = neovim.get_current_win().await.ok()?;
-                    window.get_cursor().await.ok()
-                } else {
-                    None
-                }
-            })
-            .await;
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        let window = neovim.get_current_win().await.ok()?;
+                        window.get_cursor().await.ok()
+                    } else {
+                        None
+                    }
+                })
+                .await;
 
             match result {
                 Ok(Some(pos)) => Ok(pos),
@@ -476,17 +484,18 @@ impl NeovimClient {
 
         self.runtime.block_on(async {
             // Use timeout to avoid blocking
-            let result = tokio::time::timeout(std::time::Duration::from_millis(50), async {
-                let nvim_lock = neovim_arc.lock().await;
-                if let Some(neovim) = nvim_lock.as_ref() {
-                    let window = neovim.get_current_win().await.ok()?;
-                    window.set_cursor((line, col)).await.ok()?;
-                    Some(())
-                } else {
-                    None
-                }
-            })
-            .await;
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        let window = neovim.get_current_win().await.ok()?;
+                        window.set_cursor((line, col)).await.ok()?;
+                        Some(())
+                    } else {
+                        None
+                    }
+                })
+                .await;
 
             match result {
                 Ok(Some(())) => Ok(()),
@@ -503,36 +512,37 @@ impl NeovimClient {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
-            let result = tokio::time::timeout(std::time::Duration::from_millis(50), async {
-                let nvim_lock = neovim_arc.lock().await;
-                let neovim = nvim_lock.as_ref()?;
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    let neovim = nvim_lock.as_ref()?;
 
-                // Get visual start position using getpos("v")
-                let visual_start = neovim
-                    .call_function("getpos", vec![rmpv::Value::from("v")])
-                    .await
-                    .ok()?;
+                    // Get visual start position using getpos("v")
+                    let visual_start = neovim
+                        .call_function("getpos", vec![rmpv::Value::from("v")])
+                        .await
+                        .ok()?;
 
-                // Get current cursor position using getpos(".")
-                let cursor_pos = neovim
-                    .call_function("getpos", vec![rmpv::Value::from(".")])
-                    .await
-                    .ok()?;
+                    // Get current cursor position using getpos(".")
+                    let cursor_pos = neovim
+                        .call_function("getpos", vec![rmpv::Value::from(".")])
+                        .await
+                        .ok()?;
 
-                // Parse positions: [bufnum, lnum, col, off] (1-indexed)
-                let parse_pos = |val: rmpv::Value| -> Option<(i64, i64)> {
-                    let arr = val.as_array()?;
-                    let line = arr.get(1)?.as_i64()? - 1; // Convert to 0-indexed
-                    let col = arr.get(2)?.as_i64()? - 1; // Convert to 0-indexed
-                    Some((line, col))
-                };
+                    // Parse positions: [bufnum, lnum, col, off] (1-indexed)
+                    let parse_pos = |val: rmpv::Value| -> Option<(i64, i64)> {
+                        let arr = val.as_array()?;
+                        let line = arr.get(1)?.as_i64()? - 1; // Convert to 0-indexed
+                        let col = arr.get(2)?.as_i64()? - 1; // Convert to 0-indexed
+                        Some((line, col))
+                    };
 
-                let start = parse_pos(visual_start)?;
-                let end = parse_pos(cursor_pos)?;
+                    let start = parse_pos(visual_start)?;
+                    let end = parse_pos(cursor_pos)?;
 
-                Some((start, end))
-            })
-            .await;
+                    Some((start, end))
+                })
+                .await;
 
             match result {
                 Ok(Some(selection)) => Some(selection),
@@ -547,27 +557,28 @@ impl NeovimClient {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
-            let result = tokio::time::timeout(std::time::Duration::from_millis(50), async {
-                let nvim_lock = neovim_arc.lock().await;
-                if let Some(neovim) = nvim_lock.as_ref() {
-                    // Get &modified option
-                    let modified = neovim
-                        .call_function(
-                            "getbufvar",
-                            vec![
-                                rmpv::Value::from(0), // current buffer
-                                rmpv::Value::from("&modified"),
-                            ],
-                        )
-                        .await
-                        .ok()?;
-                    // Returns 1 if modified, 0 if not
-                    Some(modified.as_i64().unwrap_or(0) != 0)
-                } else {
-                    None
-                }
-            })
-            .await;
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        // Get &modified option
+                        let modified = neovim
+                            .call_function(
+                                "getbufvar",
+                                vec![
+                                    rmpv::Value::from(0), // current buffer
+                                    rmpv::Value::from("&modified"),
+                                ],
+                            )
+                            .await
+                            .ok()?;
+                        // Returns 1 if modified, 0 if not
+                        Some(modified.as_i64().unwrap_or(0) != 0)
+                    } else {
+                        None
+                    }
+                })
+                .await;
 
             match result {
                 Ok(Some(modified)) => modified,
@@ -581,7 +592,7 @@ impl NeovimClient {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
-            let _ = tokio::time::timeout(std::time::Duration::from_millis(50), async {
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
                 let nvim_lock = neovim_arc.lock().await;
                 if let Some(neovim) = nvim_lock.as_ref() {
                     let _ = neovim.command("set nomodified").await;
@@ -599,32 +610,35 @@ impl NeovimClient {
 
         self.runtime.block_on(async {
             // Use timeout to prevent blocking on E325 ATTENTION dialogs
-            let result = tokio::time::timeout(std::time::Duration::from_millis(500), async {
-                let nvim_lock = neovim_arc.lock().await;
-                if let Some(neovim) = nvim_lock.as_ref() {
-                    // Suppress E325 ATTENTION errors before setting buffer name
-                    let _ = neovim.command("set shortmess+=A").await;
+            let result = tokio::time::timeout(
+                std::time::Duration::from_millis(RPC_EXTENDED_TIMEOUT_MS),
+                async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        // Suppress E325 ATTENTION errors before setting buffer name
+                        let _ = neovim.command("set shortmess+=A").await;
 
-                    let buffer = neovim
-                        .get_current_buf()
-                        .await
-                        .map_err(|e| format!("Failed to get buffer: {}", e))?;
+                        let buffer = neovim
+                            .get_current_buf()
+                            .await
+                            .map_err(|e| format!("Failed to get buffer: {}", e))?;
 
-                    let set_result = buffer.set_name(&name).await;
+                        let set_result = buffer.set_name(&name).await;
 
-                    if set_result.is_err() {
-                        // E325 error may leave Neovim in confirmation state
-                        // Send Enter to clear any pending prompts
-                        let _ = neovim.input("<CR>").await;
-                        let _ = neovim.input("<Esc>").await;
+                        if set_result.is_err() {
+                            // E325 error may leave Neovim in confirmation state
+                            // Send Enter to clear any pending prompts
+                            let _ = neovim.input("<CR>").await;
+                            let _ = neovim.input("<Esc>").await;
+                        }
+
+                        set_result.map_err(|e| format!("Failed to set buffer name: {}", e))?;
+                        Ok(())
+                    } else {
+                        Err("Neovim not connected".to_string())
                     }
-
-                    set_result.map_err(|e| format!("Failed to set buffer name: {}", e))?;
-                    Ok(())
-                } else {
-                    Err("Neovim not connected".to_string())
-                }
-            })
+                },
+            )
             .await;
 
             match result {
