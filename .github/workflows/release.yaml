@@ -12,7 +12,78 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      commit_sha: ${{ steps.commit.outputs.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version
+        run: |
+          INPUT_VERSION="${{ inputs.version }}"
+          # Strip leading 'v' for comparison
+          INPUT_VERSION="${INPUT_VERSION#v}"
+
+          # Get latest tag (sorted by version)
+          LATEST_TAG=$(git tag -l 'v*' | sort -V | tail -n1)
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No existing tags found. Proceeding with release."
+            exit 0
+          fi
+
+          LATEST_VERSION="${LATEST_TAG#v}"
+          echo "Input version: $INPUT_VERSION"
+          echo "Latest version: $LATEST_VERSION"
+
+          # Compare versions using sort -V
+          HIGHER=$(printf '%s\n%s' "$LATEST_VERSION" "$INPUT_VERSION" | sort -V | tail -n1)
+          if [ "$HIGHER" = "$LATEST_VERSION" ]; then
+            echo "::error::Input version ($INPUT_VERSION) must be greater than latest version ($LATEST_VERSION)"
+            exit 1
+          fi
+
+          echo "Version check passed: $INPUT_VERSION > $LATEST_VERSION"
+
+      - name: Update versions
+        run: |
+          # Strip leading 'v' from version if present (v0.1.0 -> 0.1.0)
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+
+          # Update plugin.cfg
+          sed -i "s/^version=\".*\"/version=\"${VERSION}\"/" addons/godot-neovim/plugin.cfg
+          echo "Updated plugin.cfg:"
+          cat addons/godot-neovim/plugin.cfg
+
+          # Update Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
+          echo "Updated Cargo.toml:"
+          grep "^version" Cargo.toml
+
+      - name: Commit version update (no push yet)
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add addons/godot-neovim/plugin.cfg Cargo.toml
+          git commit -m "chore: bump version to ${{ inputs.version }}"
+          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Upload commit as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: version-commit
+          path: |
+            addons/godot-neovim/plugin.cfg
+            Cargo.toml
+
   build-linux-windows:
+    needs: [prepare]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -26,6 +97,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download and apply version updates
+        uses: actions/download-artifact@v4
+        with:
+          name: version-commit
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -46,11 +122,17 @@ jobs:
           path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
   build-macos:
+    needs: [prepare]
     runs-on: macos-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download and apply version updates
+        uses: actions/download-artifact@v4
+        with:
+          name: version-commit
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -87,62 +169,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate version
-        run: |
-          INPUT_VERSION="${{ inputs.version }}"
-          # Strip leading 'v' for comparison
-          INPUT_VERSION="${INPUT_VERSION#v}"
-
-          # Get latest tag (sorted by version)
-          LATEST_TAG=$(git tag -l 'v*' | sort -V | tail -n1)
-          if [ -z "$LATEST_TAG" ]; then
-            echo "No existing tags found. Proceeding with release."
-            exit 0
-          fi
-
-          LATEST_VERSION="${LATEST_TAG#v}"
-          echo "Input version: $INPUT_VERSION"
-          echo "Latest version: $LATEST_VERSION"
-
-          # Compare versions using sort -V
-          HIGHER=$(printf '%s\n%s' "$LATEST_VERSION" "$INPUT_VERSION" | sort -V | tail -n1)
-          if [ "$HIGHER" = "$LATEST_VERSION" ]; then
-            echo "::error::Input version ($INPUT_VERSION) must be greater than latest version ($LATEST_VERSION)"
-            exit 1
-          fi
-
-          echo "Version check passed: $INPUT_VERSION > $LATEST_VERSION"
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Update versions
-        run: |
-          # Strip leading 'v' from version if present (v0.1.0 -> 0.1.0)
-          VERSION="${{ inputs.version }}"
-          VERSION="${VERSION#v}"
-
-          # Update plugin.cfg
-          sed -i "s/^version=\".*\"/version=\"${VERSION}\"/" addons/godot-neovim/plugin.cfg
-          echo "Updated plugin.cfg:"
-          cat addons/godot-neovim/plugin.cfg
-
-          # Update Cargo.toml
-          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
-          echo "Updated Cargo.toml:"
-          grep "^version" Cargo.toml
-
       - name: Commit and push version update
         run: |
+          # Apply version updates from artifact
+          cp artifacts/version-commit/Cargo.toml Cargo.toml
+          cp artifacts/version-commit/addons/godot-neovim/plugin.cfg addons/godot-neovim/plugin.cfg
+
+          # Commit and push
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add addons/godot-neovim/plugin.cfg Cargo.toml
           git commit -m "chore: bump version to ${{ inputs.version }}"
           git push origin main
 
-          # Create and push tag so git-cliff can use it
+          # Create and push tag for git-cliff
           git tag ${{ inputs.version }}
           git push origin ${{ inputs.version }}
 

@@ -1,5 +1,8 @@
 //! Godot Neovim Plugin - Main module
 
+/// Plugin version from Cargo.toml
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 mod commands;
 mod editing;
 mod keys;
@@ -151,7 +154,7 @@ pub struct GodotNeovimPlugin {
 #[godot_api]
 impl IEditorPlugin for GodotNeovimPlugin {
     fn enter_tree(&mut self) {
-        crate::verbose_print!("[godot-neovim] Plugin entering tree");
+        crate::verbose_print!("[godot-neovim] v{} loaded", VERSION);
 
         // Initialize settings first
         settings::initialize_settings();
