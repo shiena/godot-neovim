@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        id: fmt
+        run: |
+          if ! cargo fmt --check 2>&1 | tee fmt_output.txt; then
+            echo "has_diff=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_diff=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run clippy
+        id: clippy
+        run: |
+          if ! cargo clippy --all-targets --all-features -- -D warnings 2>&1 | tee clippy_output.txt; then
+            echo "has_errors=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_errors=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on PR
+        if: steps.fmt.outputs.has_diff == 'true' || steps.clippy.outputs.has_errors == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "## CI Check Failed"
+            echo ""
+
+            if [ "${{ steps.fmt.outputs.has_diff }}" = "true" ]; then
+              echo "### Formatting Issues"
+              echo ""
+              echo "Run \`cargo fmt\` to fix formatting."
+              echo ""
+              echo "<details>"
+              echo "<summary>Diff</summary>"
+              echo ""
+              echo "\`\`\`diff"
+              cargo fmt -- --check 2>&1 || true
+              echo "\`\`\`"
+              echo "</details>"
+              echo ""
+            fi
+
+            if [ "${{ steps.clippy.outputs.has_errors }}" = "true" ]; then
+              echo "### Clippy Warnings/Errors"
+              echo ""
+              echo "<details>"
+              echo "<summary>Output</summary>"
+              echo ""
+              echo "\`\`\`"
+              cat clippy_output.txt
+              echo "\`\`\`"
+              echo "</details>"
+            fi
+          } > comment.md
+
+          gh pr comment ${{ github.event.pull_request.number }} --body-file comment.md
+
+      - name: Fail if issues found
+        if: steps.fmt.outputs.has_diff == 'true' || steps.clippy.outputs.has_errors == 'true'
+        run: |
+          echo "::error::CI checks failed. See PR comment for details."
+          exit 1
