@@ -1,0 +1,114 @@
+name: Bug report
+description: Report a bug in godot-neovim
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug! Please fill out the information below to help us investigate and fix the issue.
+        - Search [existing issues](https://github.com/shiena/godot-neovim/issues) to ensure it has not already been reported.
+        - One issue per bug please.
+
+  - type: input
+    attributes:
+      label: godot-neovim version
+      description: The version of godot-neovim you are using (check plugin.cfg or the release version).
+      placeholder: "v0.5.0"
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: Godot version
+      description: The Godot version you are using. You can copy this from Help > Copy System Info.
+      placeholder: "4.5.1.stable"
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: Neovim version
+      description: Run `nvim --version` and paste the first line.
+      placeholder: "NVIM v0.10.0"
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: OS
+      description: Your operating system and version.
+      placeholder: "Windows 11 / macOS 14.0 / Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: Command that caused the bug
+      description: The Vim command or key sequence that triggered the bug.
+      placeholder: "dd, ciw, :wq, etc."
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: Vim mode when bug occurred
+      description: Which mode were you in when the bug happened?
+      options:
+        - Normal
+        - Insert
+        - Visual
+        - Visual Line
+        - Command-line
+        - Replace
+        - Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Issue description
+      description: |
+        Describe what happened and what you expected to happen.
+        You can include screenshots with drag and drop.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      description: List the steps to reproduce the bug.
+      placeholder: |
+        1. Open a script file
+        2. Enter normal mode
+        3. Type `dd`
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Verbose mode output
+      description: |
+        Run Godot in verbose mode and paste any `[godot-neovim]` related messages.
+
+        **How to enable verbose mode:**
+        - Command line: `godot --verbose`
+        - Project Manager: Click the dropdown next to "Edit" and select "Edit in verbose mode"
+
+        Paste the relevant output below (especially lines containing `[godot-neovim]`).
+      placeholder: |
+        [godot-neovim] ...
+        [godot-neovim] ERROR: ...
+    validations:
+      required: false
+
+  - type: checkboxes
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched the existing issues and this bug has not been reported.
+          required: true
+        - label: I have tested with the latest version of godot-neovim.
+          required: false
+        - label: I have tested with `--clean` option enabled in Editor Settings > Godot Neovim > Neovim Clean.
+          required: false
