@@ -26,6 +26,69 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+/// Help query for goto_help()
+#[derive(Debug, Clone)]
+pub struct HelpQuery {
+    /// Class name (e.g., "Node", "Vector2")
+    pub class_name: String,
+    /// Member name (e.g., "get_name", "position") - None for class-level help
+    pub member_name: Option<String>,
+    /// Member type for constructing the help query
+    pub member_type: HelpMemberType,
+}
+
+/// Type of member for help query
+#[derive(Debug, Clone, PartialEq)]
+pub enum HelpMemberType {
+    /// Class documentation (class_name:ClassName)
+    Class,
+    /// Method documentation (class_method:ClassName:method)
+    Method,
+    /// Property documentation (class_property:ClassName:property)
+    Property,
+    /// Signal documentation (class_signal:ClassName:signal)
+    Signal,
+    /// Constant documentation (class_constant:ClassName:constant)
+    Constant,
+}
+
+impl HelpQuery {
+    /// Convert to goto_help() query string
+    pub fn to_help_string(&self) -> String {
+        match self.member_type {
+            HelpMemberType::Class => format!("class_name:{}", self.class_name),
+            HelpMemberType::Method => {
+                if let Some(ref member) = self.member_name {
+                    format!("class_method:{}:{}", self.class_name, member)
+                } else {
+                    format!("class_name:{}", self.class_name)
+                }
+            }
+            HelpMemberType::Property => {
+                if let Some(ref member) = self.member_name {
+                    format!("class_property:{}:{}", self.class_name, member)
+                } else {
+                    format!("class_name:{}", self.class_name)
+                }
+            }
+            HelpMemberType::Signal => {
+                if let Some(ref member) = self.member_name {
+                    format!("class_signal:{}:{}", self.class_name, member)
+                } else {
+                    format!("class_name:{}", self.class_name)
+                }
+            }
+            HelpMemberType::Constant => {
+                if let Some(ref member) = self.member_name {
+                    format!("class_constant:{}:{}", self.class_name, member)
+                } else {
+                    format!("class_name:{}", self.class_name)
+                }
+            }
+        }
+    }
+}
+
 /// Main editor plugin for godot-neovim
 #[derive(GodotClass)]
 #[class(tool, init, base=EditorPlugin)]
@@ -128,9 +191,9 @@ pub struct GodotNeovimPlugin {
     /// Uses Cell for interior mutability to avoid borrow conflicts with signal callbacks
     #[init(val = Cell::new(false))]
     script_changed_pending: Cell<bool>,
-    /// Pending documentation lookup word (for deferred goto_help to avoid borrow conflicts)
+    /// Pending documentation lookup query (for deferred goto_help to avoid borrow conflicts)
     #[init(val = None)]
-    pending_help_word: Option<String>,
+    pending_help_query: Option<HelpQuery>,
     /// Pending file path to open (for deferred cmd_edit to avoid borrow conflicts)
     #[init(val = None)]
     pending_file_path: Option<String>,
@@ -265,29 +328,20 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // goto_help() triggers editor_script_changed signal synchronously, which would
         // cause a borrow conflict. We temporarily disconnect from the signal, call
         // goto_help(), then reconnect and manually trigger the handler.
-        if let Some(word) = self.pending_help_word.take() {
+        if let Some(query) = self.pending_help_query.take() {
             let editor_interface = EditorInterface::singleton();
             if let Some(mut script_editor) = editor_interface.get_script_editor() {
                 // Temporarily disconnect from signal to avoid borrow conflict
                 let callable = self.base().callable("on_script_changed");
                 script_editor.disconnect("editor_script_changed", &callable);
 
-                // Now safe to call goto_help()
-                // Only class names (uppercase start) are supported - method lookup requires
-                // knowing the parent class, which we don't have context for
-                if word.chars().next().is_some_and(|c| c.is_uppercase()) {
-                    let help_query = format!("class_name:{}", word);
-                    script_editor.goto_help(&help_query);
-                    crate::verbose_print!(
-                        "[godot-neovim] K: Opening help for class '{}' (deferred)",
-                        word
-                    );
-                } else {
-                    crate::verbose_print!(
-                        "[godot-neovim] K: Skipping help for '{}' (not a class name)",
-                        word
-                    );
-                }
+                // Now safe to call goto_help() with the constructed query
+                let help_string = query.to_help_string();
+                script_editor.goto_help(&help_string);
+                crate::verbose_print!(
+                    "[godot-neovim] K: Opening help with query '{}' (deferred)",
+                    help_string
+                );
 
                 // Reconnect to signal
                 script_editor.connect("editor_script_changed", &callable);

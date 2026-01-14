@@ -1,7 +1,7 @@
 use lsp_types::{
-    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
-    InitializeResult, Location, Position, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, Uri, WorkspaceFolder,
+    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    InitializeParams, InitializeResult, Location, Position, TextDocumentIdentifier,
+    TextDocumentItem, TextDocumentPositionParams, Uri, WorkspaceFolder,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -183,6 +183,27 @@ impl GodotLspClient {
             }
             _ => Ok(None),
         }
+    }
+
+    pub fn hover(&self, uri: &str, line: u32, col: u32) -> Result<Option<Hover>, String> {
+        let doc_uri = uri.parse::<Uri>().map_err(|e| e.to_string())?;
+        let params = HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: doc_uri },
+                position: Position {
+                    line,
+                    character: col,
+                },
+            },
+            work_done_progress_params: Default::default(),
+        };
+
+        let result: Option<Hover> = self.send_request(
+            "textDocument/hover",
+            Some(serde_json::to_value(params).map_err(|e| format!("Failed to serialize: {}", e))?),
+        )?;
+
+        Ok(result)
     }
 
     pub fn is_connected(&self) -> bool {

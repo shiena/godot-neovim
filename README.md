@@ -250,7 +250,7 @@ Press `F1` in Godot and search for **"GodotNeovim"** to view the command referen
 | `gd` | Go to definition (requires LSP, see below) |
 | `gf` | Go to file under cursor |
 | `gx` | Open URL/path under cursor in browser |
-| `K` | Open Godot documentation for class name under cursor |
+| `K` | Open Godot documentation (class, method, property, constant via LSP) |
 
 #### Editing
 
@@ -424,6 +424,7 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 | Neovim search | `/` opens Godot's find dialog |
 | Neovim undo | Uses Godot's undo system |
 | Neovim config | `init.lua` and plugins are not loaded |
+| `K` for signals | Signal documentation lookup not supported (class/method/property/constant only) |
 
 ### Known Issues
 
