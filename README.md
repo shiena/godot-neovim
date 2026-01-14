@@ -20,7 +20,7 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 - Cursor synchronization between Godot and Neovim
 - Support for count prefixes (e.g., `4j`, `10gg`)
 - Support for operator-pending commands (e.g., `gg`, `dd`, `yy`)
-- Configurable input mode (hybrid for IME support, strict for full Neovim control)
+- Configurable input mode (hybrid for Godot auto-completion, strict for full Neovim control)
 - Ctrl+[ as Escape alternative (terminal standard)
 - Full/half page scrolling (`Ctrl+F`, `Ctrl+B`, `Ctrl+D`, `Ctrl+U`)
 - Word search under cursor (`*`, `#`, `n`, `N`)
@@ -37,7 +37,7 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 |----------|---------|:------------:|:---------:|
 | **Architecture** | Backend | Neovim (RPC) | GDExtension |
 | | Language | Rust | Rust |
-| | IME Support | ✅ (hybrid mode) | ❌ |
+| | Auto-completion | ✅ (hybrid mode) | ❌ |
 | **Modes** | Normal, Insert, Visual, V-Line | ✅ | ✅ |
 | | Visual Block | ✅ (`gv`) | ✅ |
 | | Replace | ✅ (`R`) | ✅ |
@@ -76,7 +76,7 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 | **Other** | Custom key mappings | ❌ | ✅ |
 
 **Summary:**
-- **godot-neovim**: Full Neovim backend with all Ex commands, named registers, IME support. Requires Neovim 0.9+ installation.
+- **godot-neovim**: Full Neovim backend with all Ex commands, named registers, Godot auto-completion support (hybrid mode). Requires Neovim 0.9+ installation.
 - **GodotVim**: GDExtension-based emulator with custom key mapping support. No external dependencies.
 
 ## Requirements
@@ -153,14 +153,14 @@ You can choose how insert mode input is handled:
 2. Navigate to `Godot Neovim` section
 3. Set `Input Mode` to your preferred mode
 
-| Mode | Description | IME Support |
-|------|-------------|-------------|
-| `hybrid` (default) | Insert mode uses Godot's native input | ✅ Yes |
-| `strict` | Insert mode also handled by Neovim | ❌ No |
+| Mode | Description | Auto-completion |
+|------|-------------|:---------------:|
+| `hybrid` (default) | Insert mode uses Godot's native input | ✅ |
+| `strict` | Insert mode also handled by Neovim | ❌ |
 
-**Hybrid mode** is recommended for most users as it provides IME support for non-ASCII input and Godot's auto-completion features.
+**Hybrid mode** is recommended for most users as it allows using Godot's auto-completion, code hints, and other editor features directly in insert mode.
 
-**Strict mode** provides a more authentic Neovim experience where all keystrokes are processed by Neovim, but IME input is not supported.
+**Strict mode** provides a more authentic Neovim experience where all keystrokes are processed by Neovim, but Godot's auto-completion is not available.
 
 ### Go to Definition (gd)
 
@@ -406,7 +406,7 @@ This plugin has architectural limitations due to using Godot's native CodeEdit f
 
 ### Insert Mode (Hybrid Mode)
 
-In hybrid mode (default), insert mode uses Godot's native input system to support IME and auto-completion. As a result, Vim's insert mode commands are **not available**:
+In hybrid mode (default), insert mode uses Godot's native input system to support auto-completion and other editor features. As a result, Vim's insert mode commands are **not available**:
 
 | Not Supported | Description |
 |---------------|-------------|
