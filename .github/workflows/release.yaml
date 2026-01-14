@@ -129,8 +129,11 @@ jobs:
           # Show contents
           ls -la addons/godot-neovim/
 
-          # Create zip archive
-          zip -r godot-neovim-${{ inputs.version }}.zip addons
+          # Create zip archive with wrapper folder for Godot Asset Library
+          # Godot auto-skips top-level folder, so we wrap addons/ in godot-neovim/
+          mkdir godot-neovim
+          cp -r addons godot-neovim/
+          zip -r godot-neovim-${{ inputs.version }}.zip godot-neovim
 
       - name: Generate changelog
         uses: orhun/git-cliff-action@v4
