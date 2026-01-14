@@ -327,6 +327,38 @@ impl NeovimClient {
         Ok(())
     }
 
+    /// Send a serial command (keyboard input, cursor movement)
+    /// Serial commands are processed in order but don't block waiting for response
+    #[allow(dead_code)]
+    pub fn send_serial(&self, cmd: super::SerialCommand) {
+        use super::SerialCommand;
+
+        let neovim_arc = self.neovim.clone();
+
+        match cmd {
+            SerialCommand::Input(keys) => {
+                // Fire and forget - don't wait for response
+                self.runtime.spawn(async move {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        let _ = neovim.input(&keys).await;
+                    }
+                });
+            }
+            SerialCommand::SetCursor { line, col } => {
+                // Cursor setting also fire and forget
+                self.runtime.spawn(async move {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        if let Ok(window) = neovim.get_current_win().await {
+                            let _ = window.set_cursor((line, col)).await;
+                        }
+                    }
+                });
+            }
+        }
+    }
+
     /// Execute Neovim command
     #[allow(dead_code)]
     pub fn command(&self, cmd: &str) -> Result<(), String> {
