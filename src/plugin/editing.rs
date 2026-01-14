@@ -1277,17 +1277,27 @@ impl GodotNeovimPlugin {
     }
 
     /// Convert file:// URI to file path
-    /// Handles URL decoding and Windows paths (file:///C:/... -> C:/...)
+    /// Handles URL decoding and platform differences:
+    /// - Unix: file:///path -> /path
+    /// - Windows: file:///C:/path -> C:/path
     fn uri_to_file_path(uri: &str) -> String {
-        let path = uri
-            .strip_prefix("file:///")
-            .or_else(|| uri.strip_prefix("file://"))
-            .unwrap_or(uri);
+        let path = if let Some(p) = uri.strip_prefix("file:///") {
+            // Check if it's a Windows path with drive letter (e.g., C:, D:)
+            if p.len() >= 2 && p.chars().nth(1) == Some(':') {
+                // Windows path: file:///C:/path -> C:/path
+                p.to_string()
+            } else {
+                // Unix path: file:///path -> /path (restore leading /)
+                format!("/{}", p)
+            }
+        } else if let Some(p) = uri.strip_prefix("file://") {
+            // file://path (less common, but handle it)
+            p.to_string()
+        } else {
+            uri.to_string()
+        };
 
-        // URL decode (handle %20, %3A, etc.)
-        // On Windows, the path might start with a drive letter
-        // file:///C:/path -> C:/path (already correct after stripping)
-        Self::url_decode(path)
+        Self::url_decode(&path)
     }
 
     /// Simple URL decoding for file paths
