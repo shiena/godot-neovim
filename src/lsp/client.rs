@@ -68,7 +68,10 @@ impl GodotLspClient {
             .set_read_timeout(Some(Duration::from_secs(10)))
             .map_err(|e| format!("Failed to set timeout: {}", e))?;
 
-        *self.stream.lock().unwrap() = Some(stream);
+        *self
+            .stream
+            .lock()
+            .map_err(|e| format!("Failed to acquire lock: {}", e))? = Some(stream);
         Ok(())
     }
 
@@ -109,8 +112,10 @@ impl GodotLspClient {
 
         crate::verbose_print!("[godot-neovim] LSP: Sending initialize request...");
 
-        let _result: InitializeResult =
-            self.send_request("initialize", Some(serde_json::to_value(params).unwrap()))?;
+        let _result: InitializeResult = self.send_request(
+            "initialize",
+            Some(serde_json::to_value(params).map_err(|e| format!("Failed to serialize: {}", e))?),
+        )?;
 
         crate::verbose_print!("[godot-neovim] LSP: Initialize response received");
 
@@ -135,7 +140,7 @@ impl GodotLspClient {
 
         self.send_notification(
             "textDocument/didOpen",
-            Some(serde_json::to_value(params).unwrap()),
+            Some(serde_json::to_value(params).map_err(|e| format!("Failed to serialize: {}", e))?),
         )
     }
 
@@ -160,7 +165,7 @@ impl GodotLspClient {
 
         let result: Option<GotoDefinitionResponse> = self.send_request(
             "textDocument/definition",
-            Some(serde_json::to_value(params).unwrap()),
+            Some(serde_json::to_value(params).map_err(|e| format!("Failed to serialize: {}", e))?),
         )?;
 
         match result {
@@ -181,7 +186,10 @@ impl GodotLspClient {
     }
 
     pub fn is_connected(&self) -> bool {
-        self.stream.lock().unwrap().is_some()
+        self.stream
+            .lock()
+            .map(|guard| guard.is_some())
+            .unwrap_or(false)
     }
 
     pub fn is_initialized(&self) -> bool {
@@ -207,7 +215,10 @@ impl GodotLspClient {
 
         crate::verbose_print!("[godot-neovim] LSP request: {} (id={})", method, id);
 
-        let mut guard = self.stream.lock().unwrap();
+        let mut guard = self
+            .stream
+            .lock()
+            .map_err(|e| format!("Failed to acquire lock: {}", e))?;
         let stream = guard
             .as_mut()
             .ok_or_else(|| "Not connected to LSP server".to_string())?;
@@ -265,7 +276,10 @@ impl GodotLspClient {
         let body = serde_json::to_string(&notification).map_err(|e| e.to_string())?;
         let message = format!("Content-Length: {}\r\n\r\n{}", body.len(), body);
 
-        let mut guard = self.stream.lock().unwrap();
+        let mut guard = self
+            .stream
+            .lock()
+            .map_err(|e| format!("Failed to acquire lock: {}", e))?;
         let stream = guard
             .as_mut()
             .ok_or_else(|| "Not connected to LSP server".to_string())?;
