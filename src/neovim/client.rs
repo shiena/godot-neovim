@@ -1,5 +1,6 @@
 use crate::neovim::{NeovimHandler, NeovimState};
 use crate::settings;
+use godot::prelude::godot_warn;
 use nvim_rs::create::tokio as create;
 use nvim_rs::{Neovim, UiAttachOptions};
 use std::process::Stdio;
@@ -12,7 +13,44 @@ use tokio::sync::Mutex;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// Minimum required Neovim version (major, minor, patch)
+const NEOVIM_REQUIRED_VERSION: (u64, u64, u64) = (0, 9, 0);
+
 type Writer = nvim_rs::compat::tokio::Compat<tokio::process::ChildStdin>;
+
+/// Neovim version information
+#[derive(Debug, Clone, Default)]
+pub struct NeovimVersion {
+    pub major: u64,
+    pub minor: u64,
+    pub patch: u64,
+}
+
+impl NeovimVersion {
+    /// Check if version meets minimum requirements
+    pub fn meets_requirement(&self, major: u64, minor: u64, patch: u64) -> bool {
+        if self.major > major {
+            return true;
+        }
+        if self.major < major {
+            return false;
+        }
+        // major is equal
+        if self.minor > minor {
+            return true;
+        }
+        if self.minor < minor {
+            return false;
+        }
+        // minor is equal
+        self.patch >= patch
+    }
+
+    /// Format as version string
+    pub fn to_string(&self) -> String {
+        format!("{}.{}.{}", self.major, self.minor, self.patch)
+    }
+}
 
 /// Manages connection to Neovim process
 pub struct NeovimClient {
@@ -148,6 +186,30 @@ impl NeovimClient {
                 )
                 .await
                 .map_err(|e| format!("Failed to configure swapfile handling: {}", e))?;
+
+            // Check Neovim version before storing
+            let version = get_neovim_version(&neovim).await;
+            let (req_major, req_minor, req_patch) = NEOVIM_REQUIRED_VERSION;
+
+            if let Some(ref ver) = version {
+                crate::verbose_print!(
+                    "[godot-neovim] Neovim version: {}",
+                    ver.to_string()
+                );
+
+                if !ver.meets_requirement(req_major, req_minor, req_patch) {
+                    let msg = format!(
+                        "Neovim version {} is below minimum required {}.{}.{}. Some features may not work correctly.",
+                        ver.to_string(),
+                        req_major,
+                        req_minor,
+                        req_patch
+                    );
+                    godot_warn!("[godot-neovim] {}", msg);
+                }
+            } else {
+                crate::verbose_print!("[godot-neovim] Could not determine Neovim version");
+            }
 
             let mut nvim_lock = neovim_arc.lock().await;
             *nvim_lock = Some(neovim);
@@ -609,4 +671,41 @@ fn create_nvim_command(nvim_path: &str, clean: bool) -> Command {
             .stderr(Stdio::piped());
         cmd
     }
+}
+
+/// Get Neovim version from API info
+async fn get_neovim_version(neovim: &Neovim<Writer>) -> Option<NeovimVersion> {
+    // Call nvim_get_api_info to get version information
+    let api_info = neovim.get_api_info().await.ok()?;
+
+    // API info is [channel_id, {version: {...}, functions: [...], ...}]
+    let info_map = api_info.get(1)?;
+    let info_map = info_map.as_map()?;
+
+    // Find version in the map
+    for (key, value) in info_map {
+        if key.as_str() == Some("version") {
+            let version_map = value.as_map()?;
+            let mut major = 0u64;
+            let mut minor = 0u64;
+            let mut patch = 0u64;
+
+            for (vkey, vval) in version_map {
+                match vkey.as_str() {
+                    Some("major") => major = vval.as_u64().unwrap_or(0),
+                    Some("minor") => minor = vval.as_u64().unwrap_or(0),
+                    Some("patch") => patch = vval.as_u64().unwrap_or(0),
+                    _ => {}
+                }
+            }
+
+            return Some(NeovimVersion {
+                major,
+                minor,
+                patch,
+            });
+        }
+    }
+
+    None
 }
