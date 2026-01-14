@@ -182,7 +182,8 @@ Once the plugin is enabled:
 
 ### In-Editor Help
 
-Press `F1` in Godot and search for **"GodotNeovim"** to view the command reference directly in the editor.
+- Press `F1` in Godot and search for **"GodotNeovim"** to view the command reference
+- Or use `:help` (`:h`) in command-line mode to open the help directly
 
 ### Mode Indicator Colors
 
@@ -370,6 +371,7 @@ Press `F1` in Godot and search for **"GodotNeovim"** to view the command referen
 
 | Command | Description |
 |---------|-------------|
+| `:help`, `:h` | Open GodotNeovim help |
 | `:e` | Open quick open dialog for scripts |
 | `:e {file}` | Open specified script file |
 | `:e!` | Discard changes and reload |

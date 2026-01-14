@@ -204,6 +204,10 @@ impl GodotNeovimPlugin {
                     self.cmd_close();
                 } else if cmd == "ls" || cmd == "buffers" {
                     self.cmd_list_buffers();
+                }
+                // :help - open GodotNeovim help
+                else if cmd == "help" || cmd == "h" {
+                    self.cmd_help();
                 } else {
                     godot_warn!("[godot-neovim] Unknown command: {}", cmd);
                 }
@@ -982,6 +986,17 @@ impl GodotNeovimPlugin {
                 }
             }
         }
+    }
+
+    /// :help - Open GodotNeovim help
+    pub(super) fn cmd_help(&mut self) {
+        use super::{HelpMemberType, HelpQuery};
+
+        self.pending_help_query = Some(HelpQuery {
+            class_name: "GodotNeovim".to_string(),
+            member_name: None,
+            member_type: HelpMemberType::Class,
+        });
     }
 
     /// K - Open documentation for word under cursor
