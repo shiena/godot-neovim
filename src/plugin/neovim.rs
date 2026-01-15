@@ -134,7 +134,9 @@ impl GodotNeovimPlugin {
         };
 
         let Ok(client) = neovim.try_lock() else {
-            godot_warn!("[godot-neovim] Mutex busy, dropping key: {}", keys);
+            // Queue the key for retry instead of dropping
+            crate::verbose_print!("[godot-neovim] Mutex busy, queuing key: {}", keys);
+            self.pending_keys.push_back(keys.to_string());
             return false;
         };
 
@@ -285,8 +287,42 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] Escaped to normal mode, buffer synced");
     }
 
+    /// Process any pending keys that were queued due to mutex contention
+    fn process_pending_keys(&mut self) {
+        // Process up to a few keys per frame to avoid blocking
+        const MAX_KEYS_PER_FRAME: usize = 5;
+
+        for _ in 0..MAX_KEYS_PER_FRAME {
+            let Some(key) = self.pending_keys.pop_front() else {
+                break;
+            };
+
+            let Some(ref neovim) = self.neovim else {
+                // No neovim, discard pending keys
+                self.pending_keys.clear();
+                break;
+            };
+
+            let Ok(client) = neovim.try_lock() else {
+                // Still busy, put the key back and try next frame
+                self.pending_keys.push_front(key);
+                break;
+            };
+
+            // Send the queued key
+            if let Err(e) = client.input(&key) {
+                godot_error!("[godot-neovim] Failed to send queued key '{}': {}", key, e);
+            } else {
+                crate::verbose_print!("[godot-neovim] Sent queued key: {}", key);
+            }
+        }
+    }
+
     /// Process pending updates from Neovim redraw events
     pub(super) fn process_neovim_updates(&mut self) {
+        // First, try to send any queued keys
+        self.process_pending_keys();
+
         let Some(ref neovim) = self.neovim else {
             return;
         };

@@ -110,6 +110,9 @@ pub struct GodotNeovimPlugin {
     /// Last key sent to Neovim (for detecting sequences like zz, zt, zb)
     #[init(val = String::new())]
     last_key: String,
+    /// Queue of pending keys when mutex is busy (to avoid key drops)
+    #[init(val = std::collections::VecDeque::new())]
+    pending_keys: std::collections::VecDeque<String>,
     /// Command line input buffer for ':' commands
     #[init(val = String::new())]
     command_buffer: String,
