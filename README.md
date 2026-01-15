@@ -466,7 +466,7 @@ These features may already work through Neovim backend:
 
 ```
 ┌─────────────────────┐     RPC (msgpack)     ┌─────────────┐
-│   Godot Editor      │◄────────────────────►│   Neovim    │
+│   Godot Editor      │◄─────────────────────►│   Neovim    │
 │   (GDExtension)     │                       │  (--embed)  │
 │                     │                       │             │
 │ ┌─────────────────┐ │                       │             │
