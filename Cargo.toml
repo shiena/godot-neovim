@@ -4,7 +4,7 @@ version = "0.8.2"
 edition = "2021"
 authors = ["KOGA Mitsuhiro <shiena.jp@gmail.com>"]
 description = "Godot editor plugin that uses Neovim as backend"
-license = "Apache-2.0"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/shiena/godot-neovim"
 
 [lib]
