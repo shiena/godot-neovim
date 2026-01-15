@@ -81,7 +81,7 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 
 ## Requirements
 
-- Godot 4.3 - 4.5
+- Godot 4.2 - 4.5
 - Neovim 0.9.0 or later
 - Rust toolchain (for building from source)
 
