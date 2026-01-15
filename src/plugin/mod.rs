@@ -709,7 +709,9 @@ impl GodotNeovimPlugin {
     fn on_script_changed(&mut self, script: Option<Gd<godot::classes::Script>>) {
         // Handle null script (e.g., when all scripts are closed)
         let Some(script) = script else {
-            crate::verbose_print!("[godot-neovim] on_script_changed: null script, clearing references");
+            crate::verbose_print!(
+                "[godot-neovim] on_script_changed: null script, clearing references"
+            );
             self.current_editor = None;
             self.mode_label = None;
             self.current_script_path.clear();
@@ -1072,11 +1074,18 @@ impl GodotNeovimPlugin {
             _ => mode,
         };
 
+        // Get input mode for display
+        let input_mode = settings::get_input_mode();
+        let input_mode_name = match input_mode {
+            settings::InputMode::Hybrid => "Hybrid",
+            settings::InputMode::Strict => "Strict",
+        };
+
         // Format with cursor position if available
         let display_text = if let Some((line, col)) = cursor {
-            format!(" {} {}:{} ", mode_name, line, col)
+            format!(" {} ({}) {}:{} ", mode_name, input_mode_name, line, col)
         } else {
-            format!(" {} ", mode_name)
+            format!(" {} ({}) ", mode_name, input_mode_name)
         };
 
         label.set_text(&display_text);
