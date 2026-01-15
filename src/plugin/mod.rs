@@ -1608,18 +1608,18 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle '{' for previous paragraph
+        // Handle '{' for previous paragraph (send to Neovim for proper cursor positioning)
         if unicode_char == Some('{') {
-            self.move_to_prev_paragraph();
+            self.send_keys("{");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
             return;
         }
 
-        // Handle '}' for next paragraph
+        // Handle '}' for next paragraph (send to Neovim for proper cursor positioning)
         if unicode_char == Some('}') {
-            self.move_to_next_paragraph();
+            self.send_keys("}");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1887,9 +1887,27 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle '[{' and ']}' for block jump
+        // Handle '[' commands
         if self.last_key == "[" {
             match unicode_char {
+                Some('[') => {
+                    // [[ - jump to previous '{' at start of line (send to Neovim)
+                    self.send_keys("[[");
+                    self.last_key.clear();
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
+                Some(']') => {
+                    // [] - jump to previous '}' at start of line (send to Neovim)
+                    self.send_keys("[]");
+                    self.last_key.clear();
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
                 Some('{') => {
                     self.jump_to_block_start('{', '}');
                     self.last_key.clear();
@@ -1921,8 +1939,27 @@ impl GodotNeovimPlugin {
             }
         }
 
+        // Handle ']' commands
         if self.last_key == "]" {
             match unicode_char {
+                Some(']') => {
+                    // ]] - jump to next '{' at start of line (send to Neovim)
+                    self.send_keys("]]");
+                    self.last_key.clear();
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
+                Some('[') => {
+                    // ][ - jump to next '}' at start of line (send to Neovim)
+                    self.send_keys("][");
+                    self.last_key.clear();
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
                 Some('}') => {
                     self.jump_to_block_end('{', '}');
                     self.last_key.clear();
