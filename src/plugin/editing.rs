@@ -11,26 +11,66 @@ impl GodotNeovimPlugin {
             return;
         };
 
-        // Save current cursor position before undo
-        let saved_line = editor.get_caret_line();
-        let saved_col = editor.get_caret_column();
+        // Capture buffer state before undo to find changed position
+        let line_count_before = editor.get_line_count();
+        let mut lines_before: Vec<String> = Vec::with_capacity(line_count_before as usize);
+        for i in 0..line_count_before {
+            lines_before.push(editor.get_line(i).to_string());
+        }
 
         editor.undo();
 
-        // Godot's undo may move cursor to old position - restore to near the current position
-        // Vim behavior: cursor moves to the line where the change was undone
-        // Since we don't know where the change was, keep cursor at saved position if valid
-        let line_count = editor.get_line_count();
-        let target_line = saved_line.min(line_count - 1);
-        let line_length = editor.get_line(target_line).len() as i32;
-        let target_col = saved_col.min(line_length.max(0));
-        editor.set_caret_line(target_line);
-        editor.set_caret_column(target_col);
+        // Find the first position that changed and move cursor there
+        // This matches Neovim's behavior where cursor jumps to the undone change
+        let line_count_after = editor.get_line_count();
+        let mut changed_pos: Option<(i32, i32)> = None;
 
-        crate::verbose_print!(
-            "[godot-neovim] u: Undo (cursor kept at line {})",
-            target_line + 1
-        );
+        // Check for changed lines and find the exact column
+        let min_lines = line_count_before.min(line_count_after);
+        for i in 0..min_lines {
+            let line_after = editor.get_line(i).to_string();
+            if i < lines_before.len() as i32 && lines_before[i as usize] != line_after {
+                // Find the first differing column
+                let before_chars: Vec<char> = lines_before[i as usize].chars().collect();
+                let after_chars: Vec<char> = line_after.chars().collect();
+                let mut col = 0i32;
+                for (j, (b, a)) in before_chars.iter().zip(after_chars.iter()).enumerate() {
+                    if b != a {
+                        col = j as i32;
+                        break;
+                    }
+                    col = (j + 1) as i32;
+                }
+                // If lengths differ and all compared chars match, change is at the shorter length
+                if col as usize >= before_chars.len().min(after_chars.len()) {
+                    col = before_chars.len().min(after_chars.len()) as i32;
+                }
+                changed_pos = Some((i, col));
+                break;
+            }
+        }
+
+        // If no changed line found but line count differs, change is at the boundary
+        if changed_pos.is_none() && line_count_before != line_count_after {
+            let line = min_lines.max(0);
+            changed_pos = Some((line, 0));
+        }
+
+        // Move cursor to the changed position
+        if let Some((line, col)) = changed_pos {
+            let safe_line = line.min(line_count_after - 1).max(0);
+            editor.set_caret_line(safe_line);
+            let line_len = editor.get_line(safe_line).len() as i32;
+            let safe_col = col.min(line_len.max(0));
+            editor.set_caret_column(safe_col);
+            crate::verbose_print!(
+                "[godot-neovim] u: Undo (cursor moved to line {}, col {})",
+                safe_line + 1,
+                safe_col
+            );
+        } else {
+            crate::verbose_print!("[godot-neovim] u: Undo (no change detected)");
+        }
 
         // Sync buffer to Neovim after undo
         self.sync_buffer_to_neovim();
@@ -43,24 +83,61 @@ impl GodotNeovimPlugin {
             return;
         };
 
-        // Save current cursor position before redo
-        let saved_line = editor.get_caret_line();
-        let saved_col = editor.get_caret_column();
+        // Capture buffer state before redo to find changed position
+        let line_count_before = editor.get_line_count();
+        let mut lines_before: Vec<String> = Vec::with_capacity(line_count_before as usize);
+        for i in 0..line_count_before {
+            lines_before.push(editor.get_line(i).to_string());
+        }
 
         editor.redo();
 
-        // Keep cursor at saved position if valid
-        let line_count = editor.get_line_count();
-        let target_line = saved_line.min(line_count - 1);
-        let line_length = editor.get_line(target_line).len() as i32;
-        let target_col = saved_col.min(line_length.max(0));
-        editor.set_caret_line(target_line);
-        editor.set_caret_column(target_col);
+        // Find the first position that changed and move cursor there
+        let line_count_after = editor.get_line_count();
+        let mut changed_pos: Option<(i32, i32)> = None;
 
-        crate::verbose_print!(
-            "[godot-neovim] Ctrl+R: Redo (cursor kept at line {})",
-            target_line + 1
-        );
+        let min_lines = line_count_before.min(line_count_after);
+        for i in 0..min_lines {
+            let line_after = editor.get_line(i).to_string();
+            if i < lines_before.len() as i32 && lines_before[i as usize] != line_after {
+                // Find the first differing column
+                let before_chars: Vec<char> = lines_before[i as usize].chars().collect();
+                let after_chars: Vec<char> = line_after.chars().collect();
+                let mut col = 0i32;
+                for (j, (b, a)) in before_chars.iter().zip(after_chars.iter()).enumerate() {
+                    if b != a {
+                        col = j as i32;
+                        break;
+                    }
+                    col = (j + 1) as i32;
+                }
+                if col as usize >= before_chars.len().min(after_chars.len()) {
+                    col = before_chars.len().min(after_chars.len()) as i32;
+                }
+                changed_pos = Some((i, col));
+                break;
+            }
+        }
+
+        if changed_pos.is_none() && line_count_before != line_count_after {
+            let line = min_lines.max(0);
+            changed_pos = Some((line, 0));
+        }
+
+        if let Some((line, col)) = changed_pos {
+            let safe_line = line.min(line_count_after - 1).max(0);
+            editor.set_caret_line(safe_line);
+            let line_len = editor.get_line(safe_line).len() as i32;
+            let safe_col = col.min(line_len.max(0));
+            editor.set_caret_column(safe_col);
+            crate::verbose_print!(
+                "[godot-neovim] Ctrl+R: Redo (cursor moved to line {}, col {})",
+                safe_line + 1,
+                safe_col
+            );
+        } else {
+            crate::verbose_print!("[godot-neovim] Ctrl+R: Redo (no change detected)");
+        }
 
         // Sync buffer to Neovim after redo
         self.sync_buffer_to_neovim();
