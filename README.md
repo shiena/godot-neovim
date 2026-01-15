@@ -118,8 +118,11 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
    # Linux
    cp target/release/libgodot_neovim.so addons/godot-neovim/
 
-   # macOS
-   cp target/release/libgodot_neovim.dylib addons/godot-neovim/
+   # macOS (Apple Silicon)
+   cp target/release/libgodot_neovim.dylib addons/godot-neovim/libgodot_neovim.arm64.dylib
+
+   # macOS (Intel)
+   cp target/release/libgodot_neovim.dylib addons/godot-neovim/libgodot_neovim.x86_64.dylib
    ```
 
 4. Copy the addons folder to your Godot project:
