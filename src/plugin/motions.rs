@@ -309,7 +309,7 @@ impl GodotNeovimPlugin {
     pub(super) fn move_cursor_to(&mut self, line: i32, col: i32) {
         // Update last_synced_cursor BEFORE setting caret to prevent
         // caret_changed signal from triggering extra sync_cursor_to_neovim
-        self.last_synced_cursor = (line, col);
+        self.last_synced_cursor = (line as i64, col as i64);
 
         if let Some(ref mut editor) = self.current_editor {
             editor.set_caret_line(line);

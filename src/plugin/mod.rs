@@ -194,7 +194,7 @@ pub struct GodotNeovimPlugin {
     /// Last synced cursor position: (line, col) for detecting external cursor changes
     /// Used to prevent sync loops between Godot and Neovim
     #[init(val = (-1, -1))]
-    last_synced_cursor: (i32, i32),
+    last_synced_cursor: (i64, i64),
     /// Flag indicating script changed signal was received (for deferred processing)
     /// Uses Cell for interior mutability to avoid borrow conflicts with signal callbacks
     #[init(val = Cell::new(false))]
@@ -605,12 +605,12 @@ impl GodotNeovimPlugin {
         let col = editor.get_caret_column();
 
         // Check if cursor actually changed (to prevent sync loops)
-        if self.last_synced_cursor == (line, col) {
+        if self.last_synced_cursor == (line as i64, col as i64) {
             return;
         }
 
         // Update last_synced_cursor and sync to Neovim
-        self.last_synced_cursor = (line, col);
+        self.last_synced_cursor = (line as i64, col as i64);
         self.sync_cursor_to_neovim();
     }
 
@@ -626,7 +626,7 @@ impl GodotNeovimPlugin {
         let col = editor.get_caret_column();
 
         // Update last_synced_cursor and sync to Neovim
-        self.last_synced_cursor = (line, col);
+        self.last_synced_cursor = (line as i64, col as i64);
         self.sync_cursor_to_neovim();
     }
 

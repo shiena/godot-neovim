@@ -363,7 +363,7 @@ impl GodotNeovimPlugin {
 
         // Update last_synced_cursor BEFORE setting caret to prevent
         // caret_changed signal from triggering sync_cursor_to_neovim
-        self.last_synced_cursor = (safe_line, safe_col);
+        self.last_synced_cursor = (safe_line as i64, safe_col as i64);
 
         editor.set_caret_line(safe_line);
         editor.set_caret_column(safe_col);
@@ -407,7 +407,7 @@ impl GodotNeovimPlugin {
 
             // Update last_synced_cursor BEFORE setting caret to prevent
             // caret_changed signal from triggering sync_cursor_to_neovim
-            self.last_synced_cursor = (safe_line, target_col);
+            self.last_synced_cursor = (safe_line as i64, target_col as i64);
 
             editor.set_caret_line(safe_line);
             editor.set_caret_column(target_col);
