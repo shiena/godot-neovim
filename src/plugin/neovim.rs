@@ -16,7 +16,7 @@ impl GodotNeovimPlugin {
             return;
         };
 
-        let Ok(client) = neovim.lock() else {
+        let Ok(client) = neovim.try_lock() else {
             crate::verbose_print!("[godot-neovim] sync_buffer_to_neovim: Failed to lock");
             return;
         };
