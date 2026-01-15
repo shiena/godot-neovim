@@ -912,6 +912,20 @@ impl GodotNeovimPlugin {
         matches!(mode, "v" | "V" | "\x16" | "^V" | "CTRL-V")
     }
 
+    /// Clear all pending input states to ensure mutual exclusivity
+    /// Call this before setting any pending state
+    fn clear_pending_input_states(&mut self) {
+        self.command_mode = false;
+        self.search_mode = false;
+        self.pending_char_op = None;
+        self.pending_mark_op = None;
+        self.pending_macro_op = None;
+        // Clear register waiting state (Some('\0')) but preserve selected register
+        if self.selected_register == Some('\0') {
+            self.selected_register = None;
+        }
+    }
+
     /// Mark input as handled on the CodeEdit's viewport
     /// This prevents CodeEdit from processing the input event
     #[allow(dead_code)]
@@ -1512,6 +1526,7 @@ impl GodotNeovimPlugin {
             && !key_event.is_ctrl_pressed()
             && self.last_key != "g"
         {
+            self.clear_pending_input_states();
             self.pending_char_op = Some('f');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1521,6 +1536,7 @@ impl GodotNeovimPlugin {
 
         // Handle 'F' for find char backward
         if keycode == Key::F && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.clear_pending_input_states();
             self.pending_char_op = Some('F');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1534,6 +1550,7 @@ impl GodotNeovimPlugin {
             && !key_event.is_ctrl_pressed()
             && self.last_key != "g"
         {
+            self.clear_pending_input_states();
             self.pending_char_op = Some('t');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1547,6 +1564,7 @@ impl GodotNeovimPlugin {
             && !key_event.is_ctrl_pressed()
             && self.last_key != "g"
         {
+            self.clear_pending_input_states();
             self.pending_char_op = Some('T');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1713,6 +1731,7 @@ impl GodotNeovimPlugin {
 
         // Handle 'r' for replace char
         if keycode == Key::R && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.clear_pending_input_states();
             self.pending_char_op = Some('r');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1740,6 +1759,7 @@ impl GodotNeovimPlugin {
 
         // Handle 'm' for set mark
         if keycode == Key::M && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.clear_pending_input_states();
             self.pending_mark_op = Some('m');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1749,6 +1769,7 @@ impl GodotNeovimPlugin {
 
         // Handle '\'' (single quote) for jump to mark line
         if unicode_char == Some('\'') && !key_event.is_ctrl_pressed() {
+            self.clear_pending_input_states();
             self.pending_mark_op = Some('\'');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1758,6 +1779,7 @@ impl GodotNeovimPlugin {
 
         // Handle '`' (backtick) for jump to mark position
         if unicode_char == Some('`') && !key_event.is_ctrl_pressed() {
+            self.clear_pending_input_states();
             self.pending_mark_op = Some('`');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1776,6 +1798,7 @@ impl GodotNeovimPlugin {
                 self.stop_macro_recording();
             } else {
                 // Wait for register character
+                self.clear_pending_input_states();
                 self.pending_macro_op = Some('q');
             }
             if let Some(mut viewport) = self.base().get_viewport() {
@@ -1786,6 +1809,7 @@ impl GodotNeovimPlugin {
 
         // Handle '@' for macro playback
         if unicode_char == Some('@') && !key_event.is_ctrl_pressed() {
+            self.clear_pending_input_states();
             self.pending_macro_op = Some('@');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1796,6 +1820,7 @@ impl GodotNeovimPlugin {
         // Handle '"' for register selection
         if unicode_char == Some('"') && !key_event.is_ctrl_pressed() {
             // Use '\0' as marker for "waiting for register char"
+            self.clear_pending_input_states();
             self.selected_register = Some('\0');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();

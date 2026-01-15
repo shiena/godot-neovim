@@ -8,6 +8,7 @@ use godot::prelude::*;
 impl GodotNeovimPlugin {
     /// Open command-line mode
     pub(super) fn open_command_line(&mut self) {
+        self.clear_pending_input_states();
         self.command_mode = true;
         self.command_buffer = ":".to_string();
 
