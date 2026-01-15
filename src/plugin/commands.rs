@@ -1,6 +1,6 @@
 //! Command-line mode and Ex commands
 
-use super::GodotNeovimPlugin;
+use super::{CodeEditExt, GodotNeovimPlugin};
 use godot::classes::{EditorInterface, Input, InputEventKey, ResourceSaver};
 use godot::global::Key;
 use godot::prelude::*;
@@ -8,6 +8,7 @@ use godot::prelude::*;
 impl GodotNeovimPlugin {
     /// Open command-line mode
     pub(super) fn open_command_line(&mut self) {
+        self.clear_pending_input_states();
         self.command_mode = true;
         self.command_buffer = ":".to_string();
 
@@ -397,6 +398,19 @@ impl GodotNeovimPlugin {
         key_release.set_pressed(false);
         Input::singleton().parse_input_event(&key_release);
 
+        // Emit name_changed to update the script list UI (remove dirty marker)
+        if let Some(ref editor) = self.current_editor {
+            let mut current: Option<Gd<Node>> = editor.get_parent();
+            while let Some(node) = current {
+                if node.get_class() == "ScriptTextEditor".into() {
+                    let mut script_editor = node;
+                    script_editor.emit_signal("name_changed", &[]);
+                    break;
+                }
+                current = node.get_parent();
+            }
+        }
+
         crate::verbose_print!("[godot-neovim] :w - Save triggered (Ctrl+S)");
     }
 
@@ -483,8 +497,9 @@ impl GodotNeovimPlugin {
 
     /// :q - Close the current script tab by simulating Ctrl+W
     pub(super) fn cmd_close(&mut self) {
-        // Clear current editor reference before closing to avoid accessing freed instance
-        self.current_editor = None;
+        // Don't clear current_editor here - if user cancels the save dialog,
+        // the script stays open and we need to keep the reference.
+        // When the script actually closes, on_script_changed will handle cleanup.
 
         // Simulate Ctrl+W key press
         let mut key_press = InputEventKey::new_gd();
@@ -550,9 +565,9 @@ impl GodotNeovimPlugin {
 
     /// :qa/:qall - Close all script tabs
     pub(super) fn cmd_close_all(&mut self) {
-        // Clear references before closing to avoid accessing freed instances
-        self.current_editor = None;
-        self.mode_label = None;
+        // Don't clear references here - if user cancels save dialogs,
+        // scripts stay open and we need to keep the references.
+        // When scripts actually close, on_script_changed will handle cleanup.
 
         // Get the number of open scripts
         let editor = EditorInterface::singleton();
@@ -617,7 +632,7 @@ impl GodotNeovimPlugin {
             let line = editor.get_caret_line();
             let col = editor.get_caret_column();
 
-            editor.set_text(&new_text);
+            editor.set_text_and_notify(&new_text);
 
             // Restore cursor position (clamped to valid range)
             let max_line = editor.get_line_count() - 1;
@@ -659,7 +674,7 @@ impl GodotNeovimPlugin {
             let line = editor.get_caret_line();
             let col = editor.get_caret_column();
 
-            editor.set_text(&new_text);
+            editor.set_text_and_notify(&new_text);
 
             // Restore cursor position (clamped to valid range)
             let max_line = editor.get_line_count() - 1;
@@ -799,7 +814,7 @@ impl GodotNeovimPlugin {
                     .filter(|(i, _)| !matched_lines.contains(&(*i as i32)))
                     .map(|(_, l)| *l)
                     .collect();
-                editor.set_text(&new_lines.join("\n"));
+                editor.set_text_and_notify(&new_lines.join("\n"));
                 crate::verbose_print!(
                     "[godot-neovim] :g/{}/d - Deleted {} lines",
                     pattern,
@@ -846,7 +861,7 @@ impl GodotNeovimPlugin {
         let line = editor.get_caret_line();
         let col = editor.get_caret_column();
 
-        editor.set_text(&lines.join("\n"));
+        editor.set_text_and_notify(&lines.join("\n"));
 
         // Restore cursor
         let max_line = editor.get_line_count() - 1;
@@ -886,7 +901,7 @@ impl GodotNeovimPlugin {
             }
         }
 
-        editor.set_text(&new_lines.join("\n"));
+        editor.set_text_and_notify(&new_lines.join("\n"));
 
         // Move cursor to the new line
         editor.set_caret_line(insert_after + 1);
@@ -940,7 +955,7 @@ impl GodotNeovimPlugin {
             new_lines.push(line_text);
         }
 
-        editor.set_text(&new_lines.join("\n"));
+        editor.set_text_and_notify(&new_lines.join("\n"));
 
         // Move cursor to the new location
         let new_line = if insert_after < 0 {

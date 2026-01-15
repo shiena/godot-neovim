@@ -6,6 +6,10 @@ use std::process::{Command, Output};
 const SETTING_NEOVIM_PATH: &str = "godot_neovim/neovim_executable_path";
 const SETTING_INPUT_MODE: &str = "godot_neovim/input_mode";
 const SETTING_NEOVIM_CLEAN: &str = "godot_neovim/neovim_clean";
+const SETTING_TIMEOUTLEN: &str = "godot_neovim/timeoutlen";
+
+/// Default timeout for multi-key sequences (matches Neovim's default)
+pub const DEFAULT_TIMEOUTLEN_MS: i64 = 1000;
 
 /// Input mode for insert mode handling
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -62,9 +66,9 @@ pub fn initialize_settings() {
         settings.set_setting(SETTING_NEOVIM_PATH, &Variant::from(default_path));
     }
 
-    // Set initial value metadata
+    // Set initial value metadata (p_basic=true: visible by default)
     let default_path = get_default_neovim_path();
-    settings.set_initial_value(SETTING_NEOVIM_PATH, &Variant::from(default_path), false);
+    settings.set_initial_value(SETTING_NEOVIM_PATH, &Variant::from(default_path), true);
 
     // Add property info for better UI
     #[allow(deprecated)]
@@ -81,8 +85,8 @@ pub fn initialize_settings() {
         settings.set_setting(SETTING_INPUT_MODE, &Variant::from(0i64));
     }
 
-    // Set initial value for input_mode (0 = Hybrid)
-    settings.set_initial_value(SETTING_INPUT_MODE, &Variant::from(0i64), false);
+    // Set initial value for input_mode (0 = Hybrid, p_basic=true: visible by default)
+    settings.set_initial_value(SETTING_INPUT_MODE, &Variant::from(0i64), true);
 
     // Add property info for input_mode (dropdown)
     #[allow(deprecated)]
@@ -99,8 +103,8 @@ pub fn initialize_settings() {
         settings.set_setting(SETTING_NEOVIM_CLEAN, &Variant::from(false));
     }
 
-    // Set initial value for neovim_clean
-    settings.set_initial_value(SETTING_NEOVIM_CLEAN, &Variant::from(false), false);
+    // Set initial value for neovim_clean (p_basic=true: visible by default)
+    settings.set_initial_value(SETTING_NEOVIM_CLEAN, &Variant::from(false), true);
 
     // Add property info for neovim_clean (checkbox)
     #[allow(deprecated)]
@@ -110,11 +114,30 @@ pub fn initialize_settings() {
 
     settings.add_property_info(&clean_info);
 
+    // Add timeoutlen setting if it doesn't exist (advanced setting)
+    if !settings.has_setting(SETTING_TIMEOUTLEN) {
+        settings.set_setting(SETTING_TIMEOUTLEN, &Variant::from(DEFAULT_TIMEOUTLEN_MS));
+    }
+
+    // Set initial value for timeoutlen (p_basic=false: advanced setting, hidden by default)
+    settings.set_initial_value(SETTING_TIMEOUTLEN, &Variant::from(DEFAULT_TIMEOUTLEN_MS), false);
+
+    // Add property info for timeoutlen (integer with range)
+    #[allow(deprecated)]
+    let mut timeoutlen_info = Dictionary::new();
+    timeoutlen_info.set("name", SETTING_TIMEOUTLEN);
+    timeoutlen_info.set("type", VariantType::INT.ord());
+    timeoutlen_info.set("hint", godot::global::PropertyHint::RANGE.ord());
+    timeoutlen_info.set("hint_string", "0,10000,100"); // min, max, step
+
+    settings.add_property_info(&timeoutlen_info);
+
     crate::verbose_print!(
-        "[godot-neovim] Settings initialized. Neovim path: {}, Input mode: {:?}, Clean: {}",
+        "[godot-neovim] Settings initialized. Neovim path: {}, Input mode: {:?}, Clean: {}, Timeoutlen: {}ms",
         get_neovim_path(),
         get_input_mode(),
-        get_neovim_clean()
+        get_neovim_clean(),
+        get_timeoutlen()
     );
 }
 
@@ -199,6 +222,24 @@ pub fn get_neovim_clean() -> bool {
     }
 
     false
+}
+
+/// Get the configured timeoutlen (multi-key sequence timeout in milliseconds)
+pub fn get_timeoutlen() -> u64 {
+    let editor = EditorInterface::singleton();
+    let Some(settings) = editor.get_editor_settings() else {
+        return DEFAULT_TIMEOUTLEN_MS as u64;
+    };
+
+    if settings.has_setting(SETTING_TIMEOUTLEN) {
+        let value = settings.get_setting(SETTING_TIMEOUTLEN);
+        if let Ok(timeout) = value.try_to::<i64>() {
+            // Clamp to valid range (0 to 10000ms)
+            return timeout.clamp(0, 10000) as u64;
+        }
+    }
+
+    DEFAULT_TIMEOUTLEN_MS as u64
 }
 
 /// Validate the Neovim executable path

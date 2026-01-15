@@ -169,10 +169,11 @@
 ## [code]@:[/code] - Repeat last Ex command[br]
 ##
 ## [br][b]Settings[/b][br]
-## Configure via [code]Editor > Editor Settings > godot_neovim[/code]:[br]
-## - [code]neovim_executable_path[/code] - Path to nvim[br]
-## - [code]input_mode[/code] - Hybrid (auto-completion) or Strict[br]
-## - [code]neovim_clean[/code] - Start with --clean flag[br]
+## Configure via [code]Editor > Editor Settings > Godot Neovim[/code]:[br]
+## [code]neovim_executable_path[/code] - Path to Neovim executable[br]
+## [code]input_mode[/code] - Hybrid (Godot input, auto-completion) or Strict (Neovim input)[br]
+## [code]neovim_clean[/code] - Equivalent to --clean startup option[br]
+## [code]timeoutlen[/code] - Time (ms) to wait for a mapped sequence to complete (advanced)[br]
 ##
 ## [br][b]Limitations[/b][br]
 ## - Insert mode commands (Ctrl+O, Ctrl+W, etc.) not available in hybrid mode[br]

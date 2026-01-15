@@ -134,32 +134,21 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 
 ## Configuration
 
-### Neovim Executable Path
+All settings are available in `Editor > Editor Settings > Godot Neovim`.
 
-You can configure the Neovim executable path in Godot's Editor Settings:
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Neovim Executable Path | Path to Neovim executable. The plugin validates this path on startup. | `nvim.exe` (Windows) / `nvim` (macOS/Linux) |
+| Input Mode | How insert mode input is handled. `Hybrid` uses Godot's native input for auto-completion support. `Strict` sends all input to Neovim. | Hybrid |
+| Neovim Clean | Equivalent to the `--clean` startup option. When enabled, Neovim starts without loading any config files (init.lua, plugins, etc.). | false |
+| Timeoutlen *(advanced)* | Time in milliseconds to wait for a mapped key sequence to complete. This setting appears when "Advanced Settings" is enabled in Editor Settings. | 1000 |
 
-1. Open `Editor > Editor Settings`
-2. Navigate to `Godot Neovim` section
-3. Set `Neovim Executable Path` to your Neovim installation path
-
-**Default values:**
-- Windows: `nvim.exe`
-- macOS/Linux: `nvim`
-
-The plugin validates the path on startup and whenever settings change. Check the Output panel for validation results.
-
-### Input Mode
-
-You can choose how insert mode input is handled:
-
-1. Open `Editor > Editor Settings`
-2. Navigate to `Godot Neovim` section
-3. Set `Input Mode` to your preferred mode
+### Input Mode Details
 
 | Mode | Description | Auto-completion |
 |------|-------------|:---------------:|
-| `hybrid` (default) | Insert mode uses Godot's native input | ✅ |
-| `strict` | Insert mode also handled by Neovim | ❌ |
+| `Hybrid` (default) | Insert mode uses Godot's native input | ✅ |
+| `Strict` | Insert mode also handled by Neovim | ❌ |
 
 **Hybrid mode** is recommended for most users as it allows using Godot's auto-completion, code hints, and other editor features directly in insert mode.
 

@@ -1,6 +1,6 @@
 //! Neovim communication: buffer sync, cursor sync, key sending
 
-use super::GodotNeovimPlugin;
+use super::{CodeEditExt, GodotNeovimPlugin};
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
@@ -16,7 +16,7 @@ impl GodotNeovimPlugin {
             return;
         };
 
-        let Ok(client) = neovim.lock() else {
+        let Ok(client) = neovim.try_lock() else {
             crate::verbose_print!("[godot-neovim] sync_buffer_to_neovim: Failed to lock");
             return;
         };
@@ -134,7 +134,9 @@ impl GodotNeovimPlugin {
         };
 
         let Ok(client) = neovim.try_lock() else {
-            godot_warn!("[godot-neovim] Mutex busy, dropping key: {}", keys);
+            // Queue the key for retry instead of dropping
+            crate::verbose_print!("[godot-neovim] Mutex busy, queuing key: {}", keys);
+            self.pending_keys.push_back(keys.to_string());
             return false;
         };
 
@@ -275,6 +277,14 @@ impl GodotNeovimPlugin {
         // Force mode to normal (ESC always returns to normal mode)
         self.current_mode = "n".to_string();
 
+        // Clear all pending states (Escape cancels everything)
+        self.clear_last_key();
+        self.pending_char_op = None;
+        self.pending_mark_op = None;
+        self.pending_macro_op = None;
+        self.selected_register = None;
+        self.count_buffer.clear();
+
         // Clear any visual selection
         self.clear_visual_selection();
 
@@ -285,8 +295,42 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] Escaped to normal mode, buffer synced");
     }
 
+    /// Process any pending keys that were queued due to mutex contention
+    fn process_pending_keys(&mut self) {
+        // Process up to a few keys per frame to avoid blocking
+        const MAX_KEYS_PER_FRAME: usize = 5;
+
+        for _ in 0..MAX_KEYS_PER_FRAME {
+            let Some(key) = self.pending_keys.pop_front() else {
+                break;
+            };
+
+            let Some(ref neovim) = self.neovim else {
+                // No neovim, discard pending keys
+                self.pending_keys.clear();
+                break;
+            };
+
+            let Ok(client) = neovim.try_lock() else {
+                // Still busy, put the key back and try next frame
+                self.pending_keys.push_front(key);
+                break;
+            };
+
+            // Send the queued key
+            if let Err(e) = client.input(&key) {
+                godot_error!("[godot-neovim] Failed to send queued key '{}': {}", key, e);
+            } else {
+                crate::verbose_print!("[godot-neovim] Sent queued key: {}", key);
+            }
+        }
+    }
+
     /// Process pending updates from Neovim redraw events
     pub(super) fn process_neovim_updates(&mut self) {
+        // First, try to send any queued keys
+        self.process_pending_keys();
+
         let Some(ref neovim) = self.neovim else {
             return;
         };
@@ -363,7 +407,7 @@ impl GodotNeovimPlugin {
 
         // Update last_synced_cursor BEFORE setting caret to prevent
         // caret_changed signal from triggering sync_cursor_to_neovim
-        self.last_synced_cursor = (safe_line, safe_col);
+        self.last_synced_cursor = (safe_line as i64, safe_col as i64);
 
         editor.set_caret_line(safe_line);
         editor.set_caret_column(safe_col);
@@ -389,7 +433,7 @@ impl GodotNeovimPlugin {
         let current_normalized = current_text.trim_end_matches('\n');
 
         if text_normalized != current_normalized {
-            editor.set_text(&text);
+            editor.set_text_and_notify(&text);
             crate::verbose_print!(
                 "[godot-neovim] Buffer synced from Neovim ({} lines)",
                 lines.len()
@@ -407,7 +451,7 @@ impl GodotNeovimPlugin {
 
             // Update last_synced_cursor BEFORE setting caret to prevent
             // caret_changed signal from triggering sync_cursor_to_neovim
-            self.last_synced_cursor = (safe_line, target_col);
+            self.last_synced_cursor = (safe_line as i64, target_col as i64);
 
             editor.set_caret_line(safe_line);
             editor.set_caret_column(target_col);

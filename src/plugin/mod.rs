@@ -25,6 +25,33 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Instant;
+
+/// Extension trait for CodeEdit to emit text_changed signal after set_text
+/// Godot's set_text() does not emit text_changed signal, causing dirty flag to not be set
+pub(crate) trait CodeEditExt {
+    fn set_text_and_notify(&mut self, text: &str);
+}
+
+impl CodeEditExt for Gd<CodeEdit> {
+    fn set_text_and_notify(&mut self, text: &str) {
+        // Godot's set_text() updates version counter internally when undo is enabled.
+        // ScriptEditor uses get_version() != get_saved_version() for dirty flag.
+        self.set_text(text);
+
+        // Emit name_changed signal on ScriptTextEditor to update script list UI.
+        // Hierarchy: CodeEdit -> CodeTextEditor -> VSplitContainer -> ScriptTextEditor
+        let mut current: Option<Gd<Node>> = self.get_parent();
+        while let Some(node) = current {
+            if node.get_class() == "ScriptTextEditor".into() {
+                let mut script_editor = node;
+                script_editor.emit_signal("name_changed", &[]);
+                break;
+            }
+            current = node.get_parent();
+        }
+    }
+}
 
 /// Help query for goto_help()
 #[derive(Debug, Clone)]
@@ -110,6 +137,12 @@ pub struct GodotNeovimPlugin {
     /// Last key sent to Neovim (for detecting sequences like zz, zt, zb)
     #[init(val = String::new())]
     last_key: String,
+    /// Timestamp when last_key was set (for timeout detection)
+    #[init(val = None)]
+    last_key_time: Option<Instant>,
+    /// Queue of pending keys when mutex is busy (to avoid key drops)
+    #[init(val = std::collections::VecDeque::new())]
+    pending_keys: std::collections::VecDeque<String>,
     /// Command line input buffer for ':' commands
     #[init(val = String::new())]
     command_buffer: String,
@@ -194,7 +227,7 @@ pub struct GodotNeovimPlugin {
     /// Last synced cursor position: (line, col) for detecting external cursor changes
     /// Used to prevent sync loops between Godot and Neovim
     #[init(val = (-1, -1))]
-    last_synced_cursor: (i32, i32),
+    last_synced_cursor: (i64, i64),
     /// Flag indicating script changed signal was received (for deferred processing)
     /// Uses Cell for interior mutability to avoid borrow conflicts with signal callbacks
     #[init(val = Cell::new(false))]
@@ -400,6 +433,34 @@ impl IEditorPlugin for GodotNeovimPlugin {
 
         // Check for pending updates from Neovim redraw events
         self.process_neovim_updates();
+
+        // Check for key sequence timeout (like Neovim's timeoutlen)
+        // If last_key has been pending too long, cancel it
+        if let Some(key_time) = self.last_key_time {
+            let timeoutlen = crate::settings::get_timeoutlen();
+            if key_time.elapsed().as_millis() > timeoutlen as u128 {
+                if !self.last_key.is_empty() {
+                    crate::verbose_print!(
+                        "[godot-neovim] Key sequence timeout: '{}' ({}ms elapsed)",
+                        self.last_key,
+                        key_time.elapsed().as_millis()
+                    );
+                    // Cancel Neovim's pending operator
+                    if let Some(ref neovim) = self.neovim {
+                        if let Ok(client) = neovim.try_lock() {
+                            let _ = client.input("<Esc>");
+                        }
+                    }
+                    // Clear directly here (not using clear_last_key() to avoid double clearing last_key_time)
+                    self.last_key.clear();
+                }
+                self.last_key_time = None;
+
+                // Also clear related pending states on timeout
+                self.selected_register = None;
+                self.count_buffer.clear();
+            }
+        }
     }
 
     fn input(&mut self, event: Gd<godot::classes::InputEvent>) {
@@ -605,12 +666,12 @@ impl GodotNeovimPlugin {
         let col = editor.get_caret_column();
 
         // Check if cursor actually changed (to prevent sync loops)
-        if self.last_synced_cursor == (line, col) {
+        if self.last_synced_cursor == (line as i64, col as i64) {
             return;
         }
 
         // Update last_synced_cursor and sync to Neovim
-        self.last_synced_cursor = (line, col);
+        self.last_synced_cursor = (line as i64, col as i64);
         self.sync_cursor_to_neovim();
     }
 
@@ -618,6 +679,9 @@ impl GodotNeovimPlugin {
     fn sync_cursor_to_neovim_deferred(&mut self) {
         // Called after mouse click to sync cursor position
         // Deferred to ensure Godot has updated the caret position first
+        // Note: We sync even in insert mode because clicking should move
+        // the insertion point in Neovim too
+
         let Some(ref editor) = self.current_editor else {
             return;
         };
@@ -626,7 +690,7 @@ impl GodotNeovimPlugin {
         let col = editor.get_caret_column();
 
         // Update last_synced_cursor and sync to Neovim
-        self.last_synced_cursor = (line, col);
+        self.last_synced_cursor = (line as i64, col as i64);
         self.sync_cursor_to_neovim();
     }
 
@@ -640,9 +704,12 @@ impl GodotNeovimPlugin {
 
     #[func]
     fn on_script_changed(&mut self, script: Option<Gd<godot::classes::Script>>) {
-        // Handle null script (e.g., when no script is selected)
+        // Handle null script (e.g., when all scripts are closed)
         let Some(script) = script else {
-            crate::verbose_print!("[godot-neovim] on_script_changed: null script");
+            crate::verbose_print!("[godot-neovim] on_script_changed: null script, clearing references");
+            self.current_editor = None;
+            self.mode_label = None;
+            self.current_script_path.clear();
             return;
         };
 
@@ -912,6 +979,57 @@ impl GodotNeovimPlugin {
         matches!(mode, "v" | "V" | "\x16" | "^V" | "CTRL-V")
     }
 
+    /// Clear all pending input states to ensure mutual exclusivity
+    /// Call this before setting any pending state
+    fn clear_pending_input_states(&mut self) {
+        self.command_mode = false;
+        self.search_mode = false;
+        self.pending_char_op = None;
+        self.pending_mark_op = None;
+        self.pending_macro_op = None;
+        // Clear register waiting state (Some('\0')) but preserve selected register
+        if self.selected_register == Some('\0') {
+            self.selected_register = None;
+        }
+    }
+
+    /// Set last_key with timestamp for timeout tracking
+    fn set_last_key(&mut self, key: impl Into<String>) {
+        self.last_key = key.into();
+        self.last_key_time = Some(Instant::now());
+    }
+
+    /// Clear last_key and its timestamp
+    pub(super) fn clear_last_key(&mut self) {
+        self.last_key.clear();
+        self.last_key_time = None;
+    }
+
+    /// Cancel any pending operator in Neovim and clear local state
+    /// Call this before executing local commands that would conflict with pending operators
+    fn cancel_pending_operator(&mut self) {
+        if !self.last_key.is_empty() {
+            crate::verbose_print!(
+                "[godot-neovim] Cancelling pending operator: '{}'",
+                self.last_key
+            );
+            // Send Escape to cancel Neovim's pending operator
+            if let Some(ref neovim) = self.neovim {
+                if let Ok(client) = neovim.try_lock() {
+                    let _ = client.input("<Esc>");
+                } else {
+                    // Mutex busy - queue the Escape key to be sent later
+                    crate::verbose_print!(
+                        "[godot-neovim] Mutex busy, queuing <Esc> for pending operator cancellation"
+                    );
+                    self.pending_keys.push_back("<Esc>".to_string());
+                }
+            }
+            // Always clear local state even if Neovim Escape is queued
+            self.clear_last_key();
+        }
+    }
+
     /// Mark input as handled on the CodeEdit's viewport
     /// This prevents CodeEdit from processing the input event
     #[allow(dead_code)]
@@ -1060,13 +1178,29 @@ impl GodotNeovimPlugin {
 
         let keycode = key_event.get_keycode();
 
-        // Cancel on Escape
-        if keycode == Key::ESCAPE {
+        // Ignore modifier-only key presses (SHIFT, CTRL, ALT, META keys themselves)
+        // These are pressed before the actual character key and should not cancel the operation
+        if matches!(
+            keycode,
+            Key::SHIFT | Key::CTRL | Key::ALT | Key::META | Key::CAPSLOCK | Key::NUMLOCK
+        ) {
+            // Don't consume the event, but don't cancel either - wait for actual character
+            return false;
+        }
+
+        // Cancel on Escape or any modifier key combination (Ctrl+X, Alt+X, etc.)
+        if keycode == Key::ESCAPE
+            || key_event.is_ctrl_pressed()
+            || key_event.is_alt_pressed()
+            || key_event.is_meta_pressed()
+        {
             self.pending_char_op = None;
-            if let Some(mut viewport) = self.base().get_viewport() {
-                viewport.set_input_as_handled();
-            }
-            return true;
+            crate::verbose_print!(
+                "[godot-neovim] Cancelled pending char op '{}' due to modifier/escape",
+                op
+            );
+            // Don't consume the event - let it be processed normally
+            return false;
         }
 
         // Get the character
@@ -1088,6 +1222,13 @@ impl GodotNeovimPlugin {
                 return true;
             }
         }
+
+        // Non-printable key pressed - cancel the pending operation
+        self.pending_char_op = None;
+        crate::verbose_print!(
+            "[godot-neovim] Cancelled pending char op '{}' due to non-printable key",
+            op
+        );
         false
     }
 
@@ -1098,13 +1239,27 @@ impl GodotNeovimPlugin {
 
         let keycode = key_event.get_keycode();
 
-        // Cancel on Escape
-        if keycode == Key::ESCAPE {
+        // Ignore modifier-only key presses (SHIFT, CTRL, ALT, META keys themselves)
+        if matches!(
+            keycode,
+            Key::SHIFT | Key::CTRL | Key::ALT | Key::META | Key::CAPSLOCK | Key::NUMLOCK
+        ) {
+            return false;
+        }
+
+        // Cancel on Escape or any modifier key combination
+        if keycode == Key::ESCAPE
+            || key_event.is_ctrl_pressed()
+            || key_event.is_alt_pressed()
+            || key_event.is_meta_pressed()
+        {
             self.pending_mark_op = None;
-            if let Some(mut viewport) = self.base().get_viewport() {
-                viewport.set_input_as_handled();
-            }
-            return true;
+            crate::verbose_print!(
+                "[godot-neovim] Cancelled pending mark op '{}' due to modifier/escape",
+                op
+            );
+            // Don't consume the event - let it be processed normally
+            return false;
         }
 
         // Get the character (must be a-z for marks)
@@ -1124,8 +1279,23 @@ impl GodotNeovimPlugin {
                     }
                     return true;
                 }
+                // Non a-z character - cancel and let it be processed normally
+                self.pending_mark_op = None;
+                crate::verbose_print!(
+                    "[godot-neovim] Cancelled pending mark op '{}' - invalid mark char '{}'",
+                    op,
+                    c
+                );
+                return false;
             }
         }
+
+        // Non-printable key pressed - cancel the pending operation
+        self.pending_mark_op = None;
+        crate::verbose_print!(
+            "[godot-neovim] Cancelled pending mark op '{}' due to non-printable key",
+            op
+        );
         false
     }
 
@@ -1136,13 +1306,27 @@ impl GodotNeovimPlugin {
 
         let keycode = key_event.get_keycode();
 
-        // Cancel on Escape
-        if keycode == Key::ESCAPE {
+        // Ignore modifier-only key presses (SHIFT, CTRL, ALT, META keys themselves)
+        if matches!(
+            keycode,
+            Key::SHIFT | Key::CTRL | Key::ALT | Key::META | Key::CAPSLOCK | Key::NUMLOCK
+        ) {
+            return false;
+        }
+
+        // Cancel on Escape or any modifier key combination
+        if keycode == Key::ESCAPE
+            || key_event.is_ctrl_pressed()
+            || key_event.is_alt_pressed()
+            || key_event.is_meta_pressed()
+        {
             self.pending_macro_op = None;
-            if let Some(mut viewport) = self.base().get_viewport() {
-                viewport.set_input_as_handled();
-            }
-            return true;
+            crate::verbose_print!(
+                "[godot-neovim] Cancelled pending macro op '{}' due to modifier/escape",
+                op
+            );
+            // Don't consume the event - let it be processed normally
+            return false;
         }
 
         // Get the character
@@ -1155,6 +1339,11 @@ impl GodotNeovimPlugin {
                         // Start recording if a-z
                         if c.is_ascii_lowercase() {
                             self.start_macro_recording(c);
+                        } else {
+                            crate::verbose_print!(
+                                "[godot-neovim] Macro recording cancelled - invalid register '{}'",
+                                c
+                            );
                         }
                     }
                     '@' => {
@@ -1167,6 +1356,11 @@ impl GodotNeovimPlugin {
                         } else if c.is_ascii_lowercase() {
                             // @{a-z} - play specific macro
                             self.play_macro(c);
+                        } else {
+                            crate::verbose_print!(
+                                "[godot-neovim] Macro playback cancelled - invalid register '{}'",
+                                c
+                            );
                         }
                     }
                     _ => {}
@@ -1177,6 +1371,13 @@ impl GodotNeovimPlugin {
                 return true;
             }
         }
+
+        // Non-printable key pressed - cancel the pending operation
+        self.pending_macro_op = None;
+        crate::verbose_print!(
+            "[godot-neovim] Cancelled pending macro op '{}' due to non-printable key",
+            op
+        );
         false
     }
 
@@ -1238,7 +1439,7 @@ impl GodotNeovimPlugin {
             // Then enter visual block mode
             let completed = self.send_keys("<C-v>");
             if completed {
-                self.last_key.clear();
+                self.clear_last_key();
             }
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1317,11 +1518,12 @@ impl GodotNeovimPlugin {
 
         // Handle Ctrl+B: visual block in visual mode, page up in normal mode
         if key_event.is_ctrl_pressed() && keycode == Key::B {
+            self.cancel_pending_operator();
             if Self::is_visual_mode(&self.current_mode) {
                 // In visual mode: switch to visual block (Ctrl+V alternative since Godot intercepts it)
                 let completed = self.send_keys("<C-v>");
                 if completed {
-                    self.last_key.clear();
+                    self.clear_last_key();
                 }
             } else {
                 // In normal mode: page up
@@ -1356,6 +1558,7 @@ impl GodotNeovimPlugin {
 
         // Handle Ctrl+F for page down
         if key_event.is_ctrl_pressed() && keycode == Key::F {
+            self.cancel_pending_operator();
             self.page_down();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1365,6 +1568,7 @@ impl GodotNeovimPlugin {
 
         // Handle Ctrl+Y/Ctrl+E for viewport scrolling (cursor stays on same line)
         if key_event.is_ctrl_pressed() && (keycode == Key::Y || keycode == Key::E) {
+            self.cancel_pending_operator();
             if keycode == Key::Y {
                 self.scroll_viewport_up();
             } else {
@@ -1414,6 +1618,7 @@ impl GodotNeovimPlugin {
 
         // Handle Ctrl+G for file info
         if key_event.is_ctrl_pressed() && keycode == Key::G {
+            self.cancel_pending_operator();
             self.show_file_info();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1512,6 +1717,7 @@ impl GodotNeovimPlugin {
             && !key_event.is_ctrl_pressed()
             && self.last_key != "g"
         {
+            self.clear_pending_input_states();
             self.pending_char_op = Some('f');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1521,6 +1727,7 @@ impl GodotNeovimPlugin {
 
         // Handle 'F' for find char backward
         if keycode == Key::F && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.clear_pending_input_states();
             self.pending_char_op = Some('F');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1534,6 +1741,7 @@ impl GodotNeovimPlugin {
             && !key_event.is_ctrl_pressed()
             && self.last_key != "g"
         {
+            self.clear_pending_input_states();
             self.pending_char_op = Some('t');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1547,6 +1755,7 @@ impl GodotNeovimPlugin {
             && !key_event.is_ctrl_pressed()
             && self.last_key != "g"
         {
+            self.clear_pending_input_states();
             self.pending_char_op = Some('T');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1697,13 +1906,13 @@ impl GodotNeovimPlugin {
         if keycode == Key::C && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
             if self.last_key == "c" {
                 self.substitute_line();
-                self.last_key.clear();
+                self.clear_last_key();
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
                 }
                 return;
             } else {
-                self.last_key = "c".to_string();
+                self.set_last_key("c");
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
                 }
@@ -1713,6 +1922,7 @@ impl GodotNeovimPlugin {
 
         // Handle 'r' for replace char
         if keycode == Key::R && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.clear_pending_input_states();
             self.pending_char_op = Some('r');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1740,6 +1950,7 @@ impl GodotNeovimPlugin {
 
         // Handle 'm' for set mark
         if keycode == Key::M && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            self.clear_pending_input_states();
             self.pending_mark_op = Some('m');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1749,6 +1960,7 @@ impl GodotNeovimPlugin {
 
         // Handle '\'' (single quote) for jump to mark line
         if unicode_char == Some('\'') && !key_event.is_ctrl_pressed() {
+            self.clear_pending_input_states();
             self.pending_mark_op = Some('\'');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1758,6 +1970,7 @@ impl GodotNeovimPlugin {
 
         // Handle '`' (backtick) for jump to mark position
         if unicode_char == Some('`') && !key_event.is_ctrl_pressed() {
+            self.clear_pending_input_states();
             self.pending_mark_op = Some('`');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1776,6 +1989,7 @@ impl GodotNeovimPlugin {
                 self.stop_macro_recording();
             } else {
                 // Wait for register character
+                self.clear_pending_input_states();
                 self.pending_macro_op = Some('q');
             }
             if let Some(mut viewport) = self.base().get_viewport() {
@@ -1786,6 +2000,7 @@ impl GodotNeovimPlugin {
 
         // Handle '@' for macro playback
         if unicode_char == Some('@') && !key_event.is_ctrl_pressed() {
+            self.clear_pending_input_states();
             self.pending_macro_op = Some('@');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1796,6 +2011,7 @@ impl GodotNeovimPlugin {
         // Handle '"' for register selection
         if unicode_char == Some('"') && !key_event.is_ctrl_pressed() {
             // Use '\0' as marker for "waiting for register char"
+            self.clear_pending_input_states();
             self.selected_register = Some('\0');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1809,9 +2025,9 @@ impl GodotNeovimPlugin {
         if unicode_char == Some('>') {
             if self.last_key == ">" {
                 self.indent_line();
-                self.last_key.clear();
+                self.clear_last_key();
             } else {
-                self.last_key = ">".to_string();
+                self.set_last_key(">");
             }
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1822,9 +2038,9 @@ impl GodotNeovimPlugin {
         if unicode_char == Some('<') {
             if self.last_key == "<" {
                 self.unindent_line();
-                self.last_key.clear();
+                self.clear_last_key();
             } else {
-                self.last_key = "<".to_string();
+                self.set_last_key("<");
             }
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1834,7 +2050,7 @@ impl GodotNeovimPlugin {
 
         // Handle '[p' for paste before with indent adjustment
         if unicode_char == Some('[') {
-            self.last_key = "[".to_string();
+            self.set_last_key("[");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1843,7 +2059,7 @@ impl GodotNeovimPlugin {
 
         // Handle ']p' for paste after with indent adjustment
         if unicode_char == Some(']') {
-            self.last_key = "]".to_string();
+            self.set_last_key("]");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1854,14 +2070,14 @@ impl GodotNeovimPlugin {
         if keycode == Key::P && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
             if self.last_key == "[" {
                 self.paste_with_indent_before();
-                self.last_key.clear();
+                self.clear_last_key();
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
                 }
                 return;
             } else if self.last_key == "]" {
                 self.paste_with_indent_after();
-                self.last_key.clear();
+                self.clear_last_key();
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
                 }
@@ -1893,7 +2109,7 @@ impl GodotNeovimPlugin {
                 Some('[') => {
                     // [[ - jump to previous '{' at start of line (send to Neovim)
                     self.send_keys("[[");
-                    self.last_key.clear();
+                    self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
@@ -1902,7 +2118,7 @@ impl GodotNeovimPlugin {
                 Some(']') => {
                     // [] - jump to previous '}' at start of line (send to Neovim)
                     self.send_keys("[]");
-                    self.last_key.clear();
+                    self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
@@ -1910,7 +2126,7 @@ impl GodotNeovimPlugin {
                 }
                 Some('{') => {
                     self.jump_to_block_start('{', '}');
-                    self.last_key.clear();
+                    self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
@@ -1918,7 +2134,7 @@ impl GodotNeovimPlugin {
                 }
                 Some('(') => {
                     self.jump_to_block_start('(', ')');
-                    self.last_key.clear();
+                    self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
@@ -1926,7 +2142,7 @@ impl GodotNeovimPlugin {
                 }
                 Some('m') => {
                     self.jump_to_prev_method();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
@@ -1934,7 +2150,7 @@ impl GodotNeovimPlugin {
                 }
                 _ => {
                     // Not a recognized [ command, clear and continue
-                    self.last_key.clear();
+                    self.clear_last_key();
                 }
             }
         }
@@ -1945,7 +2161,7 @@ impl GodotNeovimPlugin {
                 Some(']') => {
                     // ]] - jump to next '{' at start of line (send to Neovim)
                     self.send_keys("]]");
-                    self.last_key.clear();
+                    self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
@@ -1954,7 +2170,7 @@ impl GodotNeovimPlugin {
                 Some('[') => {
                     // ][ - jump to next '}' at start of line (send to Neovim)
                     self.send_keys("][");
-                    self.last_key.clear();
+                    self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
@@ -1962,7 +2178,7 @@ impl GodotNeovimPlugin {
                 }
                 Some('}') => {
                     self.jump_to_block_end('{', '}');
-                    self.last_key.clear();
+                    self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
@@ -1970,7 +2186,7 @@ impl GodotNeovimPlugin {
                 }
                 Some(')') => {
                     self.jump_to_block_end('(', ')');
-                    self.last_key.clear();
+                    self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
@@ -1978,7 +2194,7 @@ impl GodotNeovimPlugin {
                 }
                 Some('m') => {
                     self.jump_to_next_method();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
@@ -1986,7 +2202,7 @@ impl GodotNeovimPlugin {
                 }
                 _ => {
                     // Not a recognized ] command, clear and continue
-                    self.last_key.clear();
+                    self.clear_last_key();
                 }
             }
         }
@@ -1994,7 +2210,7 @@ impl GodotNeovimPlugin {
         // Handle gqq (format current line)
         if self.last_key == "gq" && keycode == Key::Q && !key_event.is_shift_pressed() {
             self.format_current_line();
-            self.last_key.clear();
+            self.clear_last_key();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -2012,6 +2228,7 @@ impl GodotNeovimPlugin {
 
         // Handle Ctrl+D for half page down
         if key_event.is_ctrl_pressed() && keycode == Key::D {
+            self.cancel_pending_operator();
             self.half_page_down();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -2021,6 +2238,7 @@ impl GodotNeovimPlugin {
 
         // Handle Ctrl+U for half page up
         if key_event.is_ctrl_pressed() && keycode == Key::U {
+            self.cancel_pending_operator();
             self.half_page_up();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -2034,6 +2252,7 @@ impl GodotNeovimPlugin {
             && (keycode == Key::H || keycode == Key::M || keycode == Key::L)
             && key_event.is_shift_pressed()
         {
+            self.cancel_pending_operator();
             // Shift+h/m/l = H/M/L (uppercase)
             match keycode {
                 Key::H => self.move_cursor_to_visible_top(),
@@ -2052,10 +2271,10 @@ impl GodotNeovimPlugin {
             if self.last_key == "Z" {
                 // Second Z - this is ZZ (save and close)
                 self.cmd_save_and_close();
-                self.last_key.clear();
+                self.clear_last_key();
             } else {
                 // First Z - wait for next key
-                self.last_key = "Z".to_string();
+                self.set_last_key("Z");
             }
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -2071,7 +2290,7 @@ impl GodotNeovimPlugin {
         {
             // ZQ - close without saving (discard changes)
             self.cmd_close_discard();
-            self.last_key.clear();
+            self.clear_last_key();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -2080,7 +2299,7 @@ impl GodotNeovimPlugin {
 
         // Clear Z prefix if another key is pressed (not Z or Q)
         if self.last_key == "Z" && keycode != Key::Z && keycode != Key::Q {
-            self.last_key.clear();
+            self.clear_last_key();
         }
 
         // Handle register-aware yy (yank line)
@@ -2107,14 +2326,14 @@ impl GodotNeovimPlugin {
                         let count = self.get_and_clear_count();
                         self.yank_lines_to_register(reg, count);
                         self.selected_register = None;
-                        self.last_key.clear();
+                        self.clear_last_key();
                         if let Some(mut viewport) = self.base().get_viewport() {
                             viewport.set_input_as_handled();
                         }
                         return;
                     } else {
                         // First y - wait for second
-                        self.last_key = "y".to_string();
+                        self.set_last_key("y");
                         if let Some(mut viewport) = self.base().get_viewport() {
                             viewport.set_input_as_handled();
                         }
@@ -2158,14 +2377,14 @@ impl GodotNeovimPlugin {
                         let count = self.get_and_clear_count();
                         self.delete_lines_to_register(reg, count);
                         self.selected_register = None;
-                        self.last_key.clear();
+                        self.clear_last_key();
                         if let Some(mut viewport) = self.base().get_viewport() {
                             viewport.set_input_as_handled();
                         }
                         return;
                     } else {
                         // First d - wait for second
-                        self.last_key = "d".to_string();
+                        self.set_last_key("d");
                         if let Some(mut viewport) = self.base().get_viewport() {
                             viewport.set_input_as_handled();
                         }
@@ -2183,20 +2402,27 @@ impl GodotNeovimPlugin {
 
         // Forward key to Neovim (normal/visual/etc modes)
         if let Some(keys) = self.key_event_to_nvim_string(key_event) {
-            // Intercept g-prefix commands that conflict with Neovim's built-in commands
-            // (e.g., gx opens URL via netrw, gf opens file via netrw - both can freeze)
-            // gd uses Godot LSP for proper "go to definition"
+            // Intercept g-prefix commands that should be handled locally
+            // (either because they conflict with Neovim's built-in commands, or because
+            // they need Godot-specific handling)
             if self.last_key == "g" {
-                match keys.as_str() {
+                // Helper to cancel pending 'g' operator in Neovim
+                let cancel_pending_g = |s: &mut Self| {
+                    if let Some(ref neovim) = s.neovim {
+                        if let Ok(client) = neovim.try_lock() {
+                            let _ = client.input("<Esc>");
+                        }
+                    }
+                };
+
+                let handled = match keys.as_str() {
                     "x" => {
-                        // Save cursor position before canceling pending operator
+                        // gx - open URL under cursor
                         let saved_cursor = self
                             .current_editor
                             .as_ref()
                             .map(|e| (e.get_caret_line(), e.get_caret_column()));
-                        // Cancel Neovim's pending 'g' operator
-                        self.send_keys("<Esc>");
-                        // Restore cursor position
+                        cancel_pending_g(self);
                         if let (Some((line, col)), Some(ref mut editor)) =
                             (saved_cursor, self.current_editor.as_mut())
                         {
@@ -2204,53 +2430,118 @@ impl GodotNeovimPlugin {
                             editor.set_caret_column(col);
                         }
                         self.open_url_under_cursor();
-                        self.last_key.clear();
-                        if let Some(mut viewport) = self.base().get_viewport() {
-                            viewport.set_input_as_handled();
-                        }
-                        return;
+                        true
                     }
                     "f" => {
-                        // Cancel Neovim's pending 'g' operator before handling locally
-                        self.send_keys("<Esc>");
+                        // gf - go to file under cursor
+                        cancel_pending_g(self);
                         self.go_to_file_under_cursor();
-                        self.last_key.clear();
-                        if let Some(mut viewport) = self.base().get_viewport() {
-                            viewport.set_input_as_handled();
-                        }
-                        return;
+                        true
                     }
                     "d" => {
-                        // Save cursor position before Esc (which may move cursor)
+                        // gd - go to definition (using Godot LSP)
                         let saved_cursor = self
                             .current_editor
                             .as_ref()
                             .map(|editor| (editor.get_caret_line(), editor.get_caret_column()));
-
-                        // Cancel Neovim's pending 'g' operator (use input directly to avoid cursor sync)
-                        if let Some(ref neovim) = self.neovim {
-                            if let Ok(client) = neovim.try_lock() {
-                                let _ = client.input("<Esc>");
-                            }
-                        }
-
-                        // Restore cursor position
+                        cancel_pending_g(self);
                         if let (Some((line, col)), Some(ref mut editor)) =
                             (saved_cursor, self.current_editor.as_mut())
                         {
                             editor.set_caret_line(line);
                             editor.set_caret_column(col);
                         }
-
                         self.add_to_jump_list();
                         self.go_to_definition_lsp();
-                        self.last_key.clear();
-                        if let Some(mut viewport) = self.base().get_viewport() {
-                            viewport.set_input_as_handled();
-                        }
-                        return;
+                        true
                     }
-                    _ => {}
+                    "I" => {
+                        // gI - insert at column 0
+                        cancel_pending_g(self);
+                        self.insert_at_column_zero();
+                        true
+                    }
+                    "i" => {
+                        // gi - insert at last insert position
+                        cancel_pending_g(self);
+                        self.insert_at_last_position();
+                        true
+                    }
+                    "a" => {
+                        // ga - show character info under cursor
+                        cancel_pending_g(self);
+                        self.show_char_info();
+                        true
+                    }
+                    "&" => {
+                        // g& - repeat last substitution on entire buffer
+                        cancel_pending_g(self);
+                        self.repeat_substitute();
+                        true
+                    }
+                    "J" => {
+                        // gJ - join lines without space
+                        cancel_pending_g(self);
+                        self.join_lines_no_space();
+                        true
+                    }
+                    "p" => {
+                        // gp - paste and move cursor after pasted text
+                        cancel_pending_g(self);
+                        self.paste_and_move_after();
+                        true
+                    }
+                    "P" => {
+                        // gP - paste before and move cursor after pasted text
+                        cancel_pending_g(self);
+                        self.paste_before_and_move_after();
+                        true
+                    }
+                    "e" => {
+                        // ge - move to end of previous word
+                        cancel_pending_g(self);
+                        self.move_to_word_end_backward();
+                        true
+                    }
+                    "j" => {
+                        // gj - move down by display line (wrapped line)
+                        cancel_pending_g(self);
+                        self.move_display_line_down();
+                        true
+                    }
+                    "k" => {
+                        // gk - move up by display line (wrapped line)
+                        cancel_pending_g(self);
+                        self.move_display_line_up();
+                        true
+                    }
+                    "t" => {
+                        // gt - go to next tab
+                        cancel_pending_g(self);
+                        self.next_script_tab();
+                        true
+                    }
+                    "T" => {
+                        // gT - go to previous tab
+                        cancel_pending_g(self);
+                        self.prev_script_tab();
+                        true
+                    }
+                    "v" => {
+                        // gv - enter visual block mode (alternative to Ctrl+V)
+                        cancel_pending_g(self);
+                        self.send_keys("<C-v>");
+                        true
+                    }
+                    _ => false,
+                };
+
+                if handled {
+                    self.clear_last_key();
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
                 }
             }
 
@@ -2268,99 +2559,17 @@ impl GodotNeovimPlugin {
                 false
             };
 
-            // Handle g-prefixed commands
-            // Note: gd, gf, gx are intercepted before sending to Neovim (above)
-            if completed && self.last_key == "g" {
-                let handled = match keys.as_str() {
-                    "v" => {
-                        // gv - enter visual block mode (alternative to Ctrl+V)
-                        self.send_keys("<C-v>");
-                        true
-                    }
-                    "t" => {
-                        // gt - go to next tab
-                        self.next_script_tab();
-                        true
-                    }
-                    "T" => {
-                        // gT - go to previous tab
-                        self.prev_script_tab();
-                        true
-                    }
-                    // Note: "gf" is intercepted before sending to Neovim (above)
-                    // to avoid Neovim's built-in gf (netrw) which can freeze
-                    "I" => {
-                        // gI - insert at column 0
-                        self.insert_at_column_zero();
-                        true
-                    }
-                    "i" => {
-                        // gi - insert at last insert position
-                        self.insert_at_last_position();
-                        true
-                    }
-                    "a" => {
-                        // ga - show character info under cursor
-                        self.show_char_info();
-                        true
-                    }
-                    "&" => {
-                        // g& - repeat last substitution on entire buffer
-                        self.repeat_substitute();
-                        true
-                    }
-                    "J" => {
-                        // gJ - join lines without space
-                        self.join_lines_no_space();
-                        true
-                    }
-                    "p" => {
-                        // gp - paste and move cursor after pasted text
-                        self.paste_and_move_after();
-                        true
-                    }
-                    "P" => {
-                        // gP - paste before and move cursor after pasted text
-                        self.paste_before_and_move_after();
-                        true
-                    }
-                    "e" => {
-                        // ge - move to end of previous word
-                        self.move_to_word_end_backward();
-                        true
-                    }
-                    // Note: "gx" is intercepted before sending to Neovim (above)
-                    // to avoid Neovim's built-in gx (netrw) which can freeze
-                    "j" => {
-                        // gj - move down by display line (wrapped line)
-                        self.move_display_line_down();
-                        true
-                    }
-                    "k" => {
-                        // gk - move up by display line (wrapped line)
-                        self.move_display_line_up();
-                        true
-                    }
-                    "q" => {
-                        // gq - start format operator (wait for motion)
-                        self.last_key = "gq".to_string();
-                        false // Let normal key handling continue
-                    }
-                    _ => false,
-                };
-
-                if handled {
-                    self.last_key.clear();
-                    if let Some(mut viewport) = self.base().get_viewport() {
-                        viewport.set_input_as_handled();
-                    }
-                    return;
-                }
+            // Handle gq (format operator) - needs to wait for motion
+            if completed && self.last_key == "g" && keys == "q" {
+                self.set_last_key("gq");
+                // Don't return - let normal key handling continue for motion
             }
 
-            // Track last key for sequence detection, unless scroll command was handled
-            if !scroll_handled {
-                self.last_key = keys;
+            // Track last key for sequence detection, unless:
+            // - scroll command was handled, or
+            // - we entered insert/replace mode (no sequence expected in those modes)
+            if !scroll_handled && !self.is_insert_mode() && !self.is_replace_mode() {
+                self.set_last_key(keys);
             }
 
             // Consume the event to prevent Godot's default handling

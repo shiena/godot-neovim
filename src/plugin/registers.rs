@@ -1,6 +1,6 @@
 //! Named registers for yank, delete, and paste
 
-use super::GodotNeovimPlugin;
+use super::{CodeEditExt, GodotNeovimPlugin};
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
@@ -151,7 +151,7 @@ impl GodotNeovimPlugin {
         };
 
         if let Some(new_text) = new_text_opt {
-            editor.set_text(&new_text);
+            editor.set_text_and_notify(&new_text);
 
             // Adjust cursor position
             let new_line_count = editor.get_line_count();
@@ -167,7 +167,7 @@ impl GodotNeovimPlugin {
             editor.set_caret_column(first_non_blank as i32);
         } else {
             // All lines deleted - just clear
-            editor.set_text("");
+            editor.set_text_and_notify("");
             editor.set_caret_line(0);
             editor.set_caret_column(0);
         }
@@ -207,7 +207,7 @@ impl GodotNeovimPlugin {
                     lines.push(paste_content.to_string());
                 }
             }
-            editor.set_text(&lines.join("\n"));
+            editor.set_text_and_notify(&lines.join("\n"));
 
             // Move cursor to the pasted line
             editor.set_caret_line(line_idx + 1);
@@ -264,7 +264,7 @@ impl GodotNeovimPlugin {
                 }
                 lines.push(editor.get_line(i).to_string());
             }
-            editor.set_text(&lines.join("\n"));
+            editor.set_text_and_notify(&lines.join("\n"));
 
             // Move cursor to the pasted line
             editor.set_caret_line(line_idx);
@@ -327,7 +327,7 @@ impl GodotNeovimPlugin {
                     }
                 }
             }
-            editor.set_text(&lines.join("\n"));
+            editor.set_text_and_notify(&lines.join("\n"));
 
             // Move cursor to line after pasted content
             let target_line = line_idx + paste_lines.len() as i32 + 1;
@@ -385,7 +385,7 @@ impl GodotNeovimPlugin {
                 }
                 lines.push(editor.get_line(i).to_string());
             }
-            editor.set_text(&lines.join("\n"));
+            editor.set_text_and_notify(&lines.join("\n"));
 
             // Move cursor to line after pasted content (which is original line position + paste count)
             let target_line = line_idx + paste_lines.len() as i32;

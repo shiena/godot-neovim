@@ -125,6 +125,7 @@ impl GodotNeovimPlugin {
 
     /// Open search mode (/ for forward, ? for backward)
     pub(super) fn open_search_mode(&mut self, forward: bool) {
+        self.clear_pending_input_states();
         self.search_mode = true;
         self.search_forward = forward;
         self.search_buffer = if forward {

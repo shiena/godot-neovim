@@ -9,42 +9,42 @@ impl GodotNeovimPlugin {
             match keys {
                 "z" => {
                     self.center_cursor();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "t" => {
                     self.scroll_cursor_to_top();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "b" => {
                     self.scroll_cursor_to_bottom();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "a" => {
                     self.toggle_fold();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "o" => {
                     self.unfold_current_line();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "c" => {
                     self.fold_current_line();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "M" => {
                     self.fold_all();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "R" => {
                     self.unfold_all();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 _ => {}
@@ -309,7 +309,7 @@ impl GodotNeovimPlugin {
     pub(super) fn move_cursor_to(&mut self, line: i32, col: i32) {
         // Update last_synced_cursor BEFORE setting caret to prevent
         // caret_changed signal from triggering extra sync_cursor_to_neovim
-        self.last_synced_cursor = (line, col);
+        self.last_synced_cursor = (line as i64, col as i64);
 
         if let Some(ref mut editor) = self.current_editor {
             editor.set_caret_line(line);
