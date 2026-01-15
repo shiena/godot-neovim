@@ -984,8 +984,15 @@ impl GodotNeovimPlugin {
             if let Some(ref neovim) = self.neovim {
                 if let Ok(client) = neovim.try_lock() {
                     let _ = client.input("<Esc>");
+                } else {
+                    // Mutex busy - queue the Escape key to be sent later
+                    crate::verbose_print!(
+                        "[godot-neovim] Mutex busy, queuing <Esc> for pending operator cancellation"
+                    );
+                    self.pending_keys.push_back("<Esc>".to_string());
                 }
             }
+            // Always clear local state even if Neovim Escape is queued
             self.clear_last_key();
         }
     }
@@ -1138,13 +1145,19 @@ impl GodotNeovimPlugin {
 
         let keycode = key_event.get_keycode();
 
-        // Cancel on Escape
-        if keycode == Key::ESCAPE {
+        // Cancel on Escape or any modifier key combination (Ctrl+X, Alt+X, etc.)
+        if keycode == Key::ESCAPE
+            || key_event.is_ctrl_pressed()
+            || key_event.is_alt_pressed()
+            || key_event.is_meta_pressed()
+        {
             self.pending_char_op = None;
-            if let Some(mut viewport) = self.base().get_viewport() {
-                viewport.set_input_as_handled();
-            }
-            return true;
+            crate::verbose_print!(
+                "[godot-neovim] Cancelled pending char op '{}' due to modifier/escape",
+                op
+            );
+            // Don't consume the event - let it be processed normally
+            return false;
         }
 
         // Get the character
@@ -1166,6 +1179,13 @@ impl GodotNeovimPlugin {
                 return true;
             }
         }
+
+        // Non-printable key pressed - cancel the pending operation
+        self.pending_char_op = None;
+        crate::verbose_print!(
+            "[godot-neovim] Cancelled pending char op '{}' due to non-printable key",
+            op
+        );
         false
     }
 
@@ -1176,13 +1196,19 @@ impl GodotNeovimPlugin {
 
         let keycode = key_event.get_keycode();
 
-        // Cancel on Escape
-        if keycode == Key::ESCAPE {
+        // Cancel on Escape or any modifier key combination
+        if keycode == Key::ESCAPE
+            || key_event.is_ctrl_pressed()
+            || key_event.is_alt_pressed()
+            || key_event.is_meta_pressed()
+        {
             self.pending_mark_op = None;
-            if let Some(mut viewport) = self.base().get_viewport() {
-                viewport.set_input_as_handled();
-            }
-            return true;
+            crate::verbose_print!(
+                "[godot-neovim] Cancelled pending mark op '{}' due to modifier/escape",
+                op
+            );
+            // Don't consume the event - let it be processed normally
+            return false;
         }
 
         // Get the character (must be a-z for marks)
@@ -1202,8 +1228,23 @@ impl GodotNeovimPlugin {
                     }
                     return true;
                 }
+                // Non a-z character - cancel and let it be processed normally
+                self.pending_mark_op = None;
+                crate::verbose_print!(
+                    "[godot-neovim] Cancelled pending mark op '{}' - invalid mark char '{}'",
+                    op,
+                    c
+                );
+                return false;
             }
         }
+
+        // Non-printable key pressed - cancel the pending operation
+        self.pending_mark_op = None;
+        crate::verbose_print!(
+            "[godot-neovim] Cancelled pending mark op '{}' due to non-printable key",
+            op
+        );
         false
     }
 
@@ -1214,13 +1255,19 @@ impl GodotNeovimPlugin {
 
         let keycode = key_event.get_keycode();
 
-        // Cancel on Escape
-        if keycode == Key::ESCAPE {
+        // Cancel on Escape or any modifier key combination
+        if keycode == Key::ESCAPE
+            || key_event.is_ctrl_pressed()
+            || key_event.is_alt_pressed()
+            || key_event.is_meta_pressed()
+        {
             self.pending_macro_op = None;
-            if let Some(mut viewport) = self.base().get_viewport() {
-                viewport.set_input_as_handled();
-            }
-            return true;
+            crate::verbose_print!(
+                "[godot-neovim] Cancelled pending macro op '{}' due to modifier/escape",
+                op
+            );
+            // Don't consume the event - let it be processed normally
+            return false;
         }
 
         // Get the character
@@ -1233,6 +1280,11 @@ impl GodotNeovimPlugin {
                         // Start recording if a-z
                         if c.is_ascii_lowercase() {
                             self.start_macro_recording(c);
+                        } else {
+                            crate::verbose_print!(
+                                "[godot-neovim] Macro recording cancelled - invalid register '{}'",
+                                c
+                            );
                         }
                     }
                     '@' => {
@@ -1245,6 +1297,11 @@ impl GodotNeovimPlugin {
                         } else if c.is_ascii_lowercase() {
                             // @{a-z} - play specific macro
                             self.play_macro(c);
+                        } else {
+                            crate::verbose_print!(
+                                "[godot-neovim] Macro playback cancelled - invalid register '{}'",
+                                c
+                            );
                         }
                     }
                     _ => {}
@@ -1255,6 +1312,13 @@ impl GodotNeovimPlugin {
                 return true;
             }
         }
+
+        // Non-printable key pressed - cancel the pending operation
+        self.pending_macro_op = None;
+        crate::verbose_print!(
+            "[godot-neovim] Cancelled pending macro op '{}' due to non-printable key",
+            op
+        );
         false
     }
 
