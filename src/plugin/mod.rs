@@ -972,6 +972,24 @@ impl GodotNeovimPlugin {
         self.last_key_time = None;
     }
 
+    /// Cancel any pending operator in Neovim and clear local state
+    /// Call this before executing local commands that would conflict with pending operators
+    fn cancel_pending_operator(&mut self) {
+        if !self.last_key.is_empty() {
+            crate::verbose_print!(
+                "[godot-neovim] Cancelling pending operator: '{}'",
+                self.last_key
+            );
+            // Send Escape to cancel Neovim's pending operator
+            if let Some(ref neovim) = self.neovim {
+                if let Ok(client) = neovim.try_lock() {
+                    let _ = client.input("<Esc>");
+                }
+            }
+            self.clear_last_key();
+        }
+    }
+
     /// Mark input as handled on the CodeEdit's viewport
     /// This prevents CodeEdit from processing the input event
     #[allow(dead_code)]
@@ -1377,6 +1395,7 @@ impl GodotNeovimPlugin {
 
         // Handle Ctrl+B: visual block in visual mode, page up in normal mode
         if key_event.is_ctrl_pressed() && keycode == Key::B {
+            self.cancel_pending_operator();
             if Self::is_visual_mode(&self.current_mode) {
                 // In visual mode: switch to visual block (Ctrl+V alternative since Godot intercepts it)
                 let completed = self.send_keys("<C-v>");
@@ -1416,6 +1435,7 @@ impl GodotNeovimPlugin {
 
         // Handle Ctrl+F for page down
         if key_event.is_ctrl_pressed() && keycode == Key::F {
+            self.cancel_pending_operator();
             self.page_down();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1425,6 +1445,7 @@ impl GodotNeovimPlugin {
 
         // Handle Ctrl+Y/Ctrl+E for viewport scrolling (cursor stays on same line)
         if key_event.is_ctrl_pressed() && (keycode == Key::Y || keycode == Key::E) {
+            self.cancel_pending_operator();
             if keycode == Key::Y {
                 self.scroll_viewport_up();
             } else {
@@ -1474,6 +1495,7 @@ impl GodotNeovimPlugin {
 
         // Handle Ctrl+G for file info
         if key_event.is_ctrl_pressed() && keycode == Key::G {
+            self.cancel_pending_operator();
             self.show_file_info();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -2083,6 +2105,7 @@ impl GodotNeovimPlugin {
 
         // Handle Ctrl+D for half page down
         if key_event.is_ctrl_pressed() && keycode == Key::D {
+            self.cancel_pending_operator();
             self.half_page_down();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -2092,6 +2115,7 @@ impl GodotNeovimPlugin {
 
         // Handle Ctrl+U for half page up
         if key_event.is_ctrl_pressed() && keycode == Key::U {
+            self.cancel_pending_operator();
             self.half_page_up();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -2105,6 +2129,7 @@ impl GodotNeovimPlugin {
             && (keycode == Key::H || keycode == Key::M || keycode == Key::L)
             && key_event.is_shift_pressed()
         {
+            self.cancel_pending_operator();
             // Shift+h/m/l = H/M/L (uppercase)
             match keycode {
                 Key::H => self.move_cursor_to_visible_top(),
