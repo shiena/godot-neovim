@@ -404,7 +404,10 @@ impl IEditorPlugin for GodotNeovimPlugin {
 
     fn input(&mut self, event: Gd<godot::classes::InputEvent>) {
         // Handle mouse click events - sync cursor position after click
-        if let Ok(mouse_event) = event.clone().try_cast::<godot::classes::InputEventMouseButton>() {
+        if let Ok(mouse_event) = event
+            .clone()
+            .try_cast::<godot::classes::InputEventMouseButton>()
+        {
             // Only handle left mouse button press when editor has focus
             if mouse_event.is_pressed()
                 && mouse_event.get_button_index() == godot::global::MouseButton::LEFT
