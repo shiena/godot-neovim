@@ -253,6 +253,9 @@ pub struct GodotNeovimPlugin {
     /// Direct LSP client for Godot LSP server
     #[init(val = None)]
     godot_lsp: Option<Arc<GodotLspClient>>,
+    /// Temporary version display flag (cleared on next operation)
+    #[init(val = false)]
+    show_version: bool,
 }
 
 #[godot_api]
@@ -1050,6 +1053,9 @@ impl GodotNeovimPlugin {
     }
 
     fn update_mode_display_with_cursor(&mut self, mode: &str, cursor: Option<(i64, i64)>) {
+        // Clear version display flag (any operation returns to normal display)
+        self.show_version = false;
+
         let Some(ref mut label) = self.mode_label else {
             return;
         };
@@ -1098,6 +1104,17 @@ impl GodotNeovimPlugin {
             };
             editor.set_caret_type(caret_type);
         }
+    }
+
+    /// Update status label to show version
+    pub(crate) fn update_version_display(&mut self) {
+        let Some(ref mut label) = self.mode_label else {
+            return;
+        };
+        let display_text = format!(" godot-neovim v{} ", VERSION);
+        label.set_text(&display_text);
+        // White color for version display
+        label.add_theme_color_override("font_color", Color::from_rgb(1.0, 1.0, 1.0));
     }
 }
 

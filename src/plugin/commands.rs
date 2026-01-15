@@ -23,9 +23,11 @@ impl GodotNeovimPlugin {
         self.command_mode = false;
         self.command_buffer.clear();
 
-        // Restore mode display
-        let display_cursor = (self.current_cursor.0 + 1, self.current_cursor.1);
-        self.update_mode_display_with_cursor(&self.current_mode.clone(), Some(display_cursor));
+        // Restore mode display (unless showing version)
+        if !self.show_version {
+            let display_cursor = (self.current_cursor.0 + 1, self.current_cursor.1);
+            self.update_mode_display_with_cursor(&self.current_mode.clone(), Some(display_cursor));
+        }
     }
 
     /// Update command display in mode label
@@ -209,6 +211,10 @@ impl GodotNeovimPlugin {
                 // :help - open GodotNeovim help
                 else if cmd == "help" || cmd == "h" {
                     self.cmd_help();
+                }
+                // :version - show version in status label
+                else if cmd == "version" || cmd == "ver" {
+                    self.cmd_version();
                 } else {
                     godot_warn!("[godot-neovim] Unknown command: {}", cmd);
                 }
@@ -1012,6 +1018,12 @@ impl GodotNeovimPlugin {
             member_name: None,
             member_type: HelpMemberType::Class,
         });
+    }
+
+    /// :version - Show godot-neovim version in status label
+    pub(super) fn cmd_version(&mut self) {
+        self.show_version = true;
+        self.update_version_display();
     }
 
     /// K - Open documentation for word under cursor

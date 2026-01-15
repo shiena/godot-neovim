@@ -364,6 +364,7 @@ Once the plugin is enabled:
 | Command | Description |
 |---------|-------------|
 | `:help`, `:h` | Open GodotNeovim help |
+| `:version`, `:ver` | Show version in status label |
 | `:e` | Open quick open dialog for scripts |
 | `:e {file}` | Open specified script file |
 | `:e!` | Discard changes and reload |
