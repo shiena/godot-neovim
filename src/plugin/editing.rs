@@ -1,6 +1,6 @@
 //! Editing operations: undo, redo, delete, replace, indent, join
 
-use super::GodotNeovimPlugin;
+use super::{CodeEditExt, GodotNeovimPlugin};
 use godot::classes::{EditorInterface, Os};
 use godot::prelude::*;
 
@@ -256,7 +256,7 @@ impl GodotNeovimPlugin {
         // Send 'R' to Neovim to enter replace mode
         let completed = self.send_keys("R");
         if completed {
-            self.last_key.clear();
+            self.clear_last_key();
         }
         crate::verbose_print!("[godot-neovim] R: Entered replace mode");
     }
@@ -462,7 +462,7 @@ impl GodotNeovimPlugin {
             }
         }
         let new_text = new_lines.join("\n");
-        editor.set_text(&new_text);
+        editor.set_text_and_notify(&new_text);
 
         // Restore cursor position
         editor.set_caret_line(line_idx);
@@ -512,7 +512,7 @@ impl GodotNeovimPlugin {
             }
         }
         let new_text = new_lines.join("\n");
-        editor.set_text(&new_text);
+        editor.set_text_and_notify(&new_text);
 
         // Restore cursor position
         editor.set_caret_line(line_idx);
@@ -778,6 +778,7 @@ impl GodotNeovimPlugin {
         // Enter insert mode by sending 'i' to Neovim
         self.sync_cursor_to_neovim();
         self.send_keys("i");
+        self.clear_last_key();
         crate::verbose_print!(
             "[godot-neovim] gI: Insert at column 0, line {}",
             line_idx + 1
@@ -789,6 +790,7 @@ impl GodotNeovimPlugin {
         let Some((line, col)) = self.last_insert_position else {
             // No previous insert position - just enter insert mode
             self.send_keys("i");
+            self.clear_last_key();
             crate::verbose_print!(
                 "[godot-neovim] gi: No previous insert position, entering insert mode"
             );
@@ -812,6 +814,7 @@ impl GodotNeovimPlugin {
         // Enter insert mode
         self.sync_cursor_to_neovim();
         self.send_keys("i");
+        self.clear_last_key();
         crate::verbose_print!(
             "[godot-neovim] gi: Insert at last position ({}, {})",
             target_line + 1,
@@ -845,6 +848,7 @@ impl GodotNeovimPlugin {
         self.sync_buffer_to_neovim();
         self.sync_cursor_to_neovim();
         self.send_keys("i");
+        self.clear_last_key();
         crate::verbose_print!("[godot-neovim] s: Substitute char at col {}", col_idx);
     }
 
@@ -874,6 +878,7 @@ impl GodotNeovimPlugin {
         self.sync_buffer_to_neovim();
         self.sync_cursor_to_neovim();
         self.send_keys("i");
+        self.clear_last_key();
         crate::verbose_print!("[godot-neovim] S/cc: Substitute line {}", line_idx + 1);
     }
 
@@ -930,10 +935,14 @@ impl GodotNeovimPlugin {
         editor.set_line(line_idx, &new_line);
         editor.set_caret_column(col_idx as i32);
 
-        // Sync buffer and enter insert mode
+        // Sync buffer to Neovim (but NOT cursor - Neovim would clamp it
+        // since the cursor is at end of line which is out of bounds in normal mode)
         self.sync_buffer_to_neovim();
-        self.sync_cursor_to_neovim();
-        self.send_keys("i");
+
+        // Enter insert mode using 'a' (append) since cursor is at end of line
+        // Using 'i' would place cursor before the last char due to Neovim's cursor model
+        self.send_keys("a");
+        self.clear_last_key();
         crate::verbose_print!(
             "[godot-neovim] C: Changed to end of line from col {}",
             col_idx
@@ -1172,7 +1181,7 @@ impl GodotNeovimPlugin {
             }
             lines.push(editor.get_line(i).to_string());
         }
-        editor.set_text(&lines.join("\n"));
+        editor.set_text_and_notify(&lines.join("\n"));
 
         // Move cursor to first pasted line
         editor.set_caret_line(line_idx);
@@ -1223,7 +1232,7 @@ impl GodotNeovimPlugin {
                 }
             }
         }
-        editor.set_text(&lines.join("\n"));
+        editor.set_text_and_notify(&lines.join("\n"));
 
         // Move cursor to first pasted line
         editor.set_caret_line(line_idx + 1);
@@ -1307,7 +1316,7 @@ impl GodotNeovimPlugin {
             }
         }
 
-        editor.set_text(&new_lines.join("\n"));
+        editor.set_text_and_notify(&new_lines.join("\n"));
         editor.set_caret_line(line_idx);
 
         self.sync_buffer_to_neovim();

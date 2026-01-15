@@ -1,6 +1,6 @@
 //! Neovim communication: buffer sync, cursor sync, key sending
 
-use super::GodotNeovimPlugin;
+use super::{CodeEditExt, GodotNeovimPlugin};
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
@@ -277,6 +277,14 @@ impl GodotNeovimPlugin {
         // Force mode to normal (ESC always returns to normal mode)
         self.current_mode = "n".to_string();
 
+        // Clear all pending states (Escape cancels everything)
+        self.clear_last_key();
+        self.pending_char_op = None;
+        self.pending_mark_op = None;
+        self.pending_macro_op = None;
+        self.selected_register = None;
+        self.count_buffer.clear();
+
         // Clear any visual selection
         self.clear_visual_selection();
 
@@ -425,7 +433,7 @@ impl GodotNeovimPlugin {
         let current_normalized = current_text.trim_end_matches('\n');
 
         if text_normalized != current_normalized {
-            editor.set_text(&text);
+            editor.set_text_and_notify(&text);
             crate::verbose_print!(
                 "[godot-neovim] Buffer synced from Neovim ({} lines)",
                 lines.len()
