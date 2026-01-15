@@ -120,7 +120,11 @@ pub fn initialize_settings() {
     }
 
     // Set initial value for timeoutlen (p_basic=false: advanced setting, hidden by default)
-    settings.set_initial_value(SETTING_TIMEOUTLEN, &Variant::from(DEFAULT_TIMEOUTLEN_MS), false);
+    settings.set_initial_value(
+        SETTING_TIMEOUTLEN,
+        &Variant::from(DEFAULT_TIMEOUTLEN_MS),
+        false,
+    );
 
     // Add property info for timeoutlen (integer with range)
     #[allow(deprecated)]
@@ -205,6 +209,19 @@ pub fn get_input_mode() -> InputMode {
     }
 
     InputMode::default()
+}
+
+/// Set input mode in EditorSettings
+pub fn set_input_mode(mode: InputMode) {
+    let editor = EditorInterface::singleton();
+    let Some(mut settings) = editor.get_editor_settings() else {
+        return;
+    };
+    let value = match mode {
+        InputMode::Hybrid => 0i64,
+        InputMode::Strict => 1i64,
+    };
+    settings.set_setting(SETTING_INPUT_MODE, &Variant::from(value));
 }
 
 /// Get the configured neovim clean mode

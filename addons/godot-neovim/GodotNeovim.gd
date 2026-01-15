@@ -151,6 +151,8 @@
 ## [br][b]Ex Commands[/b][br]
 ## [code]:help :h[/code] - Open this help[br]
 ## [code]:version :ver[/code] - Show version in status label[br]
+## [code]:hybrid[/code] - Switch to Hybrid input mode[br]
+## [code]:strict[/code] - Switch to Strict input mode[br]
 ## [code]:w :wa[/code] - Save / Save all[br]
 ## [code]:q :qa[/code] - Close / Close all[br]
 ## [code]:wq :x[/code] - Save and close[br]
