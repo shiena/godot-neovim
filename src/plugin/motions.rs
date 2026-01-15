@@ -9,42 +9,42 @@ impl GodotNeovimPlugin {
             match keys {
                 "z" => {
                     self.center_cursor();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "t" => {
                     self.scroll_cursor_to_top();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "b" => {
                     self.scroll_cursor_to_bottom();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "a" => {
                     self.toggle_fold();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "o" => {
                     self.unfold_current_line();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "c" => {
                     self.fold_current_line();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "M" => {
                     self.fold_all();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 "R" => {
                     self.unfold_all();
-                    self.last_key.clear();
+                    self.clear_last_key();
                     return true;
                 }
                 _ => {}
