@@ -7,6 +7,8 @@ reloadable = true
 [libraries]
 linux.debug.x86_64 = "res://addons/godot-neovim/libgodot_neovim.so"
 linux.release.x86_64 = "res://addons/godot-neovim/libgodot_neovim.so"
+linux.debug.arm64 = "res://addons/godot-neovim/libgodot_neovim.arm64.so"
+linux.release.arm64 = "res://addons/godot-neovim/libgodot_neovim.arm64.so"
 windows.debug.x86_64 = "res://addons/godot-neovim/godot_neovim.dll"
 windows.release.x86_64 = "res://addons/godot-neovim/godot_neovim.dll"
 macos.debug.x86_64 = "res://addons/godot-neovim/libgodot_neovim.x86_64.dylib"

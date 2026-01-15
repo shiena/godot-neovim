@@ -82,17 +82,18 @@ jobs:
             addons/godot-neovim/plugin.cfg
             Cargo.toml
 
-  build-linux-windows:
+  build-linux:
     needs: [prepare]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
             artifact_name: libgodot_neovim.so
-          - target: x86_64-pc-windows-gnu
-            artifact_name: godot_neovim.dll
-            cross: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            artifact_name: libgodot_neovim.so
 
     steps:
       - name: Checkout
@@ -108,10 +109,6 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install MinGW (Windows cross-compile)
-        if: matrix.cross
-        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
-
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
@@ -121,9 +118,9 @@ jobs:
           name: ${{ matrix.target }}
           path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
-  build-macos:
+  build-windows:
     needs: [prepare]
-    runs-on: macos-latest
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
@@ -137,28 +134,55 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-apple-darwin,aarch64-apple-darwin
+          targets: x86_64-pc-windows-msvc
 
-      - name: Build x86_64
-        run: cargo build --release --target x86_64-apple-darwin
+      - name: Build
+        run: cargo build --release --target x86_64-pc-windows-msvc
 
-      - name: Build aarch64
-        run: cargo build --release --target aarch64-apple-darwin
-
-      - name: Upload x86_64 artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: x86_64-apple-darwin
-          path: target/x86_64-apple-darwin/release/libgodot_neovim.dylib
+          name: x86_64-pc-windows-msvc
+          path: target/x86_64-pc-windows-msvc/release/godot_neovim.dll
 
-      - name: Upload aarch64 artifact
+  build-macos:
+    needs: [prepare]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+            artifact_name: libgodot_neovim.dylib
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact_name: libgodot_neovim.dylib
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download and apply version updates
+        uses: actions/download-artifact@v4
+        with:
+          name: version-commit
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aarch64-apple-darwin
-          path: target/aarch64-apple-darwin/release/libgodot_neovim.dylib
+          name: ${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
   release:
-    needs: [build-linux-windows, build-macos]
+    needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -194,8 +218,11 @@ jobs:
       - name: Prepare release archive
         run: |
           # Copy all libraries to addons/godot-neovim/
-          cp artifacts/x86_64-pc-windows-gnu/* addons/godot-neovim/
+          cp artifacts/x86_64-pc-windows-msvc/* addons/godot-neovim/
           cp artifacts/x86_64-unknown-linux-gnu/* addons/godot-neovim/
+
+          # Rename Linux ARM64 to include architecture
+          cp artifacts/aarch64-unknown-linux-gnu/libgodot_neovim.so addons/godot-neovim/libgodot_neovim.arm64.so
 
           # Rename macOS dylibs to include architecture
           cp artifacts/x86_64-apple-darwin/libgodot_neovim.dylib addons/godot-neovim/libgodot_neovim.x86_64.dylib
