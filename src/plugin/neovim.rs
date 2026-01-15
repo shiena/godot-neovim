@@ -361,11 +361,12 @@ impl GodotNeovimPlugin {
         let safe_line = line.min(line_count - 1).max(0);
         let safe_col = column.max(0);
 
+        // Update last_synced_cursor BEFORE setting caret to prevent
+        // caret_changed signal from triggering sync_cursor_to_neovim
+        self.last_synced_cursor = (safe_line, safe_col);
+
         editor.set_caret_line(safe_line);
         editor.set_caret_column(safe_col);
-
-        // Update last_synced_cursor to prevent sync loop
-        self.last_synced_cursor = (safe_line, safe_col);
     }
 
     /// Sync buffer from Neovim to Godot editor
@@ -403,6 +404,10 @@ impl GodotNeovimPlugin {
 
             let line_count = editor.get_line_count();
             let safe_line = target_line.min(line_count - 1);
+
+            // Update last_synced_cursor BEFORE setting caret to prevent
+            // caret_changed signal from triggering sync_cursor_to_neovim
+            self.last_synced_cursor = (safe_line, target_col);
 
             editor.set_caret_line(safe_line);
             editor.set_caret_column(target_col);
