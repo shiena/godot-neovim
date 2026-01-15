@@ -191,6 +191,10 @@ pub struct GodotNeovimPlugin {
     /// Last insert position: (line, col) for gi command
     #[init(val = None)]
     last_insert_position: Option<(i32, i32)>,
+    /// Last synced cursor position: (line, col) for detecting external cursor changes
+    /// Used to prevent sync loops between Godot and Neovim
+    #[init(val = (-1, -1))]
+    last_synced_cursor: (i32, i32),
     /// Flag indicating script changed signal was received (for deferred processing)
     /// Uses Cell for interior mutability to avoid borrow conflicts with signal callbacks
     #[init(val = Cell::new(false))]
@@ -399,6 +403,20 @@ impl IEditorPlugin for GodotNeovimPlugin {
     }
 
     fn input(&mut self, event: Gd<godot::classes::InputEvent>) {
+        // Handle mouse click events - sync cursor position after click
+        if let Ok(mouse_event) = event.clone().try_cast::<godot::classes::InputEventMouseButton>() {
+            // Only handle left mouse button press when editor has focus
+            if mouse_event.is_pressed()
+                && mouse_event.get_button_index() == godot::global::MouseButton::LEFT
+                && self.editor_has_focus()
+            {
+                // Use deferred call to sync cursor after Godot updates caret position
+                self.base_mut()
+                    .call_deferred("sync_cursor_to_neovim_deferred", &[]);
+            }
+            return;
+        }
+
         // Only handle key events
         let Ok(key_event) = event.try_cast::<godot::classes::InputEventKey>() else {
             return;
@@ -549,6 +567,64 @@ impl GodotNeovimPlugin {
             let callable = self.base().callable("on_settings_changed");
             editor_settings.connect("settings_changed", &callable);
         }
+    }
+
+    fn connect_caret_changed_signal(&mut self) {
+        // Create callable first to avoid borrow conflicts
+        let callable = self.base().callable("on_caret_changed");
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        // Connect to caret_changed signal to detect mouse clicks and other cursor changes
+        // Check if already connected to avoid duplicate connections
+        if !editor.is_connected("caret_changed", &callable) {
+            editor.connect("caret_changed", &callable);
+            crate::verbose_print!("[godot-neovim] Connected to caret_changed signal");
+        }
+    }
+
+    #[func]
+    fn on_caret_changed(&mut self) {
+        // Skip sync in Insert/Replace modes - cursor moves with every keystroke
+        // and Neovim isn't receiving the input, so syncing is meaningless and causes freezes
+        if self.current_mode == "i" || self.current_mode == "R" {
+            return;
+        }
+
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        // Get current cursor position from Godot editor
+        let line = editor.get_caret_line();
+        let col = editor.get_caret_column();
+
+        // Check if cursor actually changed (to prevent sync loops)
+        if self.last_synced_cursor == (line, col) {
+            return;
+        }
+
+        // Update last_synced_cursor and sync to Neovim
+        self.last_synced_cursor = (line, col);
+        self.sync_cursor_to_neovim();
+    }
+
+    #[func]
+    fn sync_cursor_to_neovim_deferred(&mut self) {
+        // Called after mouse click to sync cursor position
+        // Deferred to ensure Godot has updated the caret position first
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let line = editor.get_caret_line();
+        let col = editor.get_caret_column();
+
+        // Update last_synced_cursor and sync to Neovim
+        self.last_synced_cursor = (line, col);
+        self.sync_cursor_to_neovim();
     }
 
     #[func]
@@ -749,6 +825,7 @@ impl GodotNeovimPlugin {
             {
                 crate::verbose_print!("[godot-neovim] Found focused CodeEdit");
                 self.current_editor = Some(code_edit);
+                self.connect_caret_changed_signal();
                 return;
             }
             // Fallback: find visible CodeEdit
@@ -756,6 +833,7 @@ impl GodotNeovimPlugin {
             {
                 crate::verbose_print!("[godot-neovim] Found visible CodeEdit");
                 self.current_editor = Some(code_edit);
+                self.connect_caret_changed_signal();
             }
         }
     }
