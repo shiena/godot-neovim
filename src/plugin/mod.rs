@@ -3,10 +3,6 @@
 /// Plugin version from Cargo.toml
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Timeout for multi-key sequences (like 'g' prefix commands) in milliseconds
-/// Matches Neovim's default timeoutlen of 1000ms
-const KEY_SEQUENCE_TIMEOUT_MS: u64 = 1000;
-
 mod commands;
 mod editing;
 mod keys;
@@ -441,7 +437,8 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Check for key sequence timeout (like Neovim's timeoutlen)
         // If last_key has been pending too long, cancel it
         if let Some(key_time) = self.last_key_time {
-            if key_time.elapsed().as_millis() > KEY_SEQUENCE_TIMEOUT_MS as u128 {
+            let timeoutlen = crate::settings::get_timeoutlen();
+            if key_time.elapsed().as_millis() > timeoutlen as u128 {
                 if !self.last_key.is_empty() {
                     crate::verbose_print!(
                         "[godot-neovim] Key sequence timeout: '{}' ({}ms elapsed)",
