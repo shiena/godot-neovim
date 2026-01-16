@@ -89,6 +89,21 @@ impl fmt::Display for NeovimVersion {
     }
 }
 
+/// Result from switching to a buffer
+#[derive(Debug, Clone)]
+pub struct SwitchBufferResult {
+    /// Buffer number in Neovim
+    pub bufnr: i64,
+    /// Current changedtick
+    pub tick: i64,
+    /// Whether this is a newly created buffer
+    pub is_new: bool,
+    /// Whether buffer is attached for notifications
+    pub attached: bool,
+    /// Cursor position (line, col) - line is 1-indexed, col is 0-indexed
+    pub cursor: (i64, i64),
+}
+
 /// Manages connection to Neovim process
 pub struct NeovimClient {
     runtime: Runtime,
@@ -497,56 +512,6 @@ impl NeovimClient {
         })
     }
 
-    /// Register buffer and attach for notifications atomically
-    /// This prevents race conditions between buffer_register and buf_attach
-    /// Returns (changedtick, attached)
-    pub fn buffer_register_and_attach(&self, lines: Vec<String>) -> Result<(i64, bool), String> {
-        use rmpv::Value;
-        let neovim_arc = self.neovim.clone();
-
-        self.runtime.block_on(async {
-            let nvim_lock = neovim_arc.lock().await;
-            if let Some(neovim) = nvim_lock.as_ref() {
-                // Convert lines to Lua array
-                let lines_value: Vec<Value> = lines.into_iter().map(Value::from).collect();
-                let args = vec![Value::from(0i64), Value::Array(lines_value)];
-
-                let result = neovim
-                    .exec_lua(
-                        "return _G.godot_neovim.buffer_register_and_attach(...)",
-                        args,
-                    )
-                    .await
-                    .map_err(|e| format!("Failed to register and attach buffer: {}", e))?;
-
-                // Parse result table { tick = number, attached = boolean }
-                if let Value::Map(map) = result {
-                    let mut tick: Option<i64> = None;
-                    let mut attached: Option<bool> = None;
-
-                    for (key, value) in map {
-                        if let Value::String(k) = key {
-                            match k.as_str() {
-                                Some("tick") => tick = value.as_i64(),
-                                Some("attached") => attached = value.as_bool(),
-                                _ => {}
-                            }
-                        }
-                    }
-
-                    match (tick, attached) {
-                        (Some(t), Some(a)) => Ok((t, a)),
-                        _ => Err("Invalid result from buffer_register_and_attach".to_string()),
-                    }
-                } else {
-                    Err("Expected table result from buffer_register_and_attach".to_string())
-                }
-            } else {
-                Err("Neovim not connected".to_string())
-            }
-        })
-    }
-
     /// Update buffer content (preserves undo history for 'u' command)
     /// Uses Lua function to properly manage undo history
     pub fn buffer_update(&self, lines: Vec<String>) -> Result<i64, String> {
@@ -573,6 +538,99 @@ impl NeovimClient {
                 Err("Neovim not connected".to_string())
             }
         })
+    }
+
+    /// Switch to buffer by path, creating and initializing if needed
+    /// Returns (bufnr, tick, is_new, cursor) where cursor is (line, col) 1-indexed
+    pub fn switch_to_buffer(
+        &self,
+        path: &str,
+        lines: Option<Vec<String>>,
+    ) -> Result<SwitchBufferResult, String> {
+        use rmpv::Value;
+        let neovim_arc = self.neovim.clone();
+        let path = path.to_string();
+
+        self.runtime.block_on(async {
+            let result = tokio::time::timeout(
+                std::time::Duration::from_millis(RPC_EXTENDED_TIMEOUT_MS),
+                async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        // Prepare arguments
+                        let lines_value = match lines {
+                            Some(l) => Value::Array(l.into_iter().map(Value::from).collect()),
+                            None => Value::Nil,
+                        };
+                        let args = vec![Value::from(path), lines_value];
+
+                        let result = neovim
+                            .exec_lua("return _G.godot_neovim.switch_to_buffer(...)", args)
+                            .await
+                            .map_err(|e| format!("Failed to switch buffer: {}", e))?;
+
+                        // Parse result table { bufnr, tick, is_new, attached, cursor }
+                        Self::parse_switch_buffer_result(result)
+                    } else {
+                        Err("Neovim not connected".to_string())
+                    }
+                },
+            )
+            .await;
+
+            match result {
+                Ok(inner) => inner,
+                Err(_) => Err("Timeout switching buffer".to_string()),
+            }
+        })
+    }
+
+    /// Parse the result from switch_to_buffer Lua function
+    fn parse_switch_buffer_result(result: rmpv::Value) -> Result<SwitchBufferResult, String> {
+        use rmpv::Value;
+
+        if let Value::Map(map) = result {
+            let mut bufnr: Option<i64> = None;
+            let mut tick: Option<i64> = None;
+            let mut is_new: Option<bool> = None;
+            let mut attached: Option<bool> = None;
+            let mut cursor: Option<(i64, i64)> = None;
+
+            for (key, value) in map {
+                if let Value::String(k) = key {
+                    match k.as_str() {
+                        Some("bufnr") => bufnr = value.as_i64(),
+                        Some("tick") => tick = value.as_i64(),
+                        Some("is_new") => is_new = value.as_bool(),
+                        Some("attached") => attached = value.as_bool(),
+                        Some("cursor") => {
+                            // cursor is [row, col] array, 1-indexed
+                            if let Value::Array(arr) = value {
+                                if arr.len() >= 2 {
+                                    let row = arr[0].as_i64().unwrap_or(1);
+                                    let col = arr[1].as_i64().unwrap_or(0);
+                                    cursor = Some((row, col));
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            match (bufnr, tick, is_new, attached, cursor) {
+                (Some(b), Some(t), Some(n), Some(a), Some(c)) => Ok(SwitchBufferResult {
+                    bufnr: b,
+                    tick: t,
+                    is_new: n,
+                    attached: a,
+                    cursor: c,
+                }),
+                _ => Err("Invalid result from switch_to_buffer".to_string()),
+            }
+        } else {
+            Err("Expected table result from switch_to_buffer".to_string())
+        }
     }
 
     /// Get cursor position (1-indexed line, 0-indexed column) with timeout
@@ -706,52 +764,6 @@ impl NeovimClient {
             match result {
                 Ok(Some(modified)) => modified,
                 _ => false,
-            }
-        })
-    }
-
-    /// Set buffer name (for LSP compatibility)
-    /// Uses timeout to prevent blocking on E325 swap file dialogs
-    pub fn set_buffer_name(&self, name: &str) -> Result<(), String> {
-        let neovim_arc = self.neovim.clone();
-        let name = name.to_string();
-
-        self.runtime.block_on(async {
-            // Use timeout to prevent blocking on E325 ATTENTION dialogs
-            let result = tokio::time::timeout(
-                std::time::Duration::from_millis(RPC_EXTENDED_TIMEOUT_MS),
-                async {
-                    let nvim_lock = neovim_arc.lock().await;
-                    if let Some(neovim) = nvim_lock.as_ref() {
-                        // Suppress E325 ATTENTION errors before setting buffer name
-                        let _ = neovim.command("set shortmess+=A").await;
-
-                        let buffer = neovim
-                            .get_current_buf()
-                            .await
-                            .map_err(|e| format!("Failed to get buffer: {}", e))?;
-
-                        let set_result = buffer.set_name(&name).await;
-
-                        if set_result.is_err() {
-                            // E325 error may leave Neovim in confirmation state
-                            // Send Enter to clear any pending prompts
-                            let _ = neovim.input("<CR>").await;
-                            let _ = neovim.input("<Esc>").await;
-                        }
-
-                        set_result.map_err(|e| format!("Failed to set buffer name: {}", e))?;
-                        Ok(())
-                    } else {
-                        Err("Neovim not connected".to_string())
-                    }
-                },
-            )
-            .await;
-
-            match result {
-                Ok(inner) => inner,
-                Err(_) => Err("Timeout setting buffer name (possible swap file issue)".to_string()),
             }
         })
     }

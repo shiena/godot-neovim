@@ -4,10 +4,89 @@ use super::{CodeEditExt, GodotNeovimPlugin};
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
-    /// Sync buffer from Godot editor to Neovim
-    /// If clear_undo is true, the sync operation won't be recorded in undo history
-    /// Uses Lua functions for proper undo history management
-    pub(super) fn sync_buffer_to_neovim_impl(&mut self, clear_undo: bool) {
+    /// Switch to Neovim buffer for the current file
+    /// Creates buffer if not exists, initializes content if new
+    /// Returns cursor position from Neovim (for existing buffers)
+    pub(super) fn switch_to_neovim_buffer(&mut self) -> Option<(i64, i64)> {
+        let Some(ref editor) = self.current_editor else {
+            crate::verbose_print!("[godot-neovim] switch_to_neovim_buffer: No current editor");
+            return None;
+        };
+
+        let Some(ref neovim) = self.neovim else {
+            crate::verbose_print!("[godot-neovim] switch_to_neovim_buffer: No neovim");
+            return None;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            crate::verbose_print!("[godot-neovim] switch_to_neovim_buffer: Failed to lock");
+            return None;
+        };
+
+        // Get absolute path for the buffer
+        if self.current_script_path.is_empty() {
+            crate::verbose_print!("[godot-neovim] switch_to_neovim_buffer: No script path");
+            return None;
+        }
+
+        use godot::classes::ProjectSettings;
+        let abs_path = if self.current_script_path.starts_with("res://") {
+            ProjectSettings::singleton()
+                .globalize_path(&self.current_script_path)
+                .to_string()
+        } else {
+            self.current_script_path.clone()
+        };
+
+        // Get text from Godot editor for new buffers
+        let text = editor.get_text().to_string();
+        let lines: Vec<String> = text.lines().map(String::from).collect();
+
+        crate::verbose_print!(
+            "[godot-neovim] Switching to buffer: {} ({} lines)",
+            abs_path,
+            lines.len()
+        );
+
+        // Switch to buffer (creates if not exists)
+        match client.switch_to_buffer(&abs_path, Some(lines)) {
+            Ok(result) => {
+                crate::verbose_print!(
+                    "[godot-neovim] Buffer switched: bufnr={}, tick={}, is_new={}, cursor=({}, {})",
+                    result.bufnr,
+                    result.tick,
+                    result.is_new,
+                    result.cursor.0,
+                    result.cursor.1
+                );
+
+                // Update sync manager
+                self.sync_manager.reset();
+                self.sync_manager.set_initial_sync_tick(result.tick);
+                self.sync_manager.set_attached(result.attached);
+
+                // Set filetype for syntax highlighting
+                let _ = client.command("set filetype=gdscript");
+
+                // Mark buffer as saved in Godot
+                drop(client);
+                if let Some(ref mut editor) = self.current_editor {
+                    editor.tag_saved_version();
+                }
+
+                // Return cursor position (convert to 0-indexed line)
+                Some((result.cursor.0 - 1, result.cursor.1))
+            }
+            Err(e) => {
+                godot_error!("[godot-neovim] Failed to switch buffer: {}", e);
+                None
+            }
+        }
+    }
+
+    /// Sync buffer from Godot editor to Neovim (for ESC from insert mode)
+    /// Preserves undo history
+    pub(super) fn sync_buffer_to_neovim_keep_undo(&mut self) {
         let Some(ref editor) = self.current_editor else {
             crate::verbose_print!("[godot-neovim] sync_buffer_to_neovim: No current editor");
             return;
@@ -28,116 +107,44 @@ impl GodotNeovimPlugin {
         let lines: Vec<String> = text.lines().map(String::from).collect();
 
         crate::verbose_print!("[godot-neovim] Syncing {} lines to Neovim", lines.len());
-        if !lines.is_empty() {
-            crate::verbose_print!(
-                "[godot-neovim] First line: '{}'",
-                lines[0].chars().take(50).collect::<String>()
-            );
-        }
 
-        // Use Lua functions for proper undo history management
-        // For initial sync (clear_undo=true), use atomic register+attach to prevent race conditions
-        // For ESC sync (clear_undo=false), use buffer_update to preserve undo history
-        if clear_undo {
-            // Initial sync: register and attach atomically
-            match client.buffer_register_and_attach(lines) {
-                Ok((tick, attached)) => {
-                    crate::verbose_print!(
-                        "[godot-neovim] Buffer registered and attached (tick={}, attached={})",
-                        tick,
-                        attached
-                    );
+        // ESC sync: update buffer preserving undo history
+        match client.buffer_update(lines) {
+            Ok(tick) => {
+                crate::verbose_print!("[godot-neovim] Buffer updated (tick={})", tick);
 
-                    // Reset sync manager and set initial sync tick
-                    self.sync_manager.reset();
-                    self.sync_manager.set_initial_sync_tick(tick);
-                    self.sync_manager.set_attached(attached);
-                }
-                Err(e) => {
-                    godot_error!("[godot-neovim] Failed to register buffer: {}", e);
-                }
-            }
-        } else {
-            // ESC sync: update buffer preserving undo history
-            match client.buffer_update(lines) {
-                Ok(tick) => {
-                    crate::verbose_print!("[godot-neovim] Buffer updated (tick={})", tick);
+                // Reset sync manager and set initial sync tick to ignore echo
+                self.sync_manager.reset();
+                self.sync_manager.set_initial_sync_tick(tick);
 
-                    // Reset sync manager and set initial sync tick to ignore echo
-                    self.sync_manager.reset();
-                    self.sync_manager.set_initial_sync_tick(tick);
-
-                    // Re-attach to buffer for change notifications
-                    match client.buf_attach_current() {
-                        Ok(true) => {
-                            self.sync_manager.set_attached(true);
-                            crate::verbose_print!(
-                                "[godot-neovim] buf_attach: attached with changedtick={}",
-                                tick
-                            );
-                        }
-                        Ok(false) => {
-                            crate::verbose_print!("[godot-neovim] buf_attach: returned false");
-                        }
-                        Err(e) => {
-                            crate::verbose_print!("[godot-neovim] buf_attach: error: {}", e);
-                        }
+                // Re-attach to buffer for change notifications
+                match client.buf_attach_current() {
+                    Ok(true) => {
+                        self.sync_manager.set_attached(true);
+                        crate::verbose_print!(
+                            "[godot-neovim] buf_attach: attached with changedtick={}",
+                            tick
+                        );
+                    }
+                    Ok(false) => {
+                        crate::verbose_print!("[godot-neovim] buf_attach: returned false");
+                    }
+                    Err(e) => {
+                        crate::verbose_print!("[godot-neovim] buf_attach: error: {}", e);
                     }
                 }
-                Err(e) => {
-                    godot_error!("[godot-neovim] Failed to update buffer: {}", e);
-                }
             }
-        }
-
-        // Set buffer name for LSP compatibility (if path changed)
-        if !self.current_script_path.is_empty() {
-            // Convert res:// path to absolute path for LSP
-            use godot::classes::ProjectSettings;
-            let abs_path = if self.current_script_path.starts_with("res://") {
-                ProjectSettings::singleton()
-                    .globalize_path(&self.current_script_path)
-                    .to_string()
-            } else {
-                self.current_script_path.clone()
-            };
-
-            // Try to set buffer name, but don't block on errors (E325 swap file issues)
-            match client.set_buffer_name(&abs_path) {
-                Ok(()) => {
-                    crate::verbose_print!("[godot-neovim] Buffer name set to: {}", abs_path);
-                    // Set filetype for syntax highlighting
-                    let _ = client.command("set filetype=gdscript");
-                }
-                Err(e) => {
-                    // Log warning but continue - editing will still work
-                    crate::verbose_print!("[godot-neovim] Buffer name not set: {}", e);
-                    // Still set filetype for syntax highlighting
-                    let _ = client.command("set filetype=gdscript");
-                }
-            }
-        }
-
-        // For initial sync (clear_undo=true), mark buffer as saved to prevent dirty flag
-        // This handles the case where buf_attach triggers nvim_buf_lines_event echo
-        if clear_undo {
-            drop(client);
-            if let Some(ref mut editor) = self.current_editor {
-                editor.tag_saved_version();
-                crate::verbose_print!("[godot-neovim] Initial sync: marked as saved");
+            Err(e) => {
+                godot_error!("[godot-neovim] Failed to update buffer: {}", e);
             }
         }
     }
 
-    /// Sync buffer from Godot editor to Neovim (initial sync, clears undo history)
+    /// Sync buffer from Godot editor to Neovim (initial sync for file open)
+    /// This is now a wrapper that calls switch_to_neovim_buffer
     pub(super) fn sync_buffer_to_neovim(&mut self) {
-        self.sync_buffer_to_neovim_impl(true);
-    }
-
-    /// Sync buffer from Godot editor to Neovim (preserves undo history)
-    /// Use this when syncing after ESC from insert mode
-    pub(super) fn sync_buffer_to_neovim_keep_undo(&mut self) {
-        self.sync_buffer_to_neovim_impl(false);
+        // Use multi-buffer approach - switch to buffer for this file
+        let _ = self.switch_to_neovim_buffer();
     }
 
     /// Sync cursor position from Godot editor to Neovim

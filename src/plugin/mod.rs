@@ -718,6 +718,29 @@ impl GodotNeovimPlugin {
 
     #[func]
     fn on_script_changed(&mut self, script: Option<Gd<godot::classes::Script>>) {
+        // Sync cursor to Neovim before switching files
+        // This ensures Neovim remembers the cursor position for the current buffer
+        // Check if editor is still valid (it may have been freed when closing a script)
+        if !self.current_script_path.is_empty() {
+            if let Some(ref editor) = self.current_editor {
+                if editor.is_instance_valid() {
+                    let line = editor.get_caret_line() as i64 + 1; // 1-indexed for Neovim
+                    let col = editor.get_caret_column() as i64;
+                    if let Some(ref neovim) = self.neovim {
+                        if let Ok(client) = neovim.try_lock() {
+                            let _ = client.set_cursor(line, col);
+                            crate::verbose_print!(
+                                "[godot-neovim] Synced cursor to Neovim for {}: ({}, {})",
+                                self.current_script_path,
+                                line,
+                                col
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         // Handle null script (e.g., when all scripts are closed)
         let Some(script) = script else {
             crate::verbose_print!(
@@ -844,7 +867,30 @@ impl GodotNeovimPlugin {
         self.current_script_path = current_script_path.clone();
 
         self.reposition_mode_label();
-        self.sync_buffer_to_neovim();
+
+        // Switch to Neovim buffer for this file (creates if not exists)
+        // Returns cursor position from Neovim for existing buffers
+        if let Some((line, col)) = self.switch_to_neovim_buffer() {
+            // Apply cursor position from Neovim to Godot editor
+            if let Some(ref mut editor) = self.current_editor {
+                let line_count = editor.get_line_count();
+                let safe_line = (line as i32).min(line_count - 1).max(0);
+                let line_length = editor.get_line(safe_line).len() as i32;
+                let safe_col = (col as i32).min(line_length).max(0);
+
+                crate::verbose_print!(
+                    "[godot-neovim] Applying cursor from Neovim: ({}, {}) -> ({}, {})",
+                    line,
+                    col,
+                    safe_line,
+                    safe_col
+                );
+
+                editor.set_caret_line(safe_line);
+                editor.set_caret_column(safe_col);
+            }
+        }
+
         self.update_cursor_from_editor();
         self.sync_cursor_to_neovim();
     }
