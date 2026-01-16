@@ -113,19 +113,24 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 3. Copy the built library to the addons folder:
    ```bash
    # Windows (x64)
-   cp target/release/godot_neovim.dll addons/godot-neovim/
+   mkdir -p addons/godot-neovim/bin/windows
+   cp target/release/godot_neovim.dll addons/godot-neovim/bin/windows/
 
    # Linux (x64)
-   cp target/release/libgodot_neovim.so addons/godot-neovim/
+   mkdir -p addons/godot-neovim/bin/linux
+   cp target/release/libgodot_neovim.so addons/godot-neovim/bin/linux/
 
    # Linux (ARM64)
-   cp target/release/libgodot_neovim.so addons/godot-neovim/libgodot_neovim.arm64.so
+   mkdir -p addons/godot-neovim/bin/linux-arm64
+   cp target/release/libgodot_neovim.so addons/godot-neovim/bin/linux-arm64/
 
    # macOS (Apple Silicon)
-   cp target/release/libgodot_neovim.dylib addons/godot-neovim/libgodot_neovim.arm64.dylib
+   mkdir -p addons/godot-neovim/bin/macos-arm64
+   cp target/release/libgodot_neovim.dylib addons/godot-neovim/bin/macos-arm64/
 
    # macOS (Intel)
-   cp target/release/libgodot_neovim.dylib addons/godot-neovim/libgodot_neovim.x86_64.dylib
+   mkdir -p addons/godot-neovim/bin/macos-x86_64
+   cp target/release/libgodot_neovim.dylib addons/godot-neovim/bin/macos-x86_64/
    ```
 
 4. Copy the addons folder to your Godot project:
@@ -496,6 +501,7 @@ These features may already work through Neovim backend:
 - [wovri-github/godot-vim-joshnajera](https://github.com/wovri-github/godot-vim-joshnajera) - GDScript, joshnajera fork with K (docs)
 
 ### Other
+- [ComradeNeovim](https://github.com/beeender/ComradeNeovim) - IntelliJ/CLion plugin with Neovim backend
 - [vscode-neovim](https://github.com/vscode-neovim/vscode-neovim) - VSCode extension with Neovim backend
 - [neovide](https://github.com/neovide/neovide) - Neovim GUI client in Rust (architecture reference)
 

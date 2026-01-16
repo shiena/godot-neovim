@@ -8,4 +8,4 @@ pub use client::NeovimClient;
 pub use commands::{ParallelCommand, SerialCommand};
 #[allow(unused_imports)]
 pub use events::{ParseError, RedrawEvent};
-pub use handler::{NeovimHandler, NeovimState};
+pub use handler::{BufEvent, NeovimHandler, NeovimState};

@@ -1,149 +1,13 @@
-//! Editing operations: undo, redo, delete, replace, indent, join
+//! Editing operations: delete, replace, indent, join
+//!
+//! Note: Undo (u) and Redo (Ctrl+R) are handled by sending to Neovim directly
+//! (Neovim Master design - see DESIGN_V2.md)
 
 use super::{CodeEditExt, GodotNeovimPlugin};
 use godot::classes::{EditorInterface, Os};
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
-    /// Undo (u command)
-    pub(super) fn undo(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        // Capture buffer state before undo to find changed position
-        let line_count_before = editor.get_line_count();
-        let mut lines_before: Vec<String> = Vec::with_capacity(line_count_before as usize);
-        for i in 0..line_count_before {
-            lines_before.push(editor.get_line(i).to_string());
-        }
-
-        editor.undo();
-
-        // Find the first position that changed and move cursor there
-        // This matches Neovim's behavior where cursor jumps to the undone change
-        let line_count_after = editor.get_line_count();
-        let mut changed_pos: Option<(i32, i32)> = None;
-
-        // Check for changed lines and find the exact column
-        let min_lines = line_count_before.min(line_count_after);
-        for i in 0..min_lines {
-            let line_after = editor.get_line(i).to_string();
-            if i < lines_before.len() as i32 && lines_before[i as usize] != line_after {
-                // Find the first differing column
-                let before_chars: Vec<char> = lines_before[i as usize].chars().collect();
-                let after_chars: Vec<char> = line_after.chars().collect();
-                let mut col = 0i32;
-                for (j, (b, a)) in before_chars.iter().zip(after_chars.iter()).enumerate() {
-                    if b != a {
-                        col = j as i32;
-                        break;
-                    }
-                    col = (j + 1) as i32;
-                }
-                // If lengths differ and all compared chars match, change is at the shorter length
-                if col as usize >= before_chars.len().min(after_chars.len()) {
-                    col = before_chars.len().min(after_chars.len()) as i32;
-                }
-                changed_pos = Some((i, col));
-                break;
-            }
-        }
-
-        // If no changed line found but line count differs, change is at the boundary
-        if changed_pos.is_none() && line_count_before != line_count_after {
-            let line = min_lines.max(0);
-            changed_pos = Some((line, 0));
-        }
-
-        // Move cursor to the changed position
-        if let Some((line, col)) = changed_pos {
-            let safe_line = line.min(line_count_after - 1).max(0);
-            editor.set_caret_line(safe_line);
-            let line_len = editor.get_line(safe_line).len() as i32;
-            let safe_col = col.min(line_len.max(0));
-            editor.set_caret_column(safe_col);
-            crate::verbose_print!(
-                "[godot-neovim] u: Undo (cursor moved to line {}, col {})",
-                safe_line + 1,
-                safe_col
-            );
-        } else {
-            crate::verbose_print!("[godot-neovim] u: Undo (no change detected)");
-        }
-
-        // Sync buffer to Neovim after undo
-        self.sync_buffer_to_neovim();
-        self.sync_cursor_to_neovim();
-    }
-
-    /// Redo (Ctrl+R command)
-    pub(super) fn redo(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        // Capture buffer state before redo to find changed position
-        let line_count_before = editor.get_line_count();
-        let mut lines_before: Vec<String> = Vec::with_capacity(line_count_before as usize);
-        for i in 0..line_count_before {
-            lines_before.push(editor.get_line(i).to_string());
-        }
-
-        editor.redo();
-
-        // Find the first position that changed and move cursor there
-        let line_count_after = editor.get_line_count();
-        let mut changed_pos: Option<(i32, i32)> = None;
-
-        let min_lines = line_count_before.min(line_count_after);
-        for i in 0..min_lines {
-            let line_after = editor.get_line(i).to_string();
-            if i < lines_before.len() as i32 && lines_before[i as usize] != line_after {
-                // Find the first differing column
-                let before_chars: Vec<char> = lines_before[i as usize].chars().collect();
-                let after_chars: Vec<char> = line_after.chars().collect();
-                let mut col = 0i32;
-                for (j, (b, a)) in before_chars.iter().zip(after_chars.iter()).enumerate() {
-                    if b != a {
-                        col = j as i32;
-                        break;
-                    }
-                    col = (j + 1) as i32;
-                }
-                if col as usize >= before_chars.len().min(after_chars.len()) {
-                    col = before_chars.len().min(after_chars.len()) as i32;
-                }
-                changed_pos = Some((i, col));
-                break;
-            }
-        }
-
-        if changed_pos.is_none() && line_count_before != line_count_after {
-            let line = min_lines.max(0);
-            changed_pos = Some((line, 0));
-        }
-
-        if let Some((line, col)) = changed_pos {
-            let safe_line = line.min(line_count_after - 1).max(0);
-            editor.set_caret_line(safe_line);
-            let line_len = editor.get_line(safe_line).len() as i32;
-            let safe_col = col.min(line_len.max(0));
-            editor.set_caret_column(safe_col);
-            crate::verbose_print!(
-                "[godot-neovim] Ctrl+R: Redo (cursor moved to line {}, col {})",
-                safe_line + 1,
-                safe_col
-            );
-        } else {
-            crate::verbose_print!("[godot-neovim] Ctrl+R: Redo (no change detected)");
-        }
-
-        // Sync buffer to Neovim after redo
-        self.sync_buffer_to_neovim();
-        self.sync_cursor_to_neovim();
-    }
-
     /// Delete character under cursor (x command)
     pub(super) fn delete_char_forward(&mut self) {
         let Some(ref mut editor) = self.current_editor else {
@@ -1367,7 +1231,10 @@ impl GodotNeovimPlugin {
     /// - Unix: file:///path -> /path
     /// - Windows: file:///C:/path -> C:/path
     fn uri_to_file_path(uri: &str) -> String {
-        let path = if let Some(p) = uri.strip_prefix("file:///") {
+        // First, URL decode the entire URI to handle %3A etc.
+        let decoded_uri = Self::url_decode(uri);
+
+        let path = if let Some(p) = decoded_uri.strip_prefix("file:///") {
             // Check if it's a Windows path with drive letter (e.g., C:, D:)
             if p.len() >= 2 && p.chars().nth(1) == Some(':') {
                 // Windows path: file:///C:/path -> C:/path
@@ -1376,14 +1243,22 @@ impl GodotNeovimPlugin {
                 // Unix path: file:///path -> /path (restore leading /)
                 format!("/{}", p)
             }
-        } else if let Some(p) = uri.strip_prefix("file://") {
+        } else if let Some(p) = decoded_uri.strip_prefix("file://") {
             // file://path (less common, but handle it)
             p.to_string()
         } else {
-            uri.to_string()
+            decoded_uri
         };
 
-        Self::url_decode(&path)
+        // Final check: if path starts with /X:/ on Windows, remove the leading /
+        if path.len() >= 3 {
+            let chars: Vec<char> = path.chars().take(4).collect();
+            if chars.len() >= 3 && chars[0] == '/' && chars[2] == ':' {
+                return path[1..].to_string();
+            }
+        }
+
+        path
     }
 
     /// Simple URL decoding for file paths

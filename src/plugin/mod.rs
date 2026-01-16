@@ -17,8 +17,11 @@ mod visual;
 use crate::lsp::GodotLspClient;
 use crate::neovim::NeovimClient;
 use crate::settings;
+use crate::sync::SyncManager;
 use godot::classes::text_edit::CaretType;
-use godot::classes::{CodeEdit, Control, EditorInterface, EditorPlugin, IEditorPlugin, Label};
+use godot::classes::{
+    CodeEdit, Control, EditorInterface, EditorPlugin, IEditorPlugin, Label, ProjectSettings,
+};
 use godot::global::Key;
 use godot::prelude::*;
 use std::cell::Cell;
@@ -256,6 +259,9 @@ pub struct GodotNeovimPlugin {
     /// Temporary version display flag (cleared on next operation)
     #[init(val = false)]
     show_version: bool,
+    /// Buffer synchronization manager (ComradeNeovim-style changedtick sync)
+    #[init(val = SyncManager::new())]
+    sync_manager: SyncManager,
 }
 
 #[godot_api]
@@ -275,7 +281,12 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Initialize Neovim client
         match NeovimClient::new() {
             Ok(mut client) => {
-                if let Err(e) = client.start() {
+                // Get addons path for Lua plugin
+                let addons_path = ProjectSettings::singleton()
+                    .globalize_path("res://addons/godot-neovim")
+                    .to_string();
+
+                if let Err(e) = client.start(Some(&addons_path)) {
                     godot_error!("[godot-neovim] Failed to start Neovim: {}", e);
                     return;
                 }
@@ -1074,18 +1085,11 @@ impl GodotNeovimPlugin {
             _ => mode,
         };
 
-        // Get input mode for display
-        let input_mode = settings::get_input_mode();
-        let input_mode_name = match input_mode {
-            settings::InputMode::Hybrid => "Hybrid",
-            settings::InputMode::Strict => "Strict",
-        };
-
         // Format with cursor position if available
         let display_text = if let Some((line, col)) = cursor {
-            format!(" {} ({}) {}:{} ", mode_name, input_mode_name, line, col)
+            format!(" {} {}:{} ", mode_name, line, col)
         } else {
-            format!(" {} ({}) ", mode_name, input_mode_name)
+            format!(" {} ", mode_name)
         };
 
         label.set_text(&display_text);
@@ -1444,7 +1448,7 @@ impl GodotNeovimPlugin {
     }
 
     fn handle_insert_mode_input(&mut self, key_event: &Gd<godot::classes::InputEventKey>) {
-        // Intercept Escape or Ctrl+[ to exit insert mode (always)
+        // Intercept Escape or Ctrl+[ to exit insert mode
         let is_escape = key_event.get_keycode() == Key::ESCAPE;
         let is_ctrl_bracket =
             key_event.is_ctrl_pressed() && key_event.get_keycode() == Key::BRACKETLEFT;
@@ -1457,7 +1461,7 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Ctrl+B in insert mode: exit insert and enter visual block mode (always)
+        // Ctrl+B in insert mode: exit insert and enter visual block mode
         let is_ctrl_b = key_event.is_ctrl_pressed() && key_event.get_keycode() == Key::B;
         if is_ctrl_b {
             // First sync buffer and exit insert mode
@@ -1473,25 +1477,25 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Check input mode setting
-        let input_mode = settings::get_input_mode();
-        if input_mode == settings::InputMode::Hybrid {
-            // Hybrid mode: Let Godot handle other keys in insert mode (IME support)
-            return;
-        }
-
-        // Strict mode: Send keys to Neovim
-        let nvim_key = self.key_event_to_nvim_notation(key_event);
-        if !nvim_key.is_empty() {
-            self.send_keys_insert_mode(&nvim_key);
-            if let Some(mut viewport) = self.base().get_viewport() {
-                viewport.set_input_as_handled();
+        // Ctrl/Alt modified keys are sent to Neovim for Vim insert mode commands
+        // (Ctrl+w, Ctrl+u, Ctrl+r, Ctrl+o, etc.)
+        let ctrl = key_event.is_ctrl_pressed();
+        let alt = key_event.is_alt_pressed();
+        if ctrl || alt {
+            let nvim_key = self.key_event_to_nvim_notation(key_event);
+            if !nvim_key.is_empty() {
+                self.send_keys(&nvim_key);
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
             }
         }
+
+        // Normal character input: let Godot handle it (IME/autocomplete support)
     }
 
     fn handle_replace_mode_input(&mut self, key_event: &Gd<godot::classes::InputEventKey>) {
-        // Intercept Escape or Ctrl+[ to exit replace mode (always)
+        // Intercept Escape or Ctrl+[ to exit replace mode
         let is_escape = key_event.get_keycode() == Key::ESCAPE;
         let is_ctrl_bracket =
             key_event.is_ctrl_pressed() && key_event.get_keycode() == Key::BRACKETLEFT;
@@ -1504,38 +1508,38 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Check input mode setting
-        let input_mode = settings::get_input_mode();
-        if input_mode == settings::InputMode::Hybrid {
-            // Hybrid mode: implement overwrite behavior
-            // Delete character at cursor position, then let Godot insert the new one
-            let unicode = key_event.get_unicode();
-            if unicode > 0 {
-                if let Some(ref mut editor) = self.current_editor {
-                    let line = editor.get_caret_line();
-                    let col = editor.get_caret_column();
-                    let line_text: String = editor.get_line(line).to_string();
-
-                    // Only delete if we're not at end of line
-                    if (col as usize) < line_text.chars().count() {
-                        // Delete character at cursor
-                        editor.select(line, col, line, col + 1);
-                        editor.delete_selection();
-                    }
+        // Ctrl/Alt modified keys are sent to Neovim
+        let ctrl = key_event.is_ctrl_pressed();
+        let alt = key_event.is_alt_pressed();
+        if ctrl || alt {
+            let nvim_key = self.key_event_to_nvim_notation(key_event);
+            if !nvim_key.is_empty() {
+                self.send_keys(&nvim_key);
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
                 }
             }
-            // Let Godot insert the character
             return;
         }
 
-        // Strict mode: Send keys to Neovim
-        let nvim_key = self.key_event_to_nvim_notation(key_event);
-        if !nvim_key.is_empty() {
-            self.send_keys_insert_mode(&nvim_key);
-            if let Some(mut viewport) = self.base().get_viewport() {
-                viewport.set_input_as_handled();
+        // Implement overwrite behavior for replace mode
+        // Delete character at cursor position, then let Godot insert the new one
+        let unicode = key_event.get_unicode();
+        if unicode > 0 {
+            if let Some(ref mut editor) = self.current_editor {
+                let line = editor.get_caret_line();
+                let col = editor.get_caret_column();
+                let line_text: String = editor.get_line(line).to_string();
+
+                // Only delete if we're not at end of line
+                if (col as usize) < line_text.chars().count() {
+                    // Delete character at cursor
+                    editor.select(line, col, line, col + 1);
+                    editor.delete_selection();
+                }
             }
         }
+        // Let Godot insert the character
     }
 
     fn handle_normal_mode_input(&mut self, key_event: &Gd<godot::classes::InputEventKey>) {
@@ -1715,22 +1719,23 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle 'u' for undo (but not after 'g' - that's 'gu' for lowercase)
+        // Handle 'u' for undo - send to Neovim (Neovim Master design)
+        // (but not after 'g' - that's 'gu' for lowercase)
         if keycode == Key::U
             && !key_event.is_shift_pressed()
             && !key_event.is_ctrl_pressed()
             && self.last_key != "g"
         {
-            self.undo();
+            self.send_keys("u");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
             return;
         }
 
-        // Handle 'Ctrl+R' for redo
+        // Handle 'Ctrl+R' for redo - send to Neovim (Neovim Master design)
         if keycode == Key::R && key_event.is_ctrl_pressed() {
-            self.redo();
+            self.send_keys("<C-r>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }

@@ -23,6 +23,35 @@ const RPC_TIMEOUT_MS: u64 = 50;
 /// Extended timeout for operations that may trigger dialogs (e.g., swap file)
 const RPC_EXTENDED_TIMEOUT_MS: u64 = 500;
 
+/// Fallback Lua code when external plugin is not available
+/// Prefer using the external lua/godot_neovim/init.lua file
+const LUA_FALLBACK_CODE: &str = r#"
+-- godot_neovim: Buffer management for Godot integration (fallback)
+_G.godot_neovim = {}
+
+-- Register buffer with initial content (clears undo history)
+function _G.godot_neovim.buffer_register(bufnr, lines)
+    if bufnr == 0 then
+        bufnr = vim.api.nvim_get_current_buf()
+    end
+    local saved_ul = vim.bo[bufnr].undolevels
+    vim.bo[bufnr].undolevels = -1
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    vim.bo[bufnr].undolevels = saved_ul
+    vim.bo[bufnr].modified = false
+    return vim.api.nvim_buf_get_changedtick(bufnr)
+end
+
+-- Update buffer content (preserves undo history for 'u' command)
+function _G.godot_neovim.buffer_update(bufnr, lines)
+    if bufnr == 0 then
+        bufnr = vim.api.nvim_get_current_buf()
+    end
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    return vim.api.nvim_buf_get_changedtick(bufnr)
+end
+"#;
+
 type Writer = nvim_rs::compat::tokio::Compat<tokio::process::ChildStdin>;
 
 /// Neovim version information
@@ -156,16 +185,22 @@ impl NeovimClient {
     }
 
     /// Start Neovim process and establish connection
-    pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /// If addons_path is provided, loads the Lua plugin from that directory
+    pub fn start(
+        &mut self,
+        addons_path: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let handler = self.handler.clone();
         let neovim_arc = self.neovim.clone();
         let nvim_path = self.nvim_path.clone();
         let clean = self.clean;
+        let addons_path_owned = addons_path.map(String::from);
 
         crate::verbose_print!(
-            "[godot-neovim] Starting Neovim: {} (clean={})",
+            "[godot-neovim] Starting Neovim: {} (clean={}, addons_path={:?})",
             nvim_path,
-            clean
+            clean,
+            addons_path
         );
 
         let io_handle = self.runtime.block_on(async {
@@ -211,6 +246,37 @@ impl NeovimClient {
                 }
             } else {
                 crate::verbose_print!("[godot-neovim] Could not determine Neovim version");
+            }
+
+            // Initialize godot_neovim Lua module
+            // Prefer external plugin if addons_path is provided
+            if let Some(ref path) = addons_path_owned {
+                // Escape backslashes for Lua string (Windows paths)
+                let lua_path = path.replace('\\', "/");
+                let init_code = format!(
+                    r#"
+                    -- Add addons path to runtimepath
+                    vim.opt.runtimepath:append("{}")
+                    -- Load the godot_neovim module
+                    require('godot_neovim')
+                    "#,
+                    lua_path
+                );
+                neovim
+                    .exec_lua(&init_code, vec![])
+                    .await
+                    .map_err(|e| format!("Failed to load Lua plugin from {}: {}", path, e))?;
+                crate::verbose_print!(
+                    "[godot-neovim] Lua module loaded from external file: {}",
+                    path
+                );
+            } else {
+                // Fallback to embedded Lua code
+                neovim
+                    .exec_lua(LUA_FALLBACK_CODE, vec![])
+                    .await
+                    .map_err(|e| format!("Failed to initialize Lua module: {}", e))?;
+                crate::verbose_print!("[godot-neovim] Lua module initialized (embedded fallback)");
             }
 
             let mut nvim_lock = neovim_arc.lock().await;
@@ -387,6 +453,7 @@ impl NeovimClient {
     }
 
     /// Get buffer content
+    #[allow(dead_code)]
     pub fn get_buffer_lines(&self, start: i64, end: i64) -> Result<Vec<String>, String> {
         let neovim_arc = self.neovim.clone();
 
@@ -430,22 +497,56 @@ impl NeovimClient {
         })
     }
 
-    /// Set buffer content
-    pub fn set_buffer_lines(&self, start: i64, end: i64, lines: Vec<String>) -> Result<(), String> {
+    /// Register buffer with initial content (clears undo history)
+    /// Uses Lua function to properly manage undo history
+    pub fn buffer_register(&self, lines: Vec<String>) -> Result<i64, String> {
+        use rmpv::Value;
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
             let nvim_lock = neovim_arc.lock().await;
             if let Some(neovim) = nvim_lock.as_ref() {
-                let buffer = neovim
-                    .get_current_buf()
+                // Convert lines to Lua array
+                let lines_value: Vec<Value> = lines.into_iter().map(Value::from).collect();
+                let args = vec![Value::from(0i64), Value::Array(lines_value)];
+
+                let result = neovim
+                    .exec_lua("return _G.godot_neovim.buffer_register(...)", args)
                     .await
-                    .map_err(|e| format!("Failed to get buffer: {}", e))?;
-                buffer
-                    .set_lines(start, end, false, lines)
+                    .map_err(|e| format!("Failed to register buffer: {}", e))?;
+
+                // Return changedtick
+                result
+                    .as_i64()
+                    .ok_or_else(|| "Invalid changedtick returned".to_string())
+            } else {
+                Err("Neovim not connected".to_string())
+            }
+        })
+    }
+
+    /// Update buffer content (preserves undo history for 'u' command)
+    /// Uses Lua function to properly manage undo history
+    pub fn buffer_update(&self, lines: Vec<String>) -> Result<i64, String> {
+        use rmpv::Value;
+        let neovim_arc = self.neovim.clone();
+
+        self.runtime.block_on(async {
+            let nvim_lock = neovim_arc.lock().await;
+            if let Some(neovim) = nvim_lock.as_ref() {
+                // Convert lines to Lua array
+                let lines_value: Vec<Value> = lines.into_iter().map(Value::from).collect();
+                let args = vec![Value::from(0i64), Value::Array(lines_value)];
+
+                let result = neovim
+                    .exec_lua("return _G.godot_neovim.buffer_update(...)", args)
                     .await
-                    .map_err(|e| format!("Failed to set lines: {}", e))?;
-                Ok(())
+                    .map_err(|e| format!("Failed to update buffer: {}", e))?;
+
+                // Return changedtick
+                result
+                    .as_i64()
+                    .ok_or_else(|| "Invalid changedtick returned".to_string())
             } else {
                 Err("Neovim not connected".to_string())
             }
@@ -587,21 +688,6 @@ impl NeovimClient {
         })
     }
 
-    /// Set buffer as not modified in Neovim
-    pub fn set_buffer_not_modified(&self) {
-        let neovim_arc = self.neovim.clone();
-
-        self.runtime.block_on(async {
-            let _ = tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
-                let nvim_lock = neovim_arc.lock().await;
-                if let Some(neovim) = nvim_lock.as_ref() {
-                    let _ = neovim.command("set nomodified").await;
-                }
-            })
-            .await;
-        });
-    }
-
     /// Set buffer name (for LSP compatibility)
     /// Uses timeout to prevent blocking on E325 swap file dialogs
     pub fn set_buffer_name(&self, name: &str) -> Result<(), String> {
@@ -666,6 +752,106 @@ impl NeovimClient {
             }
         })
     }
+
+    /// Attach to buffer for change notifications
+    /// Returns true if successfully attached
+    #[allow(dead_code)]
+    pub fn buf_attach(&self, buf_id: i64) -> Result<bool, String> {
+        let neovim_arc = self.neovim.clone();
+
+        self.runtime.block_on(async {
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        // Get buffer by ID
+                        let buffers = neovim
+                            .list_bufs()
+                            .await
+                            .map_err(|e| format!("Failed to list buffers: {}", e))?;
+
+                        // Find buffer with matching ID
+                        for buf in buffers {
+                            // nvim-rs Buffer doesn't expose ID directly, use get_number
+                            if let Ok(num) = buf.get_number().await {
+                                if num == buf_id {
+                                    // Attach to buffer with send_buffer=false (we only want notifications)
+                                    let attached = buf
+                                        .attach(false, vec![])
+                                        .await
+                                        .map_err(|e| format!("Failed to attach: {}", e))?;
+                                    return Ok(attached);
+                                }
+                            }
+                        }
+                        Err("Buffer not found".to_string())
+                    } else {
+                        Err("Neovim not connected".to_string())
+                    }
+                })
+                .await;
+
+            match result {
+                Ok(inner) => inner,
+                Err(_) => Err("Timeout attaching to buffer".to_string()),
+            }
+        })
+    }
+
+    /// Attach to current buffer for change notifications
+    pub fn buf_attach_current(&self) -> Result<bool, String> {
+        let neovim_arc = self.neovim.clone();
+
+        self.runtime.block_on(async {
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        let buf = neovim
+                            .get_current_buf()
+                            .await
+                            .map_err(|e| format!("Failed to get buffer: {}", e))?;
+
+                        // Attach to buffer with send_buffer=false (we only want notifications)
+                        let attached = buf
+                            .attach(false, vec![])
+                            .await
+                            .map_err(|e| format!("Failed to attach: {}", e))?;
+                        Ok(attached)
+                    } else {
+                        Err("Neovim not connected".to_string())
+                    }
+                })
+                .await;
+
+            match result {
+                Ok(inner) => inner,
+                Err(_) => Err("Timeout attaching to buffer".to_string()),
+            }
+        })
+    }
+
+    /// Get buffer events queue
+    pub fn get_buf_events(
+        &self,
+    ) -> std::sync::Arc<tokio::sync::Mutex<std::collections::VecDeque<super::BufEvent>>> {
+        self.handler.get_buf_events()
+    }
+
+    /// Check if there are pending buffer events
+    pub fn has_buf_events(&self) -> bool {
+        self.handler
+            .get_buf_events_flag()
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Clear the buffer events flag
+    pub fn clear_buf_events_flag(&self) {
+        self.handler
+            .get_buf_events_flag()
+            .store(false, std::sync::atomic::Ordering::SeqCst)
+    }
+
 }
 
 impl Default for NeovimClient {

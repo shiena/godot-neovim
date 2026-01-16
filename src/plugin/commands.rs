@@ -1,7 +1,6 @@
 //! Command-line mode and Ex commands
 
 use super::{CodeEditExt, GodotNeovimPlugin};
-use crate::settings;
 use godot::classes::{EditorInterface, Input, InputEventKey, ResourceSaver};
 use godot::global::Key;
 use godot::prelude::*;
@@ -216,12 +215,6 @@ impl GodotNeovimPlugin {
                 // :version - show version in status label
                 else if cmd == "version" || cmd == "ver" {
                     self.cmd_version();
-                }
-                // :hybrid / :strict - switch input mode
-                else if cmd == "hybrid" {
-                    self.cmd_set_input_mode(settings::InputMode::Hybrid);
-                } else if cmd == "strict" {
-                    self.cmd_set_input_mode(settings::InputMode::Strict);
                 } else {
                     godot_warn!("[godot-neovim] Unknown command: {}", cmd);
                 }
@@ -1031,27 +1024,6 @@ impl GodotNeovimPlugin {
     pub(super) fn cmd_version(&mut self) {
         self.show_version = true;
         self.update_version_display();
-    }
-
-    /// :hybrid / :strict - Set input mode
-    pub(super) fn cmd_set_input_mode(&mut self, mode: settings::InputMode) {
-        // Temporarily disconnect settings signal to avoid borrow conflict
-        // (set_input_mode triggers settings_changed signal synchronously)
-        let editor = EditorInterface::singleton();
-        if let Some(mut editor_settings) = editor.get_editor_settings() {
-            let callable = self.base().callable("on_settings_changed");
-            editor_settings.disconnect("settings_changed", &callable);
-
-            // Now safe to change setting
-            settings::set_input_mode(mode);
-
-            // Reconnect signal
-            editor_settings.connect("settings_changed", &callable);
-        }
-
-        // Update display to show new mode
-        let display_cursor = (self.current_cursor.0 + 1, self.current_cursor.1);
-        self.update_mode_display_with_cursor(&self.current_mode.clone(), Some(display_cursor));
     }
 
     /// K - Open documentation for word under cursor
