@@ -503,6 +503,27 @@ impl GodotNeovimPlugin {
 
     /// :q - Close the current script tab by simulating Ctrl+W
     pub(super) fn cmd_close(&mut self) {
+        // Sync cursor to Neovim BEFORE closing, because on_script_changed
+        // is called after the editor is freed and we can't read cursor then
+        if let Some(ref editor) = self.current_editor {
+            if editor.is_instance_valid() {
+                let line = editor.get_caret_line() as i64 + 1; // 1-indexed for Neovim
+                let col = editor.get_caret_column() as i64;
+                if let Some(ref neovim) = self.neovim {
+                    if let Ok(client) = neovim.try_lock() {
+                        let _ = client.set_cursor(line, col);
+                        // Set flag to skip cursor sync in on_script_changed
+                        self.cursor_synced_before_close = true;
+                        crate::verbose_print!(
+                            "[godot-neovim] :q - Synced cursor to Neovim before close: ({}, {})",
+                            line,
+                            col
+                        );
+                    }
+                }
+            }
+        }
+
         // Don't clear current_editor here - if user cancels the save dialog,
         // the script stays open and we need to keep the reference.
         // When the script actually closes, on_script_changed will handle cleanup.

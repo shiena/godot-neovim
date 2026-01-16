@@ -262,6 +262,9 @@ pub struct GodotNeovimPlugin {
     /// Buffer synchronization manager (ComradeNeovim-style changedtick sync)
     #[init(val = SyncManager::new())]
     sync_manager: SyncManager,
+    /// Flag to skip cursor sync in on_script_changed (set by cmd_close)
+    #[init(val = false)]
+    cursor_synced_before_close: bool,
 }
 
 #[godot_api]
@@ -719,9 +722,15 @@ impl GodotNeovimPlugin {
     #[func]
     fn on_script_changed(&mut self, script: Option<Gd<godot::classes::Script>>) {
         // Sync cursor to Neovim before switching files
-        // This ensures Neovim remembers the cursor position for the current buffer
-        // Check if editor is still valid (it may have been freed when closing a script)
-        if !self.current_script_path.is_empty() {
+        // Skip if cursor was already synced by cmd_close (to avoid overwriting with wrong position)
+        if self.cursor_synced_before_close {
+            self.cursor_synced_before_close = false;
+            crate::verbose_print!(
+                "[godot-neovim] Skipping cursor sync (already synced before close)"
+            );
+        } else if !self.current_script_path.is_empty() {
+            // This ensures Neovim remembers the cursor position for the current buffer
+            // Check if editor is still valid (it may have been freed when closing a script)
             if let Some(ref editor) = self.current_editor {
                 if editor.is_instance_valid() {
                     let line = editor.get_caret_line() as i64 + 1; // 1-indexed for Neovim
