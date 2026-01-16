@@ -48,6 +48,9 @@ pub struct SyncManager {
 
     /// Buffer attached flag
     attached: bool,
+
+    /// Initial sync tick - events with this tick are echoes of initial sync
+    initial_sync_tick: Option<i64>,
 }
 
 impl SyncManager {
@@ -57,6 +60,7 @@ impl SyncManager {
             changed_by_nvim: false,
             pending_changes: HashMap::new(),
             attached: false,
+            initial_sync_tick: None,
         }
     }
 
@@ -66,6 +70,14 @@ impl SyncManager {
         self.changed_by_nvim = false;
         self.pending_changes.clear();
         self.attached = false;
+        self.initial_sync_tick = None;
+    }
+
+    /// Set initial sync tick to ignore echoes from initial buffer sync
+    pub fn set_initial_sync_tick(&mut self, tick: i64) {
+        self.initial_sync_tick = Some(tick);
+        self.changedtick = tick;
+        crate::verbose_print!("[SyncManager] Initial sync tick set to {}", tick);
     }
 
     /// Mark buffer as attached
@@ -85,6 +97,22 @@ impl SyncManager {
     /// Process buffer lines event from Neovim
     /// Returns Some(change) if Godot should update, None if echo
     pub fn on_nvim_buf_lines(&mut self, event: BufLinesEvent) -> Option<DocumentChange> {
+        // Check if this is an echo of initial sync
+        if let Some(initial_tick) = self.initial_sync_tick {
+            if event.changedtick <= initial_tick {
+                crate::verbose_print!(
+                    "[SyncManager] Ignoring initial sync echo for tick {} (initial={})",
+                    event.changedtick,
+                    initial_tick
+                );
+                // Clear initial sync tick after first echo is ignored
+                self.initial_sync_tick = None;
+                return None;
+            }
+            // Clear initial sync tick if we received a newer tick
+            self.initial_sync_tick = None;
+        }
+
         // Check if this is an echo of our own change
         if self.is_echo(event.changedtick) {
             crate::verbose_print!("[SyncManager] Ignoring echo for tick {}", event.changedtick);

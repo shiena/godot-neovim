@@ -31,6 +31,41 @@ function M.buffer_register(bufnr, lines)
     return vim.api.nvim_buf_get_changedtick(bufnr)
 end
 
+-- Register a buffer and attach for notifications atomically
+-- This prevents race conditions between buffer_register and buf_attach
+-- @param bufnr number: Buffer number (0 for current buffer)
+-- @param lines table: Array of lines to set
+-- @return table: { tick = changedtick, attached = boolean }
+function M.buffer_register_and_attach(bufnr, lines)
+    -- Use current buffer if bufnr is 0
+    if bufnr == 0 then
+        bufnr = vim.api.nvim_get_current_buf()
+    end
+
+    -- Save current undolevels
+    local saved_ul = vim.bo[bufnr].undolevels
+
+    -- Disable undo for this operation
+    vim.bo[bufnr].undolevels = -1
+
+    -- Set buffer content
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+
+    -- Restore undolevels
+    vim.bo[bufnr].undolevels = saved_ul
+
+    -- Clear modified flag (this is initial content)
+    vim.bo[bufnr].modified = false
+
+    -- Get changedtick before attach
+    local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+
+    -- Attach to buffer with send_buffer=false (we only want future notifications)
+    local attached = vim.api.nvim_buf_attach(bufnr, false, {})
+
+    return { tick = tick, attached = attached }
+end
+
 -- Update buffer content (preserves undo history)
 -- @param bufnr number: Buffer number (0 for current buffer)
 -- @param lines table: Array of lines to set

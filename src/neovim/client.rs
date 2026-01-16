@@ -497,9 +497,10 @@ impl NeovimClient {
         })
     }
 
-    /// Register buffer with initial content (clears undo history)
-    /// Uses Lua function to properly manage undo history
-    pub fn buffer_register(&self, lines: Vec<String>) -> Result<i64, String> {
+    /// Register buffer and attach for notifications atomically
+    /// This prevents race conditions between buffer_register and buf_attach
+    /// Returns (changedtick, attached)
+    pub fn buffer_register_and_attach(&self, lines: Vec<String>) -> Result<(i64, bool), String> {
         use rmpv::Value;
         let neovim_arc = self.neovim.clone();
 
@@ -511,14 +512,35 @@ impl NeovimClient {
                 let args = vec![Value::from(0i64), Value::Array(lines_value)];
 
                 let result = neovim
-                    .exec_lua("return _G.godot_neovim.buffer_register(...)", args)
+                    .exec_lua(
+                        "return _G.godot_neovim.buffer_register_and_attach(...)",
+                        args,
+                    )
                     .await
-                    .map_err(|e| format!("Failed to register buffer: {}", e))?;
+                    .map_err(|e| format!("Failed to register and attach buffer: {}", e))?;
 
-                // Return changedtick
-                result
-                    .as_i64()
-                    .ok_or_else(|| "Invalid changedtick returned".to_string())
+                // Parse result table { tick = number, attached = boolean }
+                if let Value::Map(map) = result {
+                    let mut tick: Option<i64> = None;
+                    let mut attached: Option<bool> = None;
+
+                    for (key, value) in map {
+                        if let Value::String(k) = key {
+                            match k.as_str() {
+                                Some("tick") => tick = value.as_i64(),
+                                Some("attached") => attached = value.as_bool(),
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    match (tick, attached) {
+                        (Some(t), Some(a)) => Ok((t, a)),
+                        _ => Err("Invalid result from buffer_register_and_attach".to_string()),
+                    }
+                } else {
+                    Err("Expected table result from buffer_register_and_attach".to_string())
+                }
             } else {
                 Err("Neovim not connected".to_string())
             }
@@ -851,7 +873,6 @@ impl NeovimClient {
             .get_buf_events_flag()
             .store(false, std::sync::atomic::Ordering::SeqCst)
     }
-
 }
 
 impl Default for NeovimClient {

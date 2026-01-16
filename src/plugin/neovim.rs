@@ -36,41 +36,57 @@ impl GodotNeovimPlugin {
         }
 
         // Use Lua functions for proper undo history management
-        // buffer_register: clears undo history (for initial load)
-        // buffer_update: preserves undo history (for ESC from insert mode)
-        let result = if clear_undo {
-            client.buffer_register(lines)
-        } else {
-            client.buffer_update(lines)
-        };
+        // For initial sync (clear_undo=true), use atomic register+attach to prevent race conditions
+        // For ESC sync (clear_undo=false), use buffer_update to preserve undo history
+        if clear_undo {
+            // Initial sync: register and attach atomically
+            match client.buffer_register_and_attach(lines) {
+                Ok((tick, attached)) => {
+                    crate::verbose_print!(
+                        "[godot-neovim] Buffer registered and attached (tick={}, attached={})",
+                        tick,
+                        attached
+                    );
 
-        match result {
-            Ok(tick) => {
-                crate::verbose_print!(
-                    "[godot-neovim] Buffer synced to Neovim successfully (tick={})",
-                    tick
-                );
-
-                // Reset sync manager and attach to buffer for change notifications
-                self.sync_manager.reset();
-                match client.buf_attach_current() {
-                    Ok(true) => {
-                        self.sync_manager.set_attached(true);
-                        crate::verbose_print!(
-                            "[godot-neovim] buf_attach: attached with changedtick={}",
-                            tick
-                        );
-                    }
-                    Ok(false) => {
-                        crate::verbose_print!("[godot-neovim] buf_attach: returned false");
-                    }
-                    Err(e) => {
-                        crate::verbose_print!("[godot-neovim] buf_attach: error: {}", e);
-                    }
+                    // Reset sync manager and set initial sync tick
+                    self.sync_manager.reset();
+                    self.sync_manager.set_initial_sync_tick(tick);
+                    self.sync_manager.set_attached(attached);
+                }
+                Err(e) => {
+                    godot_error!("[godot-neovim] Failed to register buffer: {}", e);
                 }
             }
-            Err(e) => {
-                godot_error!("[godot-neovim] Failed to sync buffer: {}", e);
+        } else {
+            // ESC sync: update buffer preserving undo history
+            match client.buffer_update(lines) {
+                Ok(tick) => {
+                    crate::verbose_print!("[godot-neovim] Buffer updated (tick={})", tick);
+
+                    // Reset sync manager and set initial sync tick to ignore echo
+                    self.sync_manager.reset();
+                    self.sync_manager.set_initial_sync_tick(tick);
+
+                    // Re-attach to buffer for change notifications
+                    match client.buf_attach_current() {
+                        Ok(true) => {
+                            self.sync_manager.set_attached(true);
+                            crate::verbose_print!(
+                                "[godot-neovim] buf_attach: attached with changedtick={}",
+                                tick
+                            );
+                        }
+                        Ok(false) => {
+                            crate::verbose_print!("[godot-neovim] buf_attach: returned false");
+                        }
+                        Err(e) => {
+                            crate::verbose_print!("[godot-neovim] buf_attach: error: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    godot_error!("[godot-neovim] Failed to update buffer: {}", e);
+                }
             }
         }
 
@@ -99,6 +115,16 @@ impl GodotNeovimPlugin {
                     // Still set filetype for syntax highlighting
                     let _ = client.command("set filetype=gdscript");
                 }
+            }
+        }
+
+        // For initial sync (clear_undo=true), mark buffer as saved to prevent dirty flag
+        // This handles the case where buf_attach triggers nvim_buf_lines_event echo
+        if clear_undo {
+            drop(client);
+            if let Some(ref mut editor) = self.current_editor {
+                editor.tag_saved_version();
+                crate::verbose_print!("[godot-neovim] Initial sync: marked as saved");
             }
         }
     }
