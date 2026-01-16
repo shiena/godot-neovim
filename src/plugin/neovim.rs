@@ -314,10 +314,11 @@ impl GodotNeovimPlugin {
             self.clear_visual_selection();
         }
 
-        // Sync Neovim's modified flag to Godot's dirty flag
-        // When Neovim reports buffer as unmodified (e.g., after undo back to initial state),
-        // update Godot's saved_version to clear the dirty marker
-        self.sync_modified_flag();
+        // Sync modified flag only after undo/redo operations
+        // This handles the case where user undoes back to the initial state
+        if keys == "u" || keys == "<C-r>" {
+            self.sync_modified_flag();
+        }
 
         true
     }
@@ -718,9 +719,8 @@ impl GodotNeovimPlugin {
     }
 
     /// Sync Neovim's modified flag to Godot's dirty flag
-    /// When Neovim reports buffer as unmodified, update Godot's saved_version
-    /// to clear the dirty marker (e.g., after undo back to initial state)
-    pub(super) fn sync_modified_flag(&mut self) {
+    /// Called after undo/redo to handle the case where buffer returns to initial state
+    fn sync_modified_flag(&mut self) {
         let Some(ref neovim) = self.neovim else {
             return;
         };
