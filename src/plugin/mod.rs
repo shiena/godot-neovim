@@ -666,6 +666,21 @@ impl GodotNeovimPlugin {
         }
     }
 
+    fn disconnect_caret_changed_signal(&mut self) {
+        // Create callable first to avoid borrow conflicts
+        let callable = self.base().callable("on_caret_changed");
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        // Disconnect from caret_changed signal before closing
+        if editor.is_connected("caret_changed", &callable) {
+            editor.disconnect("caret_changed", &callable);
+            crate::verbose_print!("[godot-neovim] Disconnected from caret_changed signal");
+        }
+    }
+
     #[func]
     fn on_caret_changed(&mut self) {
         // Skip sync in Insert/Replace modes - cursor moves with every keystroke
@@ -677,6 +692,11 @@ impl GodotNeovimPlugin {
         let Some(ref editor) = self.current_editor else {
             return;
         };
+
+        // Check if editor is still valid (may have been freed)
+        if !editor.is_instance_valid() {
+            return;
+        }
 
         // Get current cursor position from Godot editor
         let line = editor.get_caret_line();

@@ -39,13 +39,19 @@ impl GodotNeovimPlugin {
         };
 
         // Get text from Godot editor for new buffers
+        // Use split('\n') and strip \r to handle both Unix and Windows line endings
         let text = editor.get_text().to_string();
-        let lines: Vec<String> = text.lines().map(String::from).collect();
+        let lines: Vec<String> = text
+            .split('\n')
+            .map(|s| s.trim_end_matches('\r').to_string())
+            .collect();
 
+        let godot_line_count = editor.get_line_count();
         crate::verbose_print!(
-            "[godot-neovim] Switching to buffer: {} ({} lines)",
+            "[godot-neovim] Switching to buffer: {} (text {} lines, Godot {} lines)",
             abs_path,
-            lines.len()
+            lines.len(),
+            godot_line_count
         );
 
         // Switch to buffer (creates if not exists)
@@ -103,8 +109,12 @@ impl GodotNeovimPlugin {
         };
 
         // Get text from Godot editor
+        // Use split('\n') and strip \r to handle both Unix and Windows line endings
         let text = editor.get_text().to_string();
-        let lines: Vec<String> = text.lines().map(String::from).collect();
+        let lines: Vec<String> = text
+            .split('\n')
+            .map(|s| s.trim_end_matches('\r').to_string())
+            .collect();
 
         crate::verbose_print!("[godot-neovim] Syncing {} lines to Neovim", lines.len());
 
@@ -610,9 +620,26 @@ impl GodotNeovimPlugin {
             }
         } else if first == last {
             // Insertion: insert new lines at first
-            for (i, line_text) in change.new_lines.iter().enumerate() {
-                let insert_at = first + i as i32;
-                editor.insert_line_at(insert_at, line_text);
+            let current_line_count = editor.get_line_count();
+            if first >= current_line_count {
+                // Appending at end of buffer: add all lines at once using set_text
+                // This avoids index out of bounds error with insert_line_at
+                let text = editor.get_text().to_string();
+                let new_lines_text = change.new_lines.join("\n");
+                let new_text = if text.ends_with('\n') {
+                    format!("{}{}\n", text, new_lines_text)
+                } else if text.is_empty() {
+                    format!("{}\n", new_lines_text)
+                } else {
+                    format!("{}\n{}\n", text, new_lines_text)
+                };
+                editor.set_text(&new_text);
+            } else {
+                // Insert within buffer: use insert_line_at for each line
+                for (i, line_text) in change.new_lines.iter().enumerate() {
+                    let insert_at = first + i as i32;
+                    editor.insert_line_at(insert_at, line_text);
+                }
             }
         } else {
             // Replacement: delete old lines, insert new lines
@@ -623,9 +650,37 @@ impl GodotNeovimPlugin {
                 }
             }
             // Then, insert new lines
-            for (i, line_text) in change.new_lines.iter().enumerate() {
-                let insert_at = first + i as i32;
-                editor.insert_line_at(insert_at, line_text);
+            let current_line_count = editor.get_line_count();
+            if first >= current_line_count {
+                // Appending at end after deletion: use set_text
+                let text = editor.get_text().to_string();
+                let new_lines_text = change.new_lines.join("\n");
+                let new_text = if text.ends_with('\n') {
+                    format!("{}{}\n", text, new_lines_text)
+                } else if text.is_empty() {
+                    format!("{}\n", new_lines_text)
+                } else {
+                    format!("{}\n{}\n", text, new_lines_text)
+                };
+                editor.set_text(&new_text);
+            } else {
+                for (i, line_text) in change.new_lines.iter().enumerate() {
+                    let insert_at = first + i as i32;
+                    if insert_at >= editor.get_line_count() {
+                        // Reached end of buffer during insertion
+                        let text = editor.get_text().to_string();
+                        let remaining_lines: Vec<&str> = change.new_lines[i..].iter().map(|s| s.as_str()).collect();
+                        let new_lines_text = remaining_lines.join("\n");
+                        let new_text = if text.ends_with('\n') {
+                            format!("{}{}\n", text, new_lines_text)
+                        } else {
+                            format!("{}\n{}\n", text, new_lines_text)
+                        };
+                        editor.set_text(&new_text);
+                        break;
+                    }
+                    editor.insert_line_at(insert_at, line_text);
+                }
             }
         }
 

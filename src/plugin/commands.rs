@@ -120,10 +120,7 @@ impl GodotNeovimPlugin {
             "w" => self.cmd_save(),
             "q" => self.cmd_close(),
             "qa" | "qall" => self.cmd_close_all(),
-            "wq" | "x" => {
-                self.cmd_save();
-                self.cmd_close();
-            }
+            "wq" | "x" => self.cmd_save_and_close(),
             "wa" | "wall" => self.cmd_save_all(),
             "wqa" | "wqall" | "xa" | "xall" => {
                 self.cmd_save_all();
@@ -476,22 +473,36 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// ZZ - Save and close (using ResourceSaver for synchronous save)
+    /// ZZ/:wq - Save and close (sync CodeEdit content to Script, then save)
     pub(super) fn cmd_save_and_close(&mut self) {
         let editor = EditorInterface::singleton();
         if let Some(mut script_editor) = editor.get_script_editor() {
-            if let Some(current_script) = script_editor.get_current_script() {
+            if let Some(mut current_script) = script_editor.get_current_script() {
                 let path = current_script.get_path();
                 if !path.is_empty() {
+                    // Sync CodeEdit content to Script resource before saving
+                    if let Some(ref code_editor) = self.current_editor {
+                        if code_editor.is_instance_valid() {
+                            let text = code_editor.get_text();
+                            current_script.set_source_code(&text);
+                        }
+                    }
+
                     // Save the script using ResourceSaver (synchronous)
                     let result = ResourceSaver::singleton()
                         .save_ex(&current_script)
                         .path(&path)
                         .done();
                     if result == godot::global::Error::OK {
-                        crate::verbose_print!("[godot-neovim] ZZ - Saved: {}", path);
+                        // Mark CodeEdit as saved to clear dirty flag
+                        if let Some(ref mut code_editor) = self.current_editor {
+                            if code_editor.is_instance_valid() {
+                                code_editor.tag_saved_version();
+                            }
+                        }
+                        crate::verbose_print!("[godot-neovim] :wq/ZZ - Saved: {}", path);
                     } else {
-                        godot_warn!("[godot-neovim] ZZ - Failed to save: {}", path);
+                        godot_warn!("[godot-neovim] :wq/ZZ - Failed to save: {}", path);
                     }
                 }
             }
@@ -503,6 +514,10 @@ impl GodotNeovimPlugin {
 
     /// :q - Close the current script tab by simulating Ctrl+W
     pub(super) fn cmd_close(&mut self) {
+        // Disconnect from caret_changed signal BEFORE closing to avoid
+        // accessing freed CodeEdit instance
+        self.disconnect_caret_changed_signal();
+
         // Sync cursor to Neovim BEFORE closing, because on_script_changed
         // is called after the editor is freed and we can't read cursor then
         if let Some(ref editor) = self.current_editor {
@@ -547,6 +562,9 @@ impl GodotNeovimPlugin {
 
     /// ZQ - Close without saving (discard changes)
     pub(super) fn cmd_close_discard(&mut self) {
+        // Disconnect from caret_changed signal BEFORE closing
+        self.disconnect_caret_changed_signal();
+
         let editor = EditorInterface::singleton();
         if let Some(mut script_editor) = editor.get_script_editor() {
             // Reload the script from disk and sync the CodeEdit
@@ -592,6 +610,9 @@ impl GodotNeovimPlugin {
 
     /// :qa/:qall - Close all script tabs
     pub(super) fn cmd_close_all(&mut self) {
+        // Disconnect from caret_changed signal BEFORE closing
+        self.disconnect_caret_changed_signal();
+
         // Don't clear references here - if user cancels save dialogs,
         // scripts stay open and we need to keep the references.
         // When scripts actually close, on_script_changed will handle cleanup.
