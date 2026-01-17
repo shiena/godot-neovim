@@ -212,10 +212,47 @@ function M.get_buffer_info(path)
     }
 end
 
+-- Send keys (async - keys are processed after RPC returns)
+-- @param keys string: Keys to send (Neovim notation like "<Space>", "j", etc.)
+-- @return table: { sent = true }
+function M.send_keys(keys)
+    -- Just queue the keys - they'll be processed by event loop after RPC returns
+    vim.api.nvim_input(keys)
+    return { sent = true }
+end
+
+-- Get current mode and cursor (for polling)
+-- @return table: { mode, line, col }
+function M.get_state()
+    local mode_info = vim.api.nvim_get_mode()
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    return {
+        mode = mode_info.mode,
+        line = cursor[1],
+        col = cursor[2],
+        blocking = mode_info.blocking
+    }
+end
+
 -- Setup function (called on plugin load)
 function M.setup()
     -- Register global functions for RPC access
     _G.godot_neovim = M
+
+    -- Create autocmd group for godot-neovim
+    local augroup = vim.api.nvim_create_augroup('godot_neovim', { clear = true })
+
+    -- Send cursor position on cursor movement
+    -- This sends actual byte position (not screen position like grid_cursor_goto)
+    vim.api.nvim_create_autocmd({'CursorMoved', 'CursorMovedI'}, {
+        group = augroup,
+        callback = function()
+            local cursor = vim.api.nvim_win_get_cursor(0)  -- {row, col}, row is 1-indexed, col is 0-indexed byte position
+            local mode = vim.api.nvim_get_mode().mode
+            -- Send notification with actual cursor position
+            vim.rpcnotify(0, "godot_cursor_moved", cursor[1], cursor[2], mode)
+        end
+    })
 
     -- Create user commands for debugging
     vim.api.nvim_create_user_command('GodotNeovimInfo', function()

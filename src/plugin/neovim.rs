@@ -231,13 +231,10 @@ impl GodotNeovimPlugin {
         self.current_cursor = (final_line, col as i64);
     }
 
-    /// Send keys to Neovim and sync cursor
-    /// Returns true if command completed, false if operator pending
-    /// Note: Buffer changes are handled via nvim_buf_lines_event (event-driven)
-    ///       Cursor sync is done synchronously (redraw events are unreliable)
+    /// Send keys to Neovim (fire-and-forget - state comes via redraw events)
+    /// Returns true always (keys queued for processing)
+    /// Note: Keys are processed by Neovim's event loop, state updates come via redraw
     pub(super) fn send_keys(&mut self, keys: &str) -> bool {
-        use crate::neovim::BufEvent;
-
         crate::verbose_print!("[godot-neovim] send_keys: {}", keys);
 
         let Some(ref neovim) = self.neovim else {
@@ -252,104 +249,18 @@ impl GodotNeovimPlugin {
             return false;
         };
 
-        // Send input to Neovim
-        if let Err(e) = client.input(keys) {
+        // Send keys asynchronously (fire-and-forget)
+        // State updates will come via redraw events (mode_change, grid_cursor_goto)
+        if let Err(e) = client.input_async(keys) {
             godot_error!("[godot-neovim] Failed to send keys: {}", e);
             return false;
         }
-        crate::verbose_print!("[godot-neovim] Key sent successfully");
 
-        // Poll to receive buffer events from Neovim
-        client.poll();
-
-        // Query mode and cursor synchronously
-        // (redraw events are batched and unreliable for immediate feedback)
-        let (mode, blocking) = client.get_mode();
-        let old_mode = self.current_mode.clone();
-        self.current_mode = mode.clone();
-
-        // Check for operator-pending mode (d, c, y waiting for motion)
-        if blocking && mode != "i" && mode != "R" {
-            crate::verbose_print!(
-                "[godot-neovim] Operator pending (mode={}, blocking={})",
-                mode,
-                blocking
-            );
-            return false;
-        }
-
-        // Collect buffer events BEFORE getting cursor
-        // (buffer changes affect cursor position in Godot)
-        let buf_events: Vec<BufEvent> = if client.has_buf_events() {
-            let events_arc = client.get_buf_events();
-            let result = if let Ok(mut events_guard) = events_arc.try_lock() {
-                client.clear_buf_events_flag();
-                events_guard.drain(..).collect()
-            } else {
-                Vec::new()
-            };
-            result
-        } else {
-            Vec::new()
-        };
-
-        // Get cursor position
-        let cursor = client.get_cursor().unwrap_or((1, 0));
-        crate::verbose_print!(
-            "[godot-neovim] After key: mode={}, cursor=({}, {})",
-            mode,
-            cursor.0,
-            cursor.1
-        );
-
-        // Release lock before updating UI
-        drop(client);
-
-        // Apply buffer changes FIRST (before cursor sync)
-        for event in buf_events {
-            match event {
-                BufEvent::Lines(buf_lines_event) => {
-                    if let Some(change) = self.sync_manager.on_nvim_buf_lines(buf_lines_event) {
-                        self.apply_nvim_change(&change);
-                    }
-                }
-                BufEvent::ChangedTick { tick, .. } => {
-                    self.sync_manager.on_nvim_changedtick(tick);
-                }
-                BufEvent::Detach { buf } => {
-                    crate::verbose_print!("[godot-neovim] Buffer {} detached", buf);
-                    self.sync_manager.set_attached(false);
-                }
-            }
-        }
-
-        // Update cursor state (convert to 0-indexed)
-        self.current_cursor = (cursor.0 - 1, cursor.1);
-
-        // Sync cursor to Godot editor (after buffer is updated)
-        self.sync_cursor_from_grid(self.current_cursor);
-
-        // Update mode display
-        self.update_mode_display_with_cursor(&mode, Some(cursor));
-
-        // Handle visual mode selection
-        let was_visual = Self::is_visual_mode(&old_mode);
-        let is_visual = Self::is_visual_mode(&mode);
-
-        if is_visual {
-            if mode == "V" {
-                self.update_visual_line_selection();
-            } else {
-                self.update_visual_selection();
-            }
-        } else if was_visual {
-            self.clear_visual_selection();
-        }
+        crate::verbose_print!("[godot-neovim] Key sent (async): {}", keys);
 
         // Sync modified flag only after undo/redo operations
-        // This handles the case where user undoes back to the initial state
         if keys == "u" || keys == "<C-r>" {
-            self.sync_modified_flag();
+            self.pending_modified_sync = true;
         }
 
         true
@@ -512,17 +423,23 @@ impl GodotNeovimPlugin {
         // First, try to send any queued keys
         self.process_pending_keys();
 
+        // Check if we need to sync modified flag after undo/redo
+        let needs_modified_sync = self.pending_modified_sync;
+        self.pending_modified_sync = false;
+
         // Collect data from Neovim while holding lock, then release and process
-        let (state_update, buf_events) = {
+        let (state_from_redraw, buf_events) = {
             let Some(ref neovim) = self.neovim else {
                 return;
             };
 
             let Ok(client) = neovim.try_lock() else {
+                // Restore flags if we couldn't get lock
+                self.pending_modified_sync = needs_modified_sync;
                 return;
             };
 
-            // Poll the runtime to process async events
+            // Poll the runtime to process async events (including redraw)
             client.poll();
 
             // Collect buffer events
@@ -539,10 +456,19 @@ impl GodotNeovimPlugin {
                 Vec::new()
             };
 
-            // Get state update
-            let state_update = client.take_state();
+            // Get state from redraw events (mode_change, grid_cursor_goto)
+            // This is non-blocking and doesn't make RPC calls
+            let state_from_redraw = client.take_state();
+            if let Some((ref mode, cursor)) = state_from_redraw {
+                crate::verbose_print!(
+                    "[godot-neovim] State from redraw: mode={}, cursor=({}, {})",
+                    mode,
+                    cursor.0,
+                    cursor.1
+                );
+            }
 
-            (state_update, buf_events)
+            (state_from_redraw, buf_events)
         };
         // Lock is now released
 
@@ -564,47 +490,37 @@ impl GodotNeovimPlugin {
             }
         }
 
-        // Process state update (mode, cursor)
-        if let Some((mode, cursor)) = state_update {
-            crate::verbose_print!(
-                "[godot-neovim] Got update: mode={}, cursor=({}, {})",
-                mode,
-                cursor.0,
-                cursor.1
-            );
-
+        // Process state update from redraw events
+        if let Some((mode, cursor)) = state_from_redraw {
             let old_mode = self.current_mode.clone();
             self.current_mode = mode.clone();
             self.current_cursor = cursor;
 
             // Update mode display
-            // Convert grid cursor (0-indexed) to Neovim cursor (1-indexed for display)
             let display_cursor = (cursor.0 + 1, cursor.1);
             self.update_mode_display_with_cursor(&mode, Some(display_cursor));
 
             // Sync cursor to Godot editor
             self.sync_cursor_from_grid(cursor);
 
-            // If exiting insert or replace mode, sync buffer from Godot to Neovim
-            if (old_mode == "i" && mode != "i") || (old_mode == "R" && mode != "R") {
-                self.sync_buffer_to_neovim();
-            }
-
             // Handle visual mode selection
             let was_visual = Self::is_visual_mode(&old_mode);
             let is_visual = Self::is_visual_mode(&mode);
 
             if is_visual {
-                // Update visual selection display
                 if mode == "V" {
                     self.update_visual_line_selection();
                 } else {
                     self.update_visual_selection();
                 }
             } else if was_visual {
-                // Exiting visual mode - clear selection
                 self.clear_visual_selection();
             }
+        }
+
+        // Sync modified flag if pending (after undo/redo)
+        if needs_modified_sync {
+            self.sync_modified_flag();
         }
     }
 
@@ -725,12 +641,19 @@ impl GodotNeovimPlugin {
         let safe_line = line.min(line_count - 1).max(0);
         let safe_col = column.max(0);
 
+        // Set flag to prevent on_caret_changed from triggering sync_cursor_to_neovim
+        // This is needed because set_caret_line and set_caret_column are called separately,
+        // which can trigger on_caret_changed with intermediate cursor positions
+        self.syncing_from_grid = true;
+
         // Update last_synced_cursor BEFORE setting caret to prevent
         // caret_changed signal from triggering sync_cursor_to_neovim
         self.last_synced_cursor = (safe_line as i64, safe_col as i64);
 
         editor.set_caret_line(safe_line);
         editor.set_caret_column(safe_col);
+
+        self.syncing_from_grid = false;
     }
 
     /// Sync buffer from Neovim to Godot editor

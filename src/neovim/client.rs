@@ -18,7 +18,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 const NEOVIM_REQUIRED_VERSION: (u64, u64, u64) = (0, 9, 0);
 
 /// Default timeout for RPC commands (milliseconds)
-const RPC_TIMEOUT_MS: u64 = 50;
+const RPC_TIMEOUT_MS: u64 = 100;
 
 /// Extended timeout for operations that may trigger dialogs (e.g., swap file)
 const RPC_EXTENDED_TIMEOUT_MS: u64 = 500;
@@ -150,6 +150,9 @@ impl NeovimClient {
     }
 
     /// Take pending updates (clears the flag) and return current state
+    /// Prefers actual_cursor (from CursorMoved autocmd) over grid cursor (from redraw)
+    /// because actual_cursor is byte position, while grid cursor is screen position
+    #[allow(dead_code)]
     pub fn take_state(&self) -> Option<(String, (i64, i64))> {
         if !self.has_updates.swap(false, Ordering::SeqCst) {
             return None;
@@ -157,8 +160,15 @@ impl NeovimClient {
 
         // Try to get state without blocking
         self.runtime.block_on(async {
-            let state = self.state.lock().await;
-            Some((state.mode.clone(), state.cursor))
+            let mut state = self.state.lock().await;
+            // Prefer actual_cursor (byte position) over grid cursor (screen position)
+            // This is important for files with tab characters
+            let cursor = if let Some(actual) = state.actual_cursor.take() {
+                actual
+            } else {
+                state.cursor
+            };
+            Some((state.mode.clone(), cursor))
         })
     }
 
@@ -166,8 +176,13 @@ impl NeovimClient {
     #[allow(dead_code)]
     pub fn get_state(&self) -> (String, (i64, i64)) {
         self.runtime.block_on(async {
-            let state = self.state.lock().await;
-            (state.mode.clone(), state.cursor)
+            let mut state = self.state.lock().await;
+            let cursor = if let Some(actual) = state.actual_cursor.take() {
+                actual
+            } else {
+                state.cursor
+            };
+            (state.mode.clone(), cursor)
         })
     }
 
@@ -176,8 +191,11 @@ impl NeovimClient {
     pub fn poll(&self) {
         self.runtime.block_on(async {
             // Give the runtime a chance to process IO events
-            // A short sleep allows tokio to poll IO
-            tokio::time::sleep(std::time::Duration::from_micros(100)).await;
+            // 1ms allows enough time for:
+            // 1. spawn() tasks to execute (input_async)
+            // 2. Neovim to process input and send redraw events
+            // 3. IO handler to receive and process events
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         });
     }
 
@@ -331,6 +349,7 @@ impl NeovimClient {
 
     /// Get current mode from Neovim directly with timeout
     /// Returns (mode, blocking) tuple
+    #[allow(dead_code)]
     pub fn get_mode(&self) -> (String, bool) {
         let neovim_arc = self.neovim.clone();
 
@@ -368,31 +387,139 @@ impl NeovimClient {
                             }
                         }
                     }
+                    crate::verbose_print!(
+                        "[godot-neovim] get_mode: mode={}, blocking={} (from Neovim)",
+                        mode,
+                        blocking
+                    );
                     (mode, blocking)
                 }
-                _ => {
-                    // Timeout or error - return current cached mode
-                    ("n".to_string(), true) // blocking=true indicates pending
+                Ok(None) => {
+                    crate::verbose_print!("[godot-neovim] get_mode: None response");
+                    ("n".to_string(), false)
+                }
+                Err(_) => {
+                    // Timeout or error - assume not blocking to allow normal operation
+                    crate::verbose_print!("[godot-neovim] get_mode: timeout/error");
+                    ("n".to_string(), false)
                 }
             }
         })
     }
 
-    /// Send keys to Neovim
+    /// Send keys to Neovim with timeout
     pub fn input(&self, keys: &str) -> Result<(), String> {
         let neovim_arc = self.neovim.clone();
         let keys = keys.to_string();
 
         self.runtime.block_on(async {
-            let nvim_lock = neovim_arc.lock().await;
-            if let Some(neovim) = nvim_lock.as_ref() {
-                neovim
-                    .input(&keys)
-                    .await
-                    .map_err(|e| format!("Failed to send input: {}", e))?;
-                Ok(())
-            } else {
-                Err("Neovim not connected".to_string())
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        // nvim_input returns bytes written, but we only care about success
+                        neovim
+                            .input(&keys)
+                            .await
+                            .map(|_| ())
+                            .map_err(|e| format!("Failed to send input: {}", e))
+                    } else {
+                        Err("Neovim not connected".to_string())
+                    }
+                })
+                .await;
+
+            match result {
+                Ok(inner) => inner,
+                Err(_) => Err("Timeout sending input".to_string()),
+            }
+        })
+    }
+
+    /// Send keys asynchronously (keys are processed after RPC returns)
+    /// Uses external Lua function
+    #[allow(dead_code)]
+    pub fn send_keys_async(&self, keys: &str) -> Result<(), String> {
+        use rmpv::Value;
+        let neovim_arc = self.neovim.clone();
+        let keys = keys.to_string();
+
+        self.runtime.block_on(async {
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        neovim
+                            .exec_lua(
+                                "return _G.godot_neovim.send_keys(...)",
+                                vec![Value::from(keys)],
+                            )
+                            .await
+                            .map_err(|e| format!("Failed to send keys: {}", e))?;
+                        Ok(())
+                    } else {
+                        Err("Neovim not connected".to_string())
+                    }
+                })
+                .await;
+
+            match result {
+                Ok(inner) => inner,
+                Err(_) => Err("Timeout sending keys".to_string()),
+            }
+        })
+    }
+
+    /// Get current mode and cursor position via Lua
+    /// Returns (mode, cursor_line, cursor_col) where line is 1-indexed
+    #[allow(dead_code)]
+    pub fn get_state_lua(&self) -> Result<(String, i64, i64), String> {
+        use rmpv::Value;
+        let neovim_arc = self.neovim.clone();
+
+        self.runtime.block_on(async {
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        let result = neovim
+                            .exec_lua("return _G.godot_neovim.get_state()", vec![])
+                            .await
+                            .map_err(|e| format!("Failed to get state: {}", e))?;
+
+                        // Parse result { mode, line, col }
+                        if let Value::Map(map) = result {
+                            let mut mode = "n".to_string();
+                            let mut line = 1i64;
+                            let mut col = 0i64;
+
+                            for (k, v) in map {
+                                if let Value::String(key) = k {
+                                    match key.as_str() {
+                                        Some("mode") => {
+                                            if let Value::String(m) = v {
+                                                mode = m.as_str().unwrap_or("n").to_string();
+                                            }
+                                        }
+                                        Some("line") => line = v.as_i64().unwrap_or(1),
+                                        Some("col") => col = v.as_i64().unwrap_or(0),
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            Ok((mode, line, col))
+                        } else {
+                            Err("Invalid response from Lua".to_string())
+                        }
+                    } else {
+                        Err("Neovim not connected".to_string())
+                    }
+                })
+                .await;
+
+            match result {
+                Ok(inner) => inner,
+                Err(_) => Err("Timeout getting state".to_string()),
             }
         })
     }

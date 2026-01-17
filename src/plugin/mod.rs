@@ -270,6 +270,13 @@ pub struct GodotNeovimPlugin {
     /// not the Godot line, to prevent loops when user clicks on clamped line with different columns
     #[init(val = -1)]
     last_nvim_synced_line: i64,
+    /// Flag for pending modified flag sync (after undo/redo)
+    #[init(val = false)]
+    pending_modified_sync: bool,
+    /// Flag to ignore caret_changed during sync_cursor_from_grid
+    /// Prevents RPC calls during caret update (which causes timeout on rapid key presses)
+    #[init(val = false)]
+    syncing_from_grid: bool,
 }
 
 #[godot_api]
@@ -688,6 +695,12 @@ impl GodotNeovimPlugin {
 
     #[func]
     fn on_caret_changed(&mut self) {
+        // Skip if syncing from grid (to prevent RPC during caret update)
+        // This happens when set_caret_line/column are called from sync_cursor_from_grid
+        if self.syncing_from_grid {
+            return;
+        }
+
         // Skip sync in Insert/Replace modes - cursor moves with every keystroke
         // and Neovim isn't receiving the input, so syncing is meaningless and causes freezes
         if self.current_mode == "i" || self.current_mode == "R" {

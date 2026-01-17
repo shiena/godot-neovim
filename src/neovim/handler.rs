@@ -12,10 +12,13 @@ use tokio::sync::Mutex;
 pub struct NeovimState {
     /// Current mode (n, i, v, etc.)
     pub mode: String,
-    /// Cursor position (line, col) - 0-indexed
+    /// Cursor position (line, col) - 0-indexed (from grid_cursor_goto, screen position)
     pub cursor: (i64, i64),
     /// Grid ID for cursor
     pub cursor_grid: i64,
+    /// Actual cursor position (line, col) - line is 0-indexed, col is byte position
+    /// This comes from CursorMoved autocmd and is the true buffer position
+    pub actual_cursor: Option<(i64, i64)>,
 }
 
 /// Buffer events from nvim_buf_attach
@@ -50,6 +53,7 @@ impl NeovimHandler {
                 mode: "n".to_string(),
                 cursor: (0, 0),
                 cursor_grid: 1,
+                actual_cursor: None,
             })),
             has_updates: Arc::new(AtomicBool::new(false)),
             buf_events: Arc::new(Mutex::new(VecDeque::new())),
@@ -149,6 +153,35 @@ impl NeovimHandler {
         let mut events = self.buf_events.lock().await;
         events.push_back(BufEvent::Lines(event));
         self.has_buf_events.store(true, Ordering::SeqCst);
+    }
+
+    /// Parse godot_cursor_moved notification from Lua CursorMoved autocmd
+    /// args: [line, col, mode] - line is 1-indexed, col is 0-indexed byte position
+    async fn handle_godot_cursor_moved(&self, args: Vec<Value>) {
+        if args.len() < 3 {
+            return;
+        }
+
+        let line = match &args[0] {
+            Value::Integer(i) => i.as_i64().unwrap_or(1),
+            _ => return,
+        };
+
+        let col = match &args[1] {
+            Value::Integer(i) => i.as_i64().unwrap_or(0),
+            _ => return,
+        };
+
+        let mode = match &args[2] {
+            Value::String(s) => s.as_str().unwrap_or("n").to_string(),
+            _ => "n".to_string(),
+        };
+
+        // Update state with actual cursor position (convert to 0-indexed line)
+        let mut state = self.state.lock().await;
+        state.actual_cursor = Some((line - 1, col));
+        state.mode = mode;
+        self.has_updates.store(true, Ordering::SeqCst);
     }
 
     /// Parse godot_buf_lines notification from Lua on_lines callback
@@ -261,41 +294,28 @@ impl NeovimHandler {
 
     async fn handle_redraw(&self, args: Vec<Value>) {
         let mut state = self.state.lock().await;
-        let mut updated = false;
 
+        // Neovim redraw format: ["redraw", ["event_name", args...], ["event_name2", args...], ...]
+        // Each arg is an event: ["event_name", [batch1_args], [batch2_args], ...]
         for arg in args {
-            if let Value::Array(raw_events) = arg {
-                for raw_event in raw_events {
-                    if let Value::Array(event_data) = raw_event {
-                        // Use typed event parsing
-                        match RedrawEvent::parse(&event_data) {
-                            Ok(events) => {
-                                for event in events {
-                                    match event {
-                                        RedrawEvent::ModeChange { mode, .. } => {
-                                            state.mode = mode;
-                                            updated = true;
-                                        }
-                                        RedrawEvent::GridCursorGoto { grid, row, col } => {
-                                            state.cursor_grid = grid as i64;
-                                            state.cursor = (row as i64, col as i64);
-                                            updated = true;
-                                        }
-                                        RedrawEvent::Flush => {
-                                            // Flush signals end of redraw batch
-                                            if updated {
-                                                self.has_updates.store(true, Ordering::SeqCst);
-                                            }
-                                        }
-                                        RedrawEvent::Unknown(_) => {
-                                            // Ignore unknown events
-                                        }
-                                    }
-                                }
+            if let Value::Array(event_data) = arg {
+                // event_data = ["event_name", args1, args2, ...]
+                // Use typed event parsing
+                if let Ok(events) = RedrawEvent::parse(&event_data) {
+                    for event in events {
+                        match event {
+                            RedrawEvent::ModeChange { mode, .. } => {
+                                state.mode = mode;
+                                self.has_updates.store(true, Ordering::SeqCst);
                             }
-                            Err(_) => {
-                                // Silently ignore parse errors for now
-                                // (Cannot log here - runs on tokio worker thread)
+                            RedrawEvent::GridCursorGoto { grid, row, col } => {
+                                state.cursor_grid = grid as i64;
+                                state.cursor = (row as i64, col as i64);
+                                self.has_updates.store(true, Ordering::SeqCst);
+                            }
+                            RedrawEvent::Flush | RedrawEvent::Unknown(_) => {
+                                // Flush: No longer needed since we set flag immediately
+                                // Unknown: Silently ignore unhandled events
                             }
                         }
                     }
@@ -328,6 +348,7 @@ impl Handler for NeovimHandler {
             "nvim_buf_changedtick_event" => self.handle_buf_changedtick_event(args).await,
             "nvim_buf_detach_event" => self.handle_buf_detach_event(args).await,
             "godot_buf_lines" => self.handle_godot_buf_lines(args).await,
+            "godot_cursor_moved" => self.handle_godot_cursor_moved(args).await,
             _ => {}
         }
     }
