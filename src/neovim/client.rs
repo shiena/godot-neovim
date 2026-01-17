@@ -491,6 +491,7 @@ impl NeovimClient {
     }
 
     /// Get buffer line count
+    #[allow(dead_code)]
     pub fn get_line_count(&self) -> Result<i64, String> {
         let neovim_arc = self.neovim.clone();
 

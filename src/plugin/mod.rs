@@ -1,7 +1,7 @@
 //! Godot Neovim Plugin - Main module
 
-/// Plugin version from Cargo.toml
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Plugin version: Cargo.toml version for release, build datetime for debug
+const VERSION: &str = env!("BUILD_VERSION");
 
 mod commands;
 mod editing;
@@ -265,6 +265,11 @@ pub struct GodotNeovimPlugin {
     /// Flag to skip cursor sync in on_script_changed (set by cmd_close)
     #[init(val = false)]
     cursor_synced_before_close: bool,
+    /// Last Neovim line we synced to (to prevent repeated clamping syncs)
+    /// This is separate from last_synced_cursor because we need to track the NEOVIM line,
+    /// not the Godot line, to prevent loops when user clicks on clamped line with different columns
+    #[init(val = -1)]
+    last_nvim_synced_line: i64,
 }
 
 #[godot_api]

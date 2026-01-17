@@ -151,6 +151,61 @@ impl NeovimHandler {
         self.has_buf_events.store(true, Ordering::SeqCst);
     }
 
+    /// Parse godot_buf_lines notification from Lua on_lines callback
+    /// args: [buf, tick, first_line, last_line, new_lines]
+    async fn handle_godot_buf_lines(&self, args: Vec<Value>) {
+        if args.len() < 5 {
+            return;
+        }
+
+        let buf = match &args[0] {
+            Value::Integer(i) => i.as_i64().unwrap_or(0),
+            _ => return,
+        };
+
+        let changedtick = match &args[1] {
+            Value::Integer(i) => i.as_i64().unwrap_or(0),
+            _ => return,
+        };
+
+        let first_line = match &args[2] {
+            Value::Integer(i) => i.as_i64().unwrap_or(0),
+            _ => return,
+        };
+
+        let last_line = match &args[3] {
+            Value::Integer(i) => i.as_i64().unwrap_or(-1),
+            _ => return,
+        };
+
+        let line_data: Vec<String> = match &args[4] {
+            Value::Array(arr) => arr
+                .iter()
+                .filter_map(|v| {
+                    if let Value::String(s) = v {
+                        s.as_str().map(String::from)
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            _ => return,
+        };
+
+        let event = BufLinesEvent {
+            buf,
+            changedtick,
+            first_line,
+            last_line,
+            line_data,
+            more: false,
+        };
+
+        let mut events = self.buf_events.lock().await;
+        events.push_back(BufEvent::Lines(event));
+        self.has_buf_events.store(true, Ordering::SeqCst);
+    }
+
     /// Parse nvim_buf_changedtick_event notification
     async fn handle_buf_changedtick_event(&self, args: Vec<Value>) {
         // args: [buf, changedtick]
@@ -272,6 +327,7 @@ impl Handler for NeovimHandler {
             "nvim_buf_lines_event" => self.handle_buf_lines_event(args).await,
             "nvim_buf_changedtick_event" => self.handle_buf_changedtick_event(args).await,
             "nvim_buf_detach_event" => self.handle_buf_detach_event(args).await,
+            "godot_buf_lines" => self.handle_godot_buf_lines(args).await,
             _ => {}
         }
     }

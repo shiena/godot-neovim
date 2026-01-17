@@ -121,7 +121,27 @@ function M.switch_to_buffer(path, lines)
     vim.api.nvim_set_current_buf(bufnr)
 
     -- Initialize content if this is a new buffer or not yet initialized
-    if lines and not M._initialized_buffers[bufnr] then
+    -- Also re-sync if line count differs (Godot content changed externally)
+    local should_init = false
+    if lines then
+        if not M._initialized_buffers[bufnr] then
+            should_init = true
+        else
+            -- Check if Godot's line count differs from Neovim's
+            -- Account for trailing empty line from Godot's trailing newline
+            local nvim_line_count = vim.api.nvim_buf_line_count(bufnr)
+            local godot_line_count = #lines
+            -- If Godot sent a trailing empty line, don't count it
+            if godot_line_count > 0 and lines[godot_line_count] == "" then
+                godot_line_count = godot_line_count - 1
+            end
+            if nvim_line_count ~= godot_line_count then
+                should_init = true
+            end
+        end
+    end
+
+    if should_init and lines then
         -- Save current undolevels
         local saved_ul = vim.bo[bufnr].undolevels
 
@@ -145,6 +165,13 @@ function M.switch_to_buffer(path, lines)
     local attached = false
     if not M._attached_buffers[bufnr] then
         attached = vim.api.nvim_buf_attach(bufnr, false, {
+            on_lines = function(_, buf, tick, first_line, last_line, last_line_updated, byte_count)
+                -- Get the new lines content
+                local new_lines = vim.api.nvim_buf_get_lines(buf, first_line, last_line_updated, false)
+                -- Send RPC notification with change details
+                vim.rpcnotify(0, "godot_buf_lines", buf, tick, first_line, last_line, new_lines)
+                return false  -- Continue receiving notifications
+            end,
             on_detach = function()
                 M._attached_buffers[bufnr] = nil
                 M._initialized_buffers[bufnr] = nil

@@ -51,6 +51,9 @@ pub struct SyncManager {
 
     /// Initial sync tick - events with this tick are echoes of initial sync
     initial_sync_tick: Option<i64>,
+
+    /// Neovim buffer line count (used to clamp cursor position)
+    nvim_line_count: i32,
 }
 
 impl SyncManager {
@@ -61,6 +64,7 @@ impl SyncManager {
             pending_changes: HashMap::new(),
             attached: false,
             initial_sync_tick: None,
+            nvim_line_count: 0,
         }
     }
 
@@ -71,6 +75,17 @@ impl SyncManager {
         self.pending_changes.clear();
         self.attached = false;
         self.initial_sync_tick = None;
+        self.nvim_line_count = 0;
+    }
+
+    /// Set Neovim buffer line count
+    pub fn set_line_count(&mut self, count: i32) {
+        self.nvim_line_count = count;
+    }
+
+    /// Get Neovim buffer line count
+    pub fn get_line_count(&self) -> i32 {
+        self.nvim_line_count
     }
 
     /// Set initial sync tick to ignore echoes from initial buffer sync
@@ -119,18 +134,33 @@ impl SyncManager {
             return None;
         }
 
-        // Validate changedtick order
-        if self.changedtick != -1 && event.changedtick != self.changedtick + 1 {
-            // Out of order - might need resync
-            crate::verbose_print!(
-                "[SyncManager] Out of order tick: expected {}, got {}",
-                self.changedtick + 1,
-                event.changedtick
-            );
-            // For now, accept it anyway
+        // Validate changedtick order and reject duplicates
+        if self.changedtick != -1 {
+            if event.changedtick <= self.changedtick {
+                // Same or older tick - this is a duplicate event, ignore it
+                crate::verbose_print!(
+                    "[SyncManager] Ignoring duplicate/old tick: current={}, got={}",
+                    self.changedtick,
+                    event.changedtick
+                );
+                return None;
+            } else if event.changedtick != self.changedtick + 1 {
+                // Out of order (skipped ticks) - accept but log warning
+                crate::verbose_print!(
+                    "[SyncManager] Out of order tick: expected {}, got {}",
+                    self.changedtick + 1,
+                    event.changedtick
+                );
+            }
         }
 
         self.changedtick = event.changedtick;
+
+        // Update line count based on the change
+        // delta = new_lines.len() - (last_line - first_line)
+        let old_lines = (event.last_line - event.first_line) as i32;
+        let new_lines = event.line_data.len() as i32;
+        self.nvim_line_count += new_lines - old_lines;
 
         // Return change for Godot to apply
         Some(DocumentChange {
