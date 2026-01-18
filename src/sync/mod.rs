@@ -103,12 +103,6 @@ impl SyncManager {
         }
     }
 
-    /// Check if buffer is attached
-    #[allow(dead_code)]
-    pub fn is_attached(&self) -> bool {
-        self.attached
-    }
-
     /// Process buffer lines event from Neovim
     /// Returns Some(change) if Godot should update, None if echo
     pub fn on_nvim_buf_lines(&mut self, event: BufLinesEvent) -> Option<DocumentChange> {
@@ -184,15 +178,6 @@ impl SyncManager {
         self.pending_changes.remove(&tick).is_some()
     }
 
-    /// Register a pending change from Godot (e.g., Undo/Redo)
-    /// Returns the expected tick number
-    #[allow(dead_code)]
-    pub fn register_godot_change(&mut self, change: DocumentChange) -> i64 {
-        let expected_tick = self.changedtick + 1;
-        self.pending_changes.insert(expected_tick, change);
-        expected_tick
-    }
-
     /// Set flag when applying Neovim change to Godot
     pub fn begin_nvim_change(&mut self) {
         self.changed_by_nvim = true;
@@ -201,18 +186,6 @@ impl SyncManager {
     /// Clear flag after applying Neovim change
     pub fn end_nvim_change(&mut self) {
         self.changed_by_nvim = false;
-    }
-
-    /// Check if currently applying Neovim change
-    #[allow(dead_code)]
-    pub fn is_nvim_change(&self) -> bool {
-        self.changed_by_nvim
-    }
-
-    /// Get current changedtick
-    #[allow(dead_code)]
-    pub fn changedtick(&self) -> i64 {
-        self.changedtick
     }
 }
 
@@ -227,42 +200,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_echo_detection() {
-        let mut sync = SyncManager::new();
-        sync.changedtick = 5;
-
-        // Register a Godot change
-        let change = DocumentChange {
-            first_line: 0,
-            last_line: 1,
-            new_lines: vec!["test".to_string()],
-        };
-        let tick = sync.register_godot_change(change);
-        assert_eq!(tick, 6);
-
-        // Receive echo from Neovim
-        let event = BufLinesEvent {
-            buf: 1,
-            changedtick: 6,
-            first_line: 0,
-            last_line: 1,
-            line_data: vec!["test".to_string()],
-            more: false,
-        };
-
-        // Should be detected as echo
-        assert!(sync.on_nvim_buf_lines(event).is_none());
-    }
-
-    #[test]
     fn test_nvim_change() {
         let mut sync = SyncManager::new();
-        sync.changedtick = 5;
 
-        // Receive change from Neovim
+        // Receive change from Neovim (first change, tick 1)
         let event = BufLinesEvent {
             buf: 1,
-            changedtick: 6,
+            changedtick: 1,
             first_line: 0,
             last_line: 1,
             line_data: vec!["new line".to_string()],
@@ -272,6 +216,13 @@ mod tests {
         // Should return change to apply
         let change = sync.on_nvim_buf_lines(event);
         assert!(change.is_some());
-        assert_eq!(sync.changedtick(), 6);
+        let change = change.unwrap();
+        assert_eq!(change.first_line, 0);
+        assert_eq!(change.last_line, 1);
+        assert_eq!(change.new_lines, vec!["new line".to_string()]);
     }
+
+    // Note: Tests for duplicate tick detection and initial sync echo
+    // are not included here because they hit verbose_print! paths
+    // which require Godot engine. These are tested manually.
 }

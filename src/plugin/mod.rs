@@ -274,11 +274,6 @@ pub struct GodotNeovimPlugin {
     /// not the Godot line, to prevent loops when user clicks on clamped line with different columns
     #[init(val = -1)]
     last_nvim_synced_line: i64,
-    /// Flag for pending modified flag sync (after undo/redo)
-    /// Note: Kept for potential future use - currently using event-driven approach
-    #[allow(dead_code)]
-    #[init(val = false)]
-    pending_modified_sync: bool,
     /// Flag to ignore caret_changed during sync_cursor_from_grid
     /// Prevents RPC calls during caret update (which causes timeout on rapid key presses)
     #[init(val = false)]

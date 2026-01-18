@@ -65,12 +65,6 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// Yank current line to named register
-    #[allow(dead_code)]
-    pub(super) fn yank_line_to_register(&mut self, register: char) {
-        self.yank_lines_to_register(register, 1);
-    }
-
     /// Yank multiple lines to named register
     pub(super) fn yank_lines_to_register(&mut self, register: char, count: i32) {
         let Some(ref editor) = self.current_editor else {
@@ -96,12 +90,6 @@ impl GodotNeovimPlugin {
             count,
             line_idx + 1
         );
-    }
-
-    /// Delete current line and store in named register
-    #[allow(dead_code)]
-    pub(super) fn delete_line_to_register(&mut self, register: char) {
-        self.delete_lines_to_register(register, 1);
     }
 
     /// Delete multiple lines and store in named register

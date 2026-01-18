@@ -1,6 +1,6 @@
 //! Neovim communication: buffer sync, cursor sync, key sending
 
-use super::{CodeEditExt, GodotNeovimPlugin};
+use super::GodotNeovimPlugin;
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
@@ -697,52 +697,6 @@ impl GodotNeovimPlugin {
         self.syncing_from_grid = false;
     }
 
-    /// Sync buffer from Neovim to Godot editor
-    #[allow(dead_code)]
-    pub(super) fn sync_buffer_from_neovim(
-        &mut self,
-        lines: Vec<String>,
-        cursor: Option<(i64, i64)>,
-    ) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        // Join lines and set text
-        let text = lines.join("\n");
-        let current_text = editor.get_text().to_string();
-
-        // Normalize trailing newlines for comparison to avoid false dirty flags
-        // Neovim has implicit trailing newline (eol option), Godot may or may not include it
-        let text_normalized = text.trim_end_matches('\n');
-        let current_normalized = current_text.trim_end_matches('\n');
-
-        if text_normalized != current_normalized {
-            editor.set_text_and_notify(&text);
-            crate::verbose_print!(
-                "[godot-neovim] Buffer synced from Neovim ({} lines)",
-                lines.len()
-            );
-        }
-
-        // Sync cursor position
-        if let Some((line, col)) = cursor {
-            // Neovim uses 1-indexed lines, 0-indexed columns
-            let target_line = (line - 1).max(0) as i32;
-            let target_col = col.max(0) as i32;
-
-            let line_count = editor.get_line_count();
-            let safe_line = target_line.min(line_count - 1);
-
-            // Update last_synced_cursor BEFORE setting caret to prevent
-            // caret_changed signal from triggering sync_cursor_to_neovim
-            self.last_synced_cursor = (safe_line as i64, target_col as i64);
-
-            editor.set_caret_line(safe_line);
-            editor.set_caret_column(target_col);
-        }
-    }
-
     /// Update cursor position from Godot editor and refresh display
     pub(super) fn update_cursor_from_editor(&mut self) {
         let Some(ref editor) = self.current_editor else {
@@ -757,33 +711,5 @@ impl GodotNeovimPlugin {
         // Update mode display with current cursor
         let display_cursor = (line as i64 + 1, col as i64);
         self.update_mode_display_with_cursor(&self.current_mode.clone(), Some(display_cursor));
-    }
-
-    /// Sync Neovim's modified flag to Godot's dirty flag
-    /// Called after undo/redo to handle the case where buffer returns to initial state
-    /// Note: Kept for potential future use - currently using event-driven approach
-    #[allow(dead_code)]
-    fn sync_modified_flag(&mut self) {
-        let Some(ref neovim) = self.neovim else {
-            return;
-        };
-
-        let Ok(client) = neovim.try_lock() else {
-            return;
-        };
-
-        // Check if Neovim buffer is modified
-        let is_modified = client.is_buffer_modified();
-        drop(client);
-
-        // If Neovim says buffer is not modified, clear Godot's dirty flag
-        if !is_modified {
-            if let Some(ref mut editor) = self.current_editor {
-                editor.tag_saved_version();
-                crate::verbose_print!(
-                    "[godot-neovim] Buffer unmodified in Neovim, cleared Godot dirty flag"
-                );
-            }
-        }
     }
 }
