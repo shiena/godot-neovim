@@ -124,10 +124,12 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Save current position before jumping
+        // Save current position before jumping (so Ctrl+I can return here)
         if self.jump_list_pos == self.jump_list.len() {
             self.add_to_jump_list();
-            self.jump_list_pos = self.jump_list.len();
+            // add_to_jump_list sets pos = len, but we want to jump to position BEFORE the one just added
+            // So set pos to len - 1 (the position before current, not the current we just added)
+            self.jump_list_pos = self.jump_list.len().saturating_sub(1);
         }
 
         if self.jump_list_pos == 0 {
