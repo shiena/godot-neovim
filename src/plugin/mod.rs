@@ -469,9 +469,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
         self.process_neovim_updates();
 
         // Check for key sequence timeout (like Neovim's timeoutlen)
-        // Only applies in Normal mode - Insert/Replace modes don't use operator-pending
+        // Only applies in Normal mode - Insert/Replace/Visual modes don't use operator-pending
         // If last_key has been pending too long, cancel it
-        if !self.is_insert_mode() && !self.is_replace_mode() {
+        if !self.is_insert_mode() && !self.is_replace_mode() && !self.is_in_visual_mode() {
             if let Some(key_time) = self.last_key_time {
                 let timeoutlen = crate::settings::get_timeoutlen();
                 if key_time.elapsed().as_millis() > timeoutlen as u128 {
@@ -711,7 +711,14 @@ impl GodotNeovimPlugin {
 
         // Skip sync in Insert/Replace modes - cursor moves with every keystroke
         // and Neovim isn't receiving the input, so syncing is meaningless and causes freezes
-        if self.current_mode == "i" || self.current_mode == "R" {
+        if self.is_insert_mode() || self.is_replace_mode() {
+            return;
+        }
+
+        // Skip sync in Visual mode - Neovim controls the selection
+        // Godot's CodeEdit caret_changed fires when selection updates, causing sync loops
+        // Following Master-Slave design: Neovim is master, Godot only reflects its state
+        if self.is_in_visual_mode() {
             return;
         }
 
@@ -1095,7 +1102,12 @@ impl GodotNeovimPlugin {
 
     /// Check if mode is a visual mode (v, V, or Ctrl+V)
     fn is_visual_mode(mode: &str) -> bool {
-        matches!(mode, "v" | "V" | "\x16" | "^V" | "CTRL-V")
+        matches!(mode, "v" | "V" | "\x16" | "^V" | "CTRL-V" | "visual")
+    }
+
+    /// Check if currently in visual mode (instance method)
+    fn is_in_visual_mode(&self) -> bool {
+        Self::is_visual_mode(&self.current_mode)
     }
 
     /// Clear all pending input states to ensure mutual exclusivity

@@ -55,10 +55,11 @@ pub fn initialize_settings() {
 
     // Add neovim_clean setting if it doesn't exist
     // Note: Only set initial value if setting doesn't exist to preserve user's value
+    // Default is true (--clean) for safety - avoids plugin compatibility issues
     if !settings.has_setting(SETTING_NEOVIM_CLEAN) {
-        settings.set_setting(SETTING_NEOVIM_CLEAN, &Variant::from(false));
+        settings.set_setting(SETTING_NEOVIM_CLEAN, &Variant::from(true));
         // Set initial value only for new settings (p_basic=true: visible by default)
-        settings.set_initial_value(SETTING_NEOVIM_CLEAN, &Variant::from(false), true);
+        settings.set_initial_value(SETTING_NEOVIM_CLEAN, &Variant::from(true), true);
     }
 
     // Add property info for neovim_clean (checkbox)
@@ -144,10 +145,11 @@ pub fn get_neovim_path() -> String {
 }
 
 /// Get the configured neovim clean mode
+/// Default is true (--clean) for safety - avoids plugin compatibility issues
 pub fn get_neovim_clean() -> bool {
     let editor = EditorInterface::singleton();
     let Some(settings) = editor.get_editor_settings() else {
-        return false;
+        return true; // Default to clean mode
     };
 
     if settings.has_setting(SETTING_NEOVIM_CLEAN) {
@@ -157,7 +159,7 @@ pub fn get_neovim_clean() -> bool {
         }
     }
 
-    false
+    true // Default to clean mode
 }
 
 /// Get the configured timeoutlen (multi-key sequence timeout in milliseconds)

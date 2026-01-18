@@ -148,7 +148,7 @@ All settings are available in `Editor > Editor Settings > Godot Neovim`.
 |---------|-------------|---------|
 | Neovim Executable Path | Path to Neovim executable. The plugin validates this path on startup. | `nvim.exe` (Windows) / `nvim` (macOS/Linux) |
 | Input Mode | How insert mode input is handled. `Hybrid` uses Godot's native input for auto-completion support. `Strict` sends all input to Neovim. | Hybrid |
-| Neovim Clean | Equivalent to the `--clean` startup option. When enabled, Neovim starts without loading any config files (init.lua, plugins, etc.). | false |
+| Neovim Clean | Equivalent to the `--clean` startup option. When enabled, Neovim starts without loading any config files (init.lua, plugins, etc.). Recommended to keep enabled to avoid plugin compatibility issues. | true |
 | Timeoutlen *(advanced)* | Time in milliseconds to wait for a mapped key sequence to complete. This setting appears when "Advanced Settings" is enabled in Editor Settings. | 1000 |
 
 ### Input Mode Details
@@ -427,7 +427,7 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 | Feature | Description |
 |---------|-------------|
 | Neovim undo | Uses Godot's undo system |
-| Neovim config | `init.lua` and plugins are not loaded |
+| Neovim config | `init.lua` and plugins are not loaded by default (`neovim_clean = true`). Can be enabled but may cause compatibility issues with some plugins (e.g., copilot.vim, lexima.vim). |
 | `K` for signals | Signal documentation lookup not supported (class/method/property/constant only) |
 
 ### Known Issues

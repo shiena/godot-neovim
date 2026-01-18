@@ -175,12 +175,12 @@
 ## Configure via [code]Editor > Editor Settings > Godot Neovim[/code]:[br]
 ## [code]neovim_executable_path[/code] - Path to Neovim executable[br]
 ## [code]input_mode[/code] - Hybrid (Godot input, auto-completion) or Strict (Neovim input)[br]
-## [code]neovim_clean[/code] - Equivalent to --clean startup option[br]
+## [code]neovim_clean[/code] - Equivalent to --clean startup option (default: true)[br]
 ## [code]timeoutlen[/code] - Time (ms) to wait for a mapped sequence to complete (advanced)[br]
 ##
 ## [br][b]Limitations[/b][br]
 ## - Insert mode commands (Ctrl+O, Ctrl+W, etc.) not available in hybrid mode[br]
-## - Neovim config (init.lua, plugins) not loaded[br]
+## - Neovim config (init.lua, plugins) not loaded by default (neovim_clean=true)[br]
 ## - Uses Godot's undo system instead of Neovim's
 class_name GodotNeovim
 extends RefCounted
