@@ -172,7 +172,8 @@
 ## [code]@:[/code] - Repeat last Ex command[br]
 ##
 ## [br][b]Settings[/b][br]
-## Configure via [code]Editor > Editor Settings > Godot Neovim[/code]:[br]
+## Configure via [code]Editor > Editor Settings > Godot Neovim[/code].[br]
+## [i]Note: Enable "Advanced Settings" toggle in Editor Settings to see the godot_neovim section.[/i][br]
 ## [code]neovim_executable_path[/code] - Path to Neovim executable[br]
 ## [code]input_mode[/code] - Hybrid (Godot input, auto-completion) or Strict (Neovim input)[br]
 ## [code]neovim_clean[/code] - Equivalent to --clean startup option (default: true)[br]

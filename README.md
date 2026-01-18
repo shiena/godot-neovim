@@ -144,6 +144,8 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 
 All settings are available in `Editor > Editor Settings > Godot Neovim`.
 
+> **Note**: You need to enable **"Advanced Settings"** toggle in the Editor Settings to see the `godot_neovim` section.
+
 | Setting | Description | Default |
 |---------|-------------|---------|
 | Neovim Executable Path | Path to Neovim executable. The plugin validates this path on startup. | `nvim.exe` (Windows) / `nvim` (macOS/Linux) |
