@@ -80,6 +80,18 @@ impl GodotNeovimPlugin {
                 // Set filetype for syntax highlighting
                 let _ = client.command("set filetype=gdscript");
 
+                // Resize Neovim UI to match Godot editor's visible area
+                // This is important for viewport commands (zz, zt, zb) to work correctly
+                if let Some(ref editor) = self.current_editor {
+                    let visible_lines = editor.get_visible_line_count();
+                    self.last_visible_lines = visible_lines;
+                    // Use reasonable default width (doesn't affect viewport commands)
+                    let width = 120i64;
+                    // Ensure at least 10 lines to avoid too small window
+                    let height = (visible_lines as i64).max(10);
+                    client.ui_try_resize(width, height);
+                }
+
                 // Mark buffer as saved in Godot (only for new buffers to prevent false dirty flag on open)
                 // Don't call for existing buffers - it would clear dirty flag on tab switch
                 drop(client);
@@ -451,8 +463,21 @@ impl GodotNeovimPlugin {
     pub(super) fn process_neovim_updates(&mut self) {
         use crate::neovim::BufEvent;
 
+        // Note: Neovim UI resize is handled by resized signal (on_editor_resized)
+        // No need to poll here
+
+        // Check if current_editor is still valid before processing
+        // This prevents use-after-free when switching scripts
+        if let Some(ref editor) = self.current_editor {
+            if !editor.is_instance_valid() {
+                crate::verbose_print!("[godot-neovim] current_editor is no longer valid, clearing");
+                self.current_editor = None;
+                return;
+            }
+        }
+
         // Collect data from Neovim while holding lock, then release and process
-        let (state_from_redraw, buf_events) = {
+        let (state_from_redraw, buf_events, viewport_change) = {
             let Some(ref neovim) = self.neovim else {
                 return;
             };
@@ -490,7 +515,10 @@ impl GodotNeovimPlugin {
                 );
             }
 
-            (state_from_redraw, buf_events)
+            // Get viewport changes (win_viewport events)
+            let viewport_change = client.take_viewport();
+
+            (state_from_redraw, buf_events, viewport_change)
         };
         // Lock is now released
 
@@ -524,45 +552,152 @@ impl GodotNeovimPlugin {
             }
         }
 
+        // Track visual mode state for use in both redraw and viewport_change processing
+        let mut is_visual = false;
+        let mut was_visual = false;
+        let mut visual_line_mode = false;
+
         // Process state update from redraw events
-        if let Some((mode, cursor)) = state_from_redraw {
+        if let Some((ref mode, cursor)) = state_from_redraw {
             let old_mode = self.current_mode.clone();
             self.current_mode = mode.clone();
-            self.current_cursor = cursor;
 
-            // Update mode display
-            let display_cursor = (cursor.0 + 1, cursor.1);
-            self.update_mode_display_with_cursor(&mode, Some(display_cursor));
+            // Check if entering/leaving insert/replace mode
+            let is_insert = mode == "i" || mode == "insert" || mode == "R" || mode == "replace";
+            let was_insert =
+                old_mode == "i" || old_mode == "insert" || old_mode == "R" || old_mode == "replace";
+            let entering_insert = is_insert && !was_insert;
+            let leaving_insert = was_insert && !is_insert;
 
-            // Sync cursor to Godot editor
-            self.sync_cursor_from_grid(cursor);
+            // Check if entering/leaving visual mode
+            was_visual = Self::is_visual_mode(&old_mode);
+            is_visual = Self::is_visual_mode(mode);
+            visual_line_mode = mode == "V";
+            let entering_visual = is_visual && !was_visual;
+            let leaving_visual = was_visual && !is_visual;
+
+            // Only sync cursor from grid_cursor_goto if no viewport_change
+            // When ext_multigrid is enabled, grid_cursor_goto gives screen position,
+            // while win_viewport gives accurate buffer position
+            // IMPORTANT: Skip cursor sync during mode transitions (insert/visual) without viewport_change
+            // because grid_cursor_goto gives screen-relative position which is wrong
+            let skip_grid_cursor =
+                entering_insert || leaving_insert || entering_visual || leaving_visual;
+            if viewport_change.is_none() && !skip_grid_cursor {
+                self.current_cursor = cursor;
+
+                // Update mode display
+                let display_cursor = (cursor.0 + 1, cursor.1);
+                self.update_mode_display_with_cursor(mode, Some(display_cursor));
+
+                // Sync cursor to Godot editor
+                self.sync_cursor_from_grid(cursor);
+            }
+
+            // Update mode display during mode transitions using current_cursor
+            // (grid_cursor_goto is wrong during transitions, use last known buffer position)
+            if skip_grid_cursor && viewport_change.is_none() {
+                let display_cursor = (self.current_cursor.0 + 1, self.current_cursor.1);
+                self.update_mode_display_with_cursor(mode, Some(display_cursor));
+
+                // For visual mode entry, also sync Godot caret to current_cursor
+                // This is needed for editor.select() to work correctly
+                if entering_visual {
+                    self.sync_cursor_from_grid(self.current_cursor);
+                }
+            }
 
             // Clear pending key state when entering Insert/Replace mode
-            // (operator-pending sequences like 'o' are complete once we enter insert mode)
-            let entering_insert =
-                (mode == "i" || mode == "insert" || mode == "R" || mode == "replace")
-                    && old_mode != "i"
-                    && old_mode != "insert"
-                    && old_mode != "R"
-                    && old_mode != "replace";
             if entering_insert {
                 self.clear_last_key();
             }
 
-            // Handle visual mode selection
-            let was_visual = Self::is_visual_mode(&old_mode);
-            let is_visual = Self::is_visual_mode(&mode);
-
-            if is_visual {
-                if mode == "V" {
-                    self.update_visual_line_selection();
-                } else {
-                    self.update_visual_selection();
+            // Visual selection update (only when no viewport_change)
+            // When viewport_change is present, we must update visual selection AFTER
+            // sync_cursor_from_grid, otherwise the cursor sync will clear the selection
+            if viewport_change.is_none() {
+                if is_visual {
+                    self.syncing_from_grid = true;
+                    if visual_line_mode {
+                        self.update_visual_line_selection();
+                    } else {
+                        self.update_visual_selection();
+                    }
+                    self.syncing_from_grid = false;
+                } else if was_visual {
+                    self.clear_visual_selection();
                 }
-            } else if was_visual {
-                self.clear_visual_selection();
             }
         }
+
+        // Apply viewport changes from Neovim (zz, zt, zb, Ctrl+F, Ctrl+B, etc.)
+        // win_viewport provides both viewport position and cursor position in buffer coordinates
+        if let Some((topline, _botline, curline, curcol)) = viewport_change {
+            // Use curline/curcol from win_viewport for cursor sync
+            // This is more accurate than grid_cursor_goto which gives screen position
+            let cursor = (curline, curcol);
+            self.current_cursor = cursor;
+
+            // Skip viewport sync if this was triggered by user cursor change (click)
+            // to prevent Neovim from overriding user's scroll position
+            if self.user_cursor_sync {
+                self.user_cursor_sync = false;
+                crate::verbose_print!(
+                    "[godot-neovim] Skipping viewport sync (user cursor sync): topline={}",
+                    topline
+                );
+            } else {
+                // Set cursor FIRST - this may trigger Godot's auto-scroll
+                self.sync_cursor_from_grid(cursor);
+
+                // Then set viewport - this OVERRIDES any auto-scroll from cursor setting
+                self.apply_viewport_from_neovim(topline);
+
+                // Update mode display with buffer position
+                let display_cursor = (curline + 1, curcol);
+                if let Some((ref mode, _)) = state_from_redraw {
+                    self.update_mode_display_with_cursor(mode, Some(display_cursor));
+                }
+
+                // Visual selection update AFTER cursor sync when viewport_change is present
+                // This prevents cursor sync from clearing the selection
+                // Note: is_visual and was_visual were set in the redraw block above
+                if is_visual {
+                    self.syncing_from_grid = true;
+                    if visual_line_mode {
+                        self.update_visual_line_selection();
+                    } else {
+                        self.update_visual_selection();
+                    }
+                    self.syncing_from_grid = false;
+                } else if was_visual {
+                    self.clear_visual_selection();
+                }
+
+                crate::verbose_print!(
+                    "[godot-neovim] win_viewport cursor: ({}, {})",
+                    curline,
+                    curcol
+                );
+            }
+        }
+    }
+
+    /// Apply viewport (scroll position) from Neovim to Godot editor
+    /// topline is the first visible line (0-indexed)
+    fn apply_viewport_from_neovim(&mut self, topline: i64) {
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        crate::verbose_print!(
+            "[godot-neovim] Applying viewport from Neovim: topline={}",
+            topline
+        );
+
+        // Use set_line_as_first_visible for direct control of which line is at the top
+        // This is more reliable than set_v_scroll which uses pixel values
+        editor.set_line_as_first_visible(topline as i32);
     }
 
     /// Apply a change from Neovim to Godot editor

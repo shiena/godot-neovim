@@ -180,6 +180,48 @@ impl NeovimClient {
         })
     }
 
+    /// Take viewport changes (topline, botline, curline, curcol) if viewport has changed
+    /// Returns None if viewport hasn't changed since last call
+    /// The curline/curcol are the buffer cursor positions from win_viewport
+    pub fn take_viewport(&self) -> Option<(i64, i64, i64, i64)> {
+        self.runtime.block_on(async {
+            let mut state = self.state.lock().await;
+            if state.viewport_changed {
+                state.viewport_changed = false;
+                Some((
+                    state.viewport_topline,
+                    state.viewport_botline,
+                    state.viewport_curline,
+                    state.viewport_curcol,
+                ))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Resize Neovim's UI to match Godot editor's visible area
+    /// This is important for viewport commands (zz, zt, zb) to work correctly
+    pub fn ui_try_resize(&self, width: i64, height: i64) {
+        let neovim_arc = self.neovim.clone();
+
+        self.runtime.block_on(async {
+            let nvim_lock = neovim_arc.lock().await;
+            if let Some(neovim) = nvim_lock.as_ref() {
+                if let Err(e) = neovim.ui_try_resize(width, height).await {
+                    // Log error but don't fail - resize is best-effort
+                    crate::verbose_print!("[godot-neovim] Failed to resize UI: {}", e);
+                } else {
+                    crate::verbose_print!(
+                        "[godot-neovim] Resized Neovim UI to {}x{}",
+                        width,
+                        height
+                    );
+                }
+            }
+        });
+    }
+
     /// Get current state (always returns, doesn't check updates flag)
     #[allow(dead_code)]
     pub fn get_state(&self) -> (String, (i64, i64)) {
@@ -250,9 +292,11 @@ impl NeovimClient {
             let (neovim, io_handler, _child) = create::new_child_cmd(&mut cmd, handler).await?;
 
             // Attach UI to receive redraw events
+            // ext_multigrid enables win_viewport events for viewport synchronization
             let mut ui_opts = UiAttachOptions::new();
             ui_opts.set_rgb(true);
             ui_opts.set_linegrid_external(true);
+            ui_opts.set_multigrid_external(true);
             neovim
                 .ui_attach(80, 24, &ui_opts)
                 .await

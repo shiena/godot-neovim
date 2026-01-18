@@ -3,24 +3,15 @@
 use super::GodotNeovimPlugin;
 
 impl GodotNeovimPlugin {
-    /// Handle scroll and fold command sequences (zz, zt, zb, za, zo, zc, zM, zR)
+    /// Handle scroll and fold command sequences (za, zo, zc, zM, zR)
+    /// Note: zz, zt, zb are now handled by Neovim via win_viewport events
     pub(super) fn handle_scroll_command(&mut self, keys: &str) -> bool {
         if self.last_key == "z" {
             match keys {
-                "z" => {
-                    self.center_cursor();
+                // zz, zt, zb are handled by Neovim - just clear last_key but don't handle locally
+                "z" | "t" | "b" => {
                     self.clear_last_key();
-                    return true;
-                }
-                "t" => {
-                    self.scroll_cursor_to_top();
-                    self.clear_last_key();
-                    return true;
-                }
-                "b" => {
-                    self.scroll_cursor_to_bottom();
-                    self.clear_last_key();
-                    return true;
+                    return false; // Let Neovim handle via win_viewport
                 }
                 "a" => {
                     self.toggle_fold();
@@ -53,117 +44,8 @@ impl GodotNeovimPlugin {
         false
     }
 
-    /// Center cursor on screen (zz command)
-    fn center_cursor(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let current_line = editor.get_caret_line();
-        let visible_lines = editor.get_visible_line_count();
-        let half_visible = visible_lines / 2;
-
-        let target_first = (current_line - half_visible).max(0);
-        editor.set_line_as_first_visible(target_first);
-
-        crate::verbose_print!(
-            "[godot-neovim] zz: Centered cursor on line {}",
-            current_line + 1
-        );
-    }
-
-    /// Scroll cursor line to top (zt command)
-    fn scroll_cursor_to_top(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let current_line = editor.get_caret_line();
-        editor.set_line_as_first_visible(current_line);
-
-        crate::verbose_print!("[godot-neovim] zt: Cursor line {} at top", current_line + 1);
-    }
-
-    /// Scroll cursor line to bottom (zb command)
-    fn scroll_cursor_to_bottom(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let current_line = editor.get_caret_line();
-        let visible_lines = editor.get_visible_line_count();
-
-        let target_first = (current_line - visible_lines + 1).max(0);
-        editor.set_line_as_first_visible(target_first);
-
-        crate::verbose_print!(
-            "[godot-neovim] zb: Cursor line {} at bottom",
-            current_line + 1
-        );
-    }
-
-    /// Move cursor to top of visible area (H command)
-    pub(super) fn move_cursor_to_visible_top(&mut self) {
-        let target_line = {
-            let Some(ref mut editor) = self.current_editor else {
-                return;
-            };
-            let first_visible = editor.get_first_visible_line();
-            editor.set_caret_line(first_visible);
-            editor.set_caret_column(0);
-            first_visible
-        };
-
-        crate::verbose_print!("[godot-neovim] H: moved to line {}", target_line);
-
-        // Sync to Neovim (non-blocking, errors are logged but ignored)
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-    }
-
-    /// Move cursor to middle of visible area (M command)
-    pub(super) fn move_cursor_to_visible_middle(&mut self) {
-        let target_line = {
-            let Some(ref mut editor) = self.current_editor else {
-                return;
-            };
-            let first_visible = editor.get_first_visible_line();
-            let visible_lines = editor.get_visible_line_count();
-            let middle_line = first_visible + visible_lines / 2;
-            let line_count = editor.get_line_count();
-            let target = middle_line.min(line_count - 1);
-            editor.set_caret_line(target);
-            editor.set_caret_column(0);
-            target
-        };
-
-        crate::verbose_print!("[godot-neovim] M: moved to line {}", target_line);
-
-        // Sync to Neovim (non-blocking, errors are logged but ignored)
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-    }
-
-    /// Move cursor to bottom of visible area (L command)
-    pub(super) fn move_cursor_to_visible_bottom(&mut self) {
-        let target_line = {
-            let Some(ref mut editor) = self.current_editor else {
-                return;
-            };
-            let last_visible = editor.get_last_full_visible_line();
-            let line_count = editor.get_line_count();
-            let target = last_visible.min(line_count - 1);
-            editor.set_caret_line(target);
-            editor.set_caret_column(0);
-            target
-        };
-
-        crate::verbose_print!("[godot-neovim] L: moved to line {}", target_line);
-
-        // Sync to Neovim (non-blocking, errors are logged but ignored)
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-    }
+    // Note: zz, zt, zb, H, M, L are now handled by Neovim via win_viewport events
+    // Local implementations have been removed
 
     /// Scroll viewport up (Ctrl+Y command)
     pub(super) fn scroll_viewport_up(&mut self) {
@@ -332,105 +214,9 @@ impl GodotNeovimPlugin {
         self.update_mode_display_with_cursor(&self.current_mode.clone(), Some(display_cursor));
     }
 
-    /// Move half page down (Ctrl+D command)
-    pub(super) fn half_page_down(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let visible_lines = editor.get_visible_line_count();
-        let half_page = visible_lines / 2;
-        let current_line = editor.get_caret_line();
-        let line_count = editor.get_line_count();
-
-        let target_line = (current_line + half_page).min(line_count - 1);
-        editor.set_caret_line(target_line);
-
-        // Also scroll the viewport
-        let first_visible = editor.get_first_visible_line();
-        let new_first = (first_visible + half_page).min(line_count - visible_lines);
-        if new_first > first_visible {
-            editor.set_line_as_first_visible(new_first.max(0));
-        }
-
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-        crate::verbose_print!("[godot-neovim] Ctrl+D: Moved to line {}", target_line + 1);
-    }
-
-    /// Move half page up (Ctrl+U command)
-    pub(super) fn half_page_up(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let visible_lines = editor.get_visible_line_count();
-        let half_page = visible_lines / 2;
-        let current_line = editor.get_caret_line();
-
-        let target_line = (current_line - half_page).max(0);
-        editor.set_caret_line(target_line);
-
-        // Also scroll the viewport
-        let first_visible = editor.get_first_visible_line();
-        let new_first = (first_visible - half_page).max(0);
-        if new_first < first_visible {
-            editor.set_line_as_first_visible(new_first);
-        }
-
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-        crate::verbose_print!("[godot-neovim] Ctrl+U: Moved to line {}", target_line + 1);
-    }
-
-    /// Move full page down (Ctrl+F command)
-    pub(super) fn page_down(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let visible_lines = editor.get_visible_line_count();
-        let current_line = editor.get_caret_line();
-        let line_count = editor.get_line_count();
-
-        let target_line = (current_line + visible_lines).min(line_count - 1);
-        editor.set_caret_line(target_line);
-
-        // Also scroll the viewport
-        let first_visible = editor.get_first_visible_line();
-        let new_first = (first_visible + visible_lines).min(line_count - visible_lines);
-        if new_first > first_visible {
-            editor.set_line_as_first_visible(new_first.max(0));
-        }
-
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-        crate::verbose_print!("[godot-neovim] Ctrl+F: Moved to line {}", target_line + 1);
-    }
-
-    /// Move full page up (Ctrl+B command)
-    pub(super) fn page_up(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let visible_lines = editor.get_visible_line_count();
-        let current_line = editor.get_caret_line();
-
-        let target_line = (current_line - visible_lines).max(0);
-        editor.set_caret_line(target_line);
-
-        // Also scroll the viewport
-        let first_visible = editor.get_first_visible_line();
-        let new_first = (first_visible - visible_lines).max(0);
-        if new_first < first_visible {
-            editor.set_line_as_first_visible(new_first);
-        }
-
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-        crate::verbose_print!("[godot-neovim] Ctrl+B: Moved to line {}", target_line + 1);
-    }
+    // Note: half_page_down (Ctrl+D), half_page_up (Ctrl+U), page_down (Ctrl+F),
+    // and page_up (Ctrl+B) are now handled by Neovim via win_viewport events
+    // for proper viewport synchronization
 
     /// Jump to matching bracket (% command)
     pub(super) fn jump_to_matching_bracket(&mut self) {

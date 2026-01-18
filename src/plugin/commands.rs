@@ -514,9 +514,10 @@ impl GodotNeovimPlugin {
 
     /// :q - Close the current script tab by simulating Ctrl+W
     pub(super) fn cmd_close(&mut self) {
-        // Disconnect from caret_changed signal BEFORE closing to avoid
+        // Disconnect from signals BEFORE closing to avoid
         // accessing freed CodeEdit instance
         self.disconnect_caret_changed_signal();
+        self.disconnect_resized_signal();
 
         // Sync cursor to Neovim BEFORE closing, because on_script_changed
         // is called after the editor is freed and we can't read cursor then
@@ -562,8 +563,9 @@ impl GodotNeovimPlugin {
 
     /// ZQ - Close without saving (discard changes)
     pub(super) fn cmd_close_discard(&mut self) {
-        // Disconnect from caret_changed signal BEFORE closing
+        // Disconnect from signals BEFORE closing
         self.disconnect_caret_changed_signal();
+        self.disconnect_resized_signal();
 
         let editor = EditorInterface::singleton();
         if let Some(mut script_editor) = editor.get_script_editor() {
@@ -610,8 +612,9 @@ impl GodotNeovimPlugin {
 
     /// :qa/:qall - Close all script tabs
     pub(super) fn cmd_close_all(&mut self) {
-        // Disconnect from caret_changed signal BEFORE closing
+        // Disconnect from signals BEFORE closing
         self.disconnect_caret_changed_signal();
+        self.disconnect_resized_signal();
 
         // Don't clear references here - if user cancels save dialogs,
         // scripts stay open and we need to keep the references.

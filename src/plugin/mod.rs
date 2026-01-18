@@ -278,6 +278,14 @@ pub struct GodotNeovimPlugin {
     /// Prevents RPC calls during caret update (which causes timeout on rapid key presses)
     #[init(val = false)]
     syncing_from_grid: bool,
+    /// Flag to skip viewport sync when cursor was changed by user interaction (click)
+    /// This prevents Neovim from overriding user's scroll position
+    #[init(val = false)]
+    user_cursor_sync: bool,
+    /// Last known visible line count (for detecting editor resize)
+    /// Used to resize Neovim UI when Godot editor size changes
+    #[init(val = 0)]
+    last_visible_lines: i32,
 }
 
 #[godot_api]
@@ -698,6 +706,66 @@ impl GodotNeovimPlugin {
         }
     }
 
+    fn connect_resized_signal(&mut self) {
+        // Create callable first to avoid borrow conflicts
+        let callable = self.base().callable("on_editor_resized");
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        // Connect to resized signal to detect editor size changes
+        // (window resize, panel toggle, dock width changes, etc.)
+        if !editor.is_connected("resized", &callable) {
+            editor.connect("resized", &callable);
+            crate::verbose_print!("[godot-neovim] Connected to resized signal");
+        }
+    }
+
+    fn disconnect_resized_signal(&mut self) {
+        // Create callable first to avoid borrow conflicts
+        let callable = self.base().callable("on_editor_resized");
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        // Disconnect from resized signal before closing
+        if editor.is_connected("resized", &callable) {
+            editor.disconnect("resized", &callable);
+            crate::verbose_print!("[godot-neovim] Disconnected from resized signal");
+        }
+    }
+
+    #[func]
+    fn on_editor_resized(&mut self) {
+        // Resize Neovim UI to match new editor size
+        let Some(ref editor) = self.current_editor else {
+            return;
+        };
+
+        let visible_lines = editor.get_visible_line_count();
+        if visible_lines != self.last_visible_lines && visible_lines > 0 {
+            self.last_visible_lines = visible_lines;
+
+            // Clear user_cursor_sync flag since resize might trigger caret_changed
+            // but we still want to apply viewport changes from Neovim after resize
+            self.user_cursor_sync = false;
+
+            let Some(ref neovim) = self.neovim else {
+                return;
+            };
+
+            let Ok(client) = neovim.try_lock() else {
+                return;
+            };
+
+            let width = 120i64;
+            let height = (visible_lines as i64).max(10);
+            client.ui_try_resize(width, height);
+        }
+    }
+
     #[func]
     fn on_caret_changed(&mut self) {
         // Skip if syncing from grid (to prevent RPC during caret update)
@@ -736,6 +804,10 @@ impl GodotNeovimPlugin {
         if self.last_synced_cursor == (line as i64, col as i64) {
             return;
         }
+
+        // Set flag to skip viewport sync from Neovim
+        // This prevents Neovim from overriding user's scroll position when clicking
+        self.user_cursor_sync = true;
 
         // Update last_synced_cursor and sync to Neovim
         self.last_synced_cursor = (line as i64, col as i64);
@@ -1017,6 +1089,7 @@ impl GodotNeovimPlugin {
                 crate::verbose_print!("[godot-neovim] Found focused CodeEdit");
                 self.current_editor = Some(code_edit);
                 self.connect_caret_changed_signal();
+                self.connect_resized_signal();
                 return;
             }
             // Fallback: find visible CodeEdit
@@ -1025,6 +1098,7 @@ impl GodotNeovimPlugin {
                 crate::verbose_print!("[godot-neovim] Found visible CodeEdit");
                 self.current_editor = Some(code_edit);
                 self.connect_caret_changed_signal();
+                self.connect_resized_signal();
             }
         }
     }
@@ -1670,8 +1744,8 @@ impl GodotNeovimPlugin {
                     self.clear_last_key();
                 }
             } else {
-                // In normal mode: page up
-                self.page_up();
+                // In normal mode: page up - send to Neovim, viewport syncs via win_viewport
+                self.send_keys("<C-b>");
             }
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -1700,10 +1774,10 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle Ctrl+F for page down
+        // Handle Ctrl+F for page down - send to Neovim, viewport syncs via win_viewport
         if key_event.is_ctrl_pressed() && keycode == Key::F {
             self.cancel_pending_operator();
-            self.page_down();
+            self.send_keys("<C-f>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1880,11 +1954,13 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle 't' for till char forward (but not after 'g' - that's gt for tab navigation)
+        // Handle 't' for till char forward (but not after 'g' - that's gt for tab navigation,
+        // and not after 'z' - that's zt for scroll cursor to top)
         if keycode == Key::T
             && !key_event.is_shift_pressed()
             && !key_event.is_ctrl_pressed()
             && self.last_key != "g"
+            && self.last_key != "z"
         {
             self.clear_pending_input_states();
             self.pending_char_op = Some('t');
@@ -2398,20 +2474,20 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle Ctrl+D for half page down
+        // Handle Ctrl+D for half page down - send to Neovim for viewport sync
         if key_event.is_ctrl_pressed() && keycode == Key::D {
             self.cancel_pending_operator();
-            self.half_page_down();
+            self.send_keys("<C-d>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
             return;
         }
 
-        // Handle Ctrl+U for half page up
+        // Handle Ctrl+U for half page up - send to Neovim for viewport sync
         if key_event.is_ctrl_pressed() && keycode == Key::U {
             self.cancel_pending_operator();
-            self.half_page_up();
+            self.send_keys("<C-u>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -2425,11 +2501,17 @@ impl GodotNeovimPlugin {
             && key_event.is_shift_pressed()
         {
             self.cancel_pending_operator();
-            // Shift+h/m/l = H/M/L (uppercase)
+            // Shift+h/m/l = H/M/L (uppercase) - send to Neovim for viewport-aware handling
             match keycode {
-                Key::H => self.move_cursor_to_visible_top(),
-                Key::M => self.move_cursor_to_visible_middle(),
-                Key::L => self.move_cursor_to_visible_bottom(),
+                Key::H => {
+                    self.send_keys("H");
+                }
+                Key::M => {
+                    self.send_keys("M");
+                }
+                Key::L => {
+                    self.send_keys("L");
+                }
                 _ => {}
             }
             if let Some(mut viewport) = self.base().get_viewport() {

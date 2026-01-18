@@ -19,6 +19,16 @@ pub struct NeovimState {
     /// Actual cursor position (line, col) - line is 0-indexed, col is byte position
     /// This comes from CursorMoved autocmd and is the true buffer position
     pub actual_cursor: Option<(i64, i64)>,
+    /// Viewport top line (0-indexed) - first visible line from win_viewport
+    pub viewport_topline: i64,
+    /// Viewport bottom line (0-indexed, exclusive) - last visible line + 1 from win_viewport
+    pub viewport_botline: i64,
+    /// Cursor line from win_viewport (buffer position, 0-indexed)
+    pub viewport_curline: i64,
+    /// Cursor column from win_viewport (buffer position, 0-indexed)
+    pub viewport_curcol: i64,
+    /// Flag indicating viewport has changed since last read
+    pub viewport_changed: bool,
 }
 
 /// Buffer events from nvim_buf_attach
@@ -56,6 +66,11 @@ impl NeovimHandler {
                 cursor: (0, 0),
                 cursor_grid: 1,
                 actual_cursor: None,
+                viewport_topline: 0,
+                viewport_botline: 0,
+                viewport_curline: 0,
+                viewport_curcol: 0,
+                viewport_changed: false,
             })),
             has_updates: Arc::new(AtomicBool::new(false)),
             buf_events: Arc::new(Mutex::new(VecDeque::new())),
@@ -336,6 +351,39 @@ impl NeovimHandler {
                                 state.cursor_grid = grid as i64;
                                 state.cursor = (row as i64, col as i64);
                                 self.has_updates.store(true, Ordering::SeqCst);
+                            }
+                            RedrawEvent::WinViewport {
+                                topline,
+                                botline,
+                                curline,
+                                curcol,
+                                ..
+                            } => {
+                                // Update viewport and cursor from win_viewport
+                                // curline/curcol are the buffer positions (more accurate than grid_cursor_goto)
+                                crate::verbose_print!(
+                                    "[godot-neovim] win_viewport: topline={}, botline={}, curline={}, curcol={}",
+                                    topline, botline, curline, curcol
+                                );
+                                let viewport_changed = state.viewport_topline != topline
+                                    || state.viewport_botline != botline;
+                                let cursor_changed = state.viewport_curline != curline
+                                    || state.viewport_curcol != curcol;
+
+                                if viewport_changed || cursor_changed {
+                                    crate::verbose_print!(
+                                        "[godot-neovim] win_viewport changed: viewport={}, cursor={}",
+                                        viewport_changed, cursor_changed
+                                    );
+                                    state.viewport_topline = topline;
+                                    state.viewport_botline = botline;
+                                    state.viewport_curline = curline;
+                                    state.viewport_curcol = curcol;
+                                    // Set flag when either viewport OR cursor changed
+                                    // so take_viewport() returns data for cursor sync from win_viewport
+                                    state.viewport_changed = viewport_changed || cursor_changed;
+                                    self.has_updates.store(true, Ordering::SeqCst);
+                                }
                             }
                             RedrawEvent::Flush | RedrawEvent::Unknown(_) => {
                                 // Flush: No longer needed since we set flag immediately
