@@ -469,30 +469,33 @@ impl IEditorPlugin for GodotNeovimPlugin {
         self.process_neovim_updates();
 
         // Check for key sequence timeout (like Neovim's timeoutlen)
+        // Only applies in Normal mode - Insert/Replace modes don't use operator-pending
         // If last_key has been pending too long, cancel it
-        if let Some(key_time) = self.last_key_time {
-            let timeoutlen = crate::settings::get_timeoutlen();
-            if key_time.elapsed().as_millis() > timeoutlen as u128 {
-                if !self.last_key.is_empty() {
-                    crate::verbose_print!(
-                        "[godot-neovim] Key sequence timeout: '{}' ({}ms elapsed)",
-                        self.last_key,
-                        key_time.elapsed().as_millis()
-                    );
-                    // Cancel Neovim's pending operator
-                    if let Some(ref neovim) = self.neovim {
-                        if let Ok(client) = neovim.try_lock() {
-                            let _ = client.input("<Esc>");
+        if !self.is_insert_mode() && !self.is_replace_mode() {
+            if let Some(key_time) = self.last_key_time {
+                let timeoutlen = crate::settings::get_timeoutlen();
+                if key_time.elapsed().as_millis() > timeoutlen as u128 {
+                    if !self.last_key.is_empty() {
+                        crate::verbose_print!(
+                            "[godot-neovim] Key sequence timeout: '{}' ({}ms elapsed)",
+                            self.last_key,
+                            key_time.elapsed().as_millis()
+                        );
+                        // Cancel Neovim's pending operator
+                        if let Some(ref neovim) = self.neovim {
+                            if let Ok(client) = neovim.try_lock() {
+                                let _ = client.input("<Esc>");
+                            }
                         }
+                        // Clear directly here (not using clear_last_key() to avoid double clearing last_key_time)
+                        self.last_key.clear();
                     }
-                    // Clear directly here (not using clear_last_key() to avoid double clearing last_key_time)
-                    self.last_key.clear();
-                }
-                self.last_key_time = None;
+                    self.last_key_time = None;
 
-                // Also clear related pending states on timeout
-                self.selected_register = None;
-                self.count_buffer.clear();
+                    // Also clear related pending states on timeout
+                    self.selected_register = None;
+                    self.count_buffer.clear();
+                }
             }
         }
     }

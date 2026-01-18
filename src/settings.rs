@@ -54,12 +54,12 @@ pub fn initialize_settings() {
     settings.add_property_info(&property_info);
 
     // Add neovim_clean setting if it doesn't exist
+    // Note: Only set initial value if setting doesn't exist to preserve user's value
     if !settings.has_setting(SETTING_NEOVIM_CLEAN) {
         settings.set_setting(SETTING_NEOVIM_CLEAN, &Variant::from(false));
+        // Set initial value only for new settings (p_basic=true: visible by default)
+        settings.set_initial_value(SETTING_NEOVIM_CLEAN, &Variant::from(false), true);
     }
-
-    // Set initial value for neovim_clean (p_basic=true: visible by default)
-    settings.set_initial_value(SETTING_NEOVIM_CLEAN, &Variant::from(false), true);
 
     // Add property info for neovim_clean (checkbox)
     #[allow(deprecated)]

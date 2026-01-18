@@ -514,6 +514,18 @@ impl GodotNeovimPlugin {
             // Sync cursor to Godot editor
             self.sync_cursor_from_grid(cursor);
 
+            // Clear pending key state when entering Insert/Replace mode
+            // (operator-pending sequences like 'o' are complete once we enter insert mode)
+            let entering_insert =
+                (mode == "i" || mode == "insert" || mode == "R" || mode == "replace")
+                    && old_mode != "i"
+                    && old_mode != "insert"
+                    && old_mode != "R"
+                    && old_mode != "replace";
+            if entering_insert {
+                self.clear_last_key();
+            }
+
             // Handle visual mode selection
             let was_visual = Self::is_visual_mode(&old_mode);
             let is_visual = Self::is_visual_mode(&mode);
