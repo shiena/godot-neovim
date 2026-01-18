@@ -245,6 +245,17 @@ function M.setup()
         end
     })
 
+    -- Send modified flag changes (for undo/redo dirty flag sync)
+    -- This fires when buffer's modified flag changes (true->false or false->true)
+    vim.api.nvim_create_autocmd('BufModifiedSet', {
+        group = augroup,
+        callback = function()
+            local bufnr = vim.api.nvim_get_current_buf()
+            local modified = vim.bo[bufnr].modified
+            vim.rpcnotify(0, "godot_modified_changed", bufnr, modified)
+        end
+    })
+
     -- Create user commands for debugging
     vim.api.nvim_create_user_command('GodotNeovimInfo', function()
         print('godot_neovim Lua plugin loaded')

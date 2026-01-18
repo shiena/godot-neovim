@@ -276,10 +276,8 @@ impl GodotNeovimPlugin {
 
         crate::verbose_print!("[godot-neovim] Key queued via channel: {}", keys);
 
-        // Sync modified flag only after undo/redo operations
-        if keys == "u" || keys == "<C-r>" {
-            self.pending_modified_sync = true;
-        }
+        // Note: Modified flag sync is now event-driven via BufModifiedSet autocmd
+        // No need to set pending_modified_sync here
 
         true
     }
@@ -380,6 +378,9 @@ impl GodotNeovimPlugin {
                     crate::verbose_print!("[godot-neovim] Buffer {} detached", buf);
                     self.sync_manager.set_attached(false);
                 }
+                BufEvent::ModifiedChanged { .. } => {
+                    // Ignore during escape - this is from our sync, not user edit
+                }
             }
         }
 
@@ -437,10 +438,6 @@ impl GodotNeovimPlugin {
     pub(super) fn process_neovim_updates(&mut self) {
         use crate::neovim::BufEvent;
 
-        // Check if we need to sync modified flag after undo/redo
-        let needs_modified_sync = self.pending_modified_sync;
-        self.pending_modified_sync = false;
-
         // Collect data from Neovim while holding lock, then release and process
         let (state_from_redraw, buf_events) = {
             let Some(ref neovim) = self.neovim else {
@@ -448,8 +445,6 @@ impl GodotNeovimPlugin {
             };
 
             let Ok(client) = neovim.try_lock() else {
-                // Restore flags if we couldn't get lock
-                self.pending_modified_sync = needs_modified_sync;
                 return;
             };
 
@@ -501,6 +496,18 @@ impl GodotNeovimPlugin {
                     crate::verbose_print!("[godot-neovim] Buffer {} detached", buf);
                     self.sync_manager.set_attached(false);
                 }
+                BufEvent::ModifiedChanged { modified, .. } => {
+                    crate::verbose_print!("[godot-neovim] Buffer modified changed: {}", modified);
+                    // If Neovim says buffer is not modified, clear Godot's dirty flag
+                    if !modified {
+                        if let Some(ref mut editor) = self.current_editor {
+                            editor.tag_saved_version();
+                            crate::verbose_print!(
+                                "[godot-neovim] Cleared Godot dirty flag (undo to unmodified)"
+                            );
+                        }
+                    }
+                }
             }
         }
 
@@ -542,11 +549,6 @@ impl GodotNeovimPlugin {
             } else if was_visual {
                 self.clear_visual_selection();
             }
-        }
-
-        // Sync modified flag if pending (after undo/redo)
-        if needs_modified_sync {
-            self.sync_modified_flag();
         }
     }
 
@@ -746,6 +748,8 @@ impl GodotNeovimPlugin {
 
     /// Sync Neovim's modified flag to Godot's dirty flag
     /// Called after undo/redo to handle the case where buffer returns to initial state
+    /// Note: Kept for potential future use - currently using event-driven approach
+    #[allow(dead_code)]
     fn sync_modified_flag(&mut self) {
         let Some(ref neovim) = self.neovim else {
             return;

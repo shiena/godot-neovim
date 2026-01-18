@@ -31,6 +31,8 @@ pub enum BufEvent {
     ChangedTick { buf: i64, tick: i64 },
     /// Buffer detached
     Detach { buf: i64 },
+    /// Buffer modified flag changed (from BufModifiedSet autocmd)
+    ModifiedChanged { buf: i64, modified: bool },
 }
 
 /// Handler for Neovim RPC notifications and requests
@@ -292,6 +294,28 @@ impl NeovimHandler {
         self.has_buf_events.store(true, Ordering::SeqCst);
     }
 
+    /// Parse godot_modified_changed notification from Lua BufModifiedSet autocmd
+    /// args: [buf, modified]
+    async fn handle_godot_modified_changed(&self, args: Vec<Value>) {
+        if args.len() < 2 {
+            return;
+        }
+
+        let buf = match &args[0] {
+            Value::Integer(i) => i.as_i64().unwrap_or(0),
+            _ => return,
+        };
+
+        let modified = match &args[1] {
+            Value::Boolean(b) => *b,
+            _ => return,
+        };
+
+        let mut events = self.buf_events.lock().await;
+        events.push_back(BufEvent::ModifiedChanged { buf, modified });
+        self.has_buf_events.store(true, Ordering::SeqCst);
+    }
+
     async fn handle_redraw(&self, args: Vec<Value>) {
         let mut state = self.state.lock().await;
 
@@ -349,6 +373,7 @@ impl Handler for NeovimHandler {
             "nvim_buf_detach_event" => self.handle_buf_detach_event(args).await,
             "godot_buf_lines" => self.handle_godot_buf_lines(args).await,
             "godot_cursor_moved" => self.handle_godot_cursor_moved(args).await,
+            "godot_modified_changed" => self.handle_godot_modified_changed(args).await,
             _ => {}
         }
     }
