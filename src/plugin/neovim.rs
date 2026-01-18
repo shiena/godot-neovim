@@ -169,6 +169,14 @@ impl GodotNeovimPlugin {
 
     /// Sync cursor position from Godot editor to Neovim
     pub(super) fn sync_cursor_to_neovim(&mut self) {
+        // Skip if buffer not yet initialized (e.g., during hot reload)
+        if self.sync_manager.get_line_count() == 0 {
+            crate::verbose_print!(
+                "[godot-neovim] sync_cursor_to_neovim: Buffer not initialized, skipping"
+            );
+            return;
+        }
+
         let Some(ref mut editor) = self.current_editor else {
             crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: No current editor");
             return;

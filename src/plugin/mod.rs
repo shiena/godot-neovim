@@ -352,14 +352,15 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Connect to settings changed signal
         self.connect_settings_signals();
 
-        // Try to find and sync current editor (in case a script is already open)
+        // Try to find existing CodeEdit (indicates hot reload if found)
         self.find_current_code_edit();
         if self.current_editor.is_some() {
-            crate::verbose_print!("[godot-neovim] Found existing CodeEdit, syncing initial buffer");
-            self.reposition_mode_label();
-            self.sync_buffer_to_neovim();
-            self.update_cursor_from_editor();
-            self.sync_cursor_to_neovim();
+            crate::verbose_print!(
+                "[godot-neovim] Found existing CodeEdit - triggering full reinitialization (hot reload)"
+            );
+            // Trigger full reinitialization via deferred call
+            // This uses the same flow as on_script_changed for consistent behavior
+            self.script_changed_pending.set(true);
         }
 
         // Enable process() to be called every frame for checking redraw events
