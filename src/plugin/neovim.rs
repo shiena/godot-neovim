@@ -289,6 +289,11 @@ impl GodotNeovimPlugin {
 
         crate::verbose_print!("[godot-neovim] send_escape");
 
+        // Cancel code completion popup if open
+        if let Some(ref mut editor) = self.current_editor {
+            editor.cancel_code_completion();
+        }
+
         // Set flag to buffer any keys pressed during the exit process
         // This prevents key loss when user types quickly after pressing Escape
         // Check for both short ("i", "R") and long ("insert", "replace") mode names
