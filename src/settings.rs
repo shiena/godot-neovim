@@ -39,9 +39,9 @@ pub fn initialize_settings() {
         settings.set_setting(SETTING_NEOVIM_PATH, &Variant::from(default_path));
     }
 
-    // Set initial value metadata (p_basic=true: visible by default)
+    // Set initial value for Revert button (update_current=false: don't overwrite user's value)
     let default_path = get_default_neovim_path();
-    settings.set_initial_value(SETTING_NEOVIM_PATH, &Variant::from(default_path), true);
+    settings.set_initial_value(SETTING_NEOVIM_PATH, &Variant::from(default_path), false);
 
     // Add property info for better UI
     #[allow(deprecated)]
@@ -54,13 +54,13 @@ pub fn initialize_settings() {
     settings.add_property_info(&property_info);
 
     // Add neovim_clean setting if it doesn't exist
-    // Note: Only set initial value if setting doesn't exist to preserve user's value
     // Default is true (--clean) for safety - avoids plugin compatibility issues
     if !settings.has_setting(SETTING_NEOVIM_CLEAN) {
         settings.set_setting(SETTING_NEOVIM_CLEAN, &Variant::from(true));
-        // Set initial value only for new settings (p_basic=true: visible by default)
-        settings.set_initial_value(SETTING_NEOVIM_CLEAN, &Variant::from(true), true);
     }
+
+    // Set initial value for Revert button (update_current=false: don't overwrite user's value)
+    settings.set_initial_value(SETTING_NEOVIM_CLEAN, &Variant::from(true), false);
 
     // Add property info for neovim_clean (checkbox)
     #[allow(deprecated)]
@@ -75,7 +75,7 @@ pub fn initialize_settings() {
         settings.set_setting(SETTING_TIMEOUTLEN, &Variant::from(DEFAULT_TIMEOUTLEN_MS));
     }
 
-    // Set initial value for timeoutlen (p_basic=false: advanced setting, hidden by default)
+    // Set initial value for Revert button (update_current=false: don't overwrite user's value)
     settings.set_initial_value(
         SETTING_TIMEOUTLEN,
         &Variant::from(DEFAULT_TIMEOUTLEN_MS),
