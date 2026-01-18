@@ -305,8 +305,12 @@ impl GodotNeovimPlugin {
         );
     }
 
-    /// Move cursor to specified position and sync with Neovim
+    /// Move cursor to specified position (Godot local only, does not sync to Neovim)
+    /// Caller is responsible for sending the corresponding key to Neovim
     pub(super) fn move_cursor_to(&mut self, line: i32, col: i32) {
+        // Set flag to prevent on_caret_changed from triggering sync_cursor_to_neovim
+        self.syncing_from_grid = true;
+
         // Update last_synced_cursor BEFORE setting caret to prevent
         // caret_changed signal from triggering extra sync_cursor_to_neovim
         self.last_synced_cursor = (line as i64, col as i64);
@@ -320,8 +324,8 @@ impl GodotNeovimPlugin {
         // Update cached cursor position
         self.current_cursor = (line as i64, col as i64);
 
-        // Sync to Neovim
-        self.sync_cursor_to_neovim();
+        // Clear flag
+        self.syncing_from_grid = false;
 
         // Update display
         let display_cursor = (line as i64 + 1, col as i64);

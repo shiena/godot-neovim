@@ -1914,9 +1914,25 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle '0' for go to start of line
+        // Handle count prefix (1-9, or 0 if count_buffer not empty)
+        // This tracks the count locally while also sending to Neovim
+        if let Some(c) = unicode_char {
+            if c.is_ascii_digit() && (c != '0' || !self.count_buffer.is_empty()) {
+                self.count_buffer.push(c);
+                self.send_keys(&c.to_string());
+                // Reset timeout to prevent <Esc> being sent during count input
+                self.last_key_time = Some(std::time::Instant::now());
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
+        }
+
+        // Handle '0' for go to start of line (only when not part of a count)
         if unicode_char == Some('0') && !key_event.is_ctrl_pressed() {
             self.move_to_line_start();
+            self.send_keys("0"); // Also send to Neovim
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1926,6 +1942,7 @@ impl GodotNeovimPlugin {
         // Handle '^' for go to first non-blank
         if unicode_char == Some('^') {
             self.move_to_first_non_blank();
+            self.send_keys("^"); // Also send to Neovim
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1935,6 +1952,7 @@ impl GodotNeovimPlugin {
         // Handle '$' for go to end of line
         if unicode_char == Some('$') {
             self.move_to_line_end();
+            self.send_keys("$"); // Also send to Neovim
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1960,12 +1978,13 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 'x' for delete char under cursor (but not after 'g' - that's 'gx' for open URL)
+        // Neovim Master: send to Neovim only, reflect via nvim_buf_lines_event
         if keycode == Key::X
             && !key_event.is_shift_pressed()
             && !key_event.is_ctrl_pressed()
             && self.last_key != "g"
         {
-            self.delete_char_forward();
+            self.send_keys("x");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1973,8 +1992,9 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 'X' for delete char before cursor
+        // Neovim Master: send to Neovim only
         if keycode == Key::X && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
-            self.delete_char_backward();
+            self.send_keys("X");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1982,8 +2002,9 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 'Y' for yank to end of line
+        // Neovim Master: send to Neovim only
         if keycode == Key::Y && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
-            self.yank_to_eol();
+            self.send_keys("Y");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1991,8 +2012,9 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 'D' for delete to end of line
+        // Neovim Master: send to Neovim only, reflect via nvim_buf_lines_event
         if keycode == Key::D && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
-            self.delete_to_eol();
+            self.send_keys("D");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -2000,8 +2022,9 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 'C' for change to end of line
+        // Neovim Master: send to Neovim only
         if keycode == Key::C && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
-            self.change_to_eol();
+            self.send_keys("C");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -2009,8 +2032,9 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 's' for substitute char (delete char and enter insert mode)
+        // Neovim Master: send to Neovim only
         if keycode == Key::S && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
-            self.substitute_char();
+            self.send_keys("s");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -2018,8 +2042,9 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 'S' for substitute line (delete line content and enter insert mode)
+        // Neovim Master: send to Neovim only
         if keycode == Key::S && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
-            self.substitute_line();
+            self.send_keys("S");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -2027,9 +2052,10 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 'cc' for substitute line (same as S)
+        // Neovim Master: send to Neovim only
         if keycode == Key::C && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
             if self.last_key == "c" {
-                self.substitute_line();
+                self.send_keys("c"); // Send second 'c' to complete 'cc'
                 self.clear_last_key();
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
@@ -2037,6 +2063,7 @@ impl GodotNeovimPlugin {
                 return;
             } else {
                 self.set_last_key("c");
+                self.send_keys("c"); // Send first 'c' to Neovim
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
                 }
