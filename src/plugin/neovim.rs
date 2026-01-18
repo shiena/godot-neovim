@@ -80,10 +80,13 @@ impl GodotNeovimPlugin {
                 // Set filetype for syntax highlighting
                 let _ = client.command("set filetype=gdscript");
 
-                // Mark buffer as saved in Godot
+                // Mark buffer as saved in Godot (only for new buffers to prevent false dirty flag on open)
+                // Don't call for existing buffers - it would clear dirty flag on tab switch
                 drop(client);
-                if let Some(ref mut editor) = self.current_editor {
-                    editor.tag_saved_version();
+                if result.is_new {
+                    if let Some(ref mut editor) = self.current_editor {
+                        editor.tag_saved_version();
+                    }
                 }
 
                 // Return cursor position (convert to 0-indexed line)

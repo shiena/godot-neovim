@@ -77,7 +77,6 @@ pub enum HelpMemberType {
     /// Property documentation (class_property:ClassName:property)
     Property,
     /// Signal documentation (class_signal:ClassName:signal)
-    #[allow(dead_code)]
     Signal,
     /// Constant documentation (class_constant:ClassName:constant)
     Constant,

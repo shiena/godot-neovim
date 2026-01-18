@@ -120,25 +120,16 @@ function M.switch_to_buffer(path, lines)
     -- Switch to the buffer
     vim.api.nvim_set_current_buf(bufnr)
 
-    -- Initialize content if this is a new buffer or not yet initialized
-    -- Also re-sync if line count differs (Godot content changed externally)
+    -- Initialize content only for new/uninitialized buffers
+    -- Don't re-init existing buffers - it would reset undo history
+    -- External file changes should be handled via :e! command
     local should_init = false
     if lines then
         if not M._initialized_buffers[bufnr] then
             should_init = true
-        else
-            -- Check if Godot's line count differs from Neovim's
-            -- Account for trailing empty line from Godot's trailing newline
-            local nvim_line_count = vim.api.nvim_buf_line_count(bufnr)
-            local godot_line_count = #lines
-            -- If Godot sent a trailing empty line, don't count it
-            if godot_line_count > 0 and lines[godot_line_count] == "" then
-                godot_line_count = godot_line_count - 1
-            end
-            if nvim_line_count ~= godot_line_count then
-                should_init = true
-            end
         end
+        -- Note: Removed line count check that was causing undo history reset
+        -- on buffer switch. Existing buffers keep their Neovim state.
     end
 
     if should_init and lines then

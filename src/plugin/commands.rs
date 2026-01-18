@@ -1261,6 +1261,26 @@ impl GodotNeovimPlugin {
             }
         }
 
+        // Pattern: "signal ClassName.signal_name(" or "signal signal_name(" - signal
+        if content.contains("signal ") && content.contains('(') {
+            // Extract class name from "signal ClassName.signal_name" pattern
+            if let Some((class_name, signal_name)) = Self::match_signal_class_member(&content) {
+                return Some(HelpQuery {
+                    class_name,
+                    member_name: Some(signal_name),
+                    member_type: HelpMemberType::Signal,
+                });
+            }
+            // Fallback: try to extract class from "Defined in" link
+            if let Some(class_name) = Self::extract_class_from_defined_in(&content) {
+                return Some(HelpQuery {
+                    class_name,
+                    member_name: Some(word.to_string()),
+                    member_type: HelpMemberType::Signal,
+                });
+            }
+        }
+
         // Pattern: "<Native> class ClassName" or just class name
         if content.contains("class ") {
             // Try to extract class name after "class "
@@ -1554,6 +1574,30 @@ impl GodotNeovimPlugin {
 
                     if !class_name.is_empty() && !method_name.is_empty() {
                         return Some((class_name, method_name));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Match "signal ClassName.signal_name(" pattern
+    fn match_signal_class_member(content: &str) -> Option<(String, String)> {
+        for line in content.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("signal ") {
+                if let Some((class_part, signal_part)) = rest.split_once('.') {
+                    let class_name: String = class_part
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+                    let signal_name: String = signal_part
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+
+                    if !class_name.is_empty() && !signal_name.is_empty() {
+                        return Some((class_name, signal_name));
                     }
                 }
             }

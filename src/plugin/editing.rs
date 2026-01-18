@@ -391,6 +391,12 @@ impl GodotNeovimPlugin {
     }
 
     /// Go to definition using LSP (gd command)
+    ///
+    /// Note: This uses Godot's built-in LSP (port 6005) instead of Neovim LSP.
+    /// Rationale: Similar to vscode-neovim which uses IDE's LSP.
+    /// - neovim_clean=true by default, so user's Neovim LSP config is not loaded
+    /// - Godot LSP is always available without additional user configuration
+    /// - File jumping across files is handled by Godot's editor
     pub(super) fn go_to_definition_lsp(&mut self) {
         use godot::classes::ProjectSettings;
 
