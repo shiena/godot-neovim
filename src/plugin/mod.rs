@@ -1079,13 +1079,15 @@ impl GodotNeovimPlugin {
     }
 
     /// Check if currently in insert mode
+    /// Neovim mode_change events can send "i" or "insert" depending on context
     fn is_insert_mode(&self) -> bool {
-        self.current_mode == "i"
+        self.current_mode == "i" || self.current_mode == "insert"
     }
 
     /// Check if currently in replace mode
+    /// Neovim mode_change events can send "R" or "replace" depending on context
     fn is_replace_mode(&self) -> bool {
-        self.current_mode == "R"
+        self.current_mode == "R" || self.current_mode == "replace"
     }
 
     /// Check if mode is a visual mode (v, V, or Ctrl+V)

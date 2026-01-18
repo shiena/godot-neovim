@@ -290,7 +290,8 @@ impl GodotNeovimPlugin {
 
         // Set flag to buffer any keys pressed during the exit process
         // This prevents key loss when user types quickly after pressing Escape
-        let was_insert = self.current_mode == "i" || self.current_mode == "R";
+        // Check for both short ("i", "R") and long ("insert", "replace") mode names
+        let was_insert = matches!(self.current_mode.as_str(), "i" | "insert" | "R" | "replace");
         if was_insert {
             self.is_exiting_insert_mode = true;
             self.pending_keys_after_exit.clear();
