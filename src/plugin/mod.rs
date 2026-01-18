@@ -143,9 +143,14 @@ pub struct GodotNeovimPlugin {
     /// Timestamp when last_key was set (for timeout detection)
     #[init(val = None)]
     last_key_time: Option<Instant>,
-    /// Queue of pending keys when mutex is busy (to avoid key drops)
-    #[init(val = std::collections::VecDeque::new())]
-    pending_keys: std::collections::VecDeque<String>,
+    /// Flag indicating Insert mode exit is in progress (vscode-neovim style)
+    /// When true, keys are buffered in pending_keys_after_exit
+    #[init(val = false)]
+    is_exiting_insert_mode: bool,
+    /// Keys pressed during Insert mode exit (vscode-neovim style)
+    /// These are sent after exit completes to prevent key loss
+    #[init(val = String::new())]
+    pending_keys_after_exit: String,
     /// Command line input buffer for ':' commands
     #[init(val = String::new())]
     command_buffer: String,
@@ -1122,16 +1127,18 @@ impl GodotNeovimPlugin {
                 "[godot-neovim] Cancelling pending operator: '{}'",
                 self.last_key
             );
-            // Send Escape to cancel Neovim's pending operator
+            // Send Escape to cancel Neovim's pending operator via channel
             if let Some(ref neovim) = self.neovim {
                 if let Ok(client) = neovim.try_lock() {
-                    let _ = client.input("<Esc>");
+                    if !client.send_key_via_channel("<Esc>") {
+                        crate::verbose_print!(
+                            "[godot-neovim] Failed to send <Esc> for pending operator cancellation"
+                        );
+                    }
                 } else {
-                    // Mutex busy - queue the Escape key to be sent later
                     crate::verbose_print!(
-                        "[godot-neovim] Mutex busy, queuing <Esc> for pending operator cancellation"
+                        "[godot-neovim] Mutex busy, could not send <Esc> for pending operator cancellation"
                     );
-                    self.pending_keys.push_back("<Esc>".to_string());
                 }
             }
             // Always clear local state even if Neovim Escape is queued

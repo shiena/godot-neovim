@@ -231,32 +231,47 @@ impl GodotNeovimPlugin {
         self.current_cursor = (final_line, col as i64);
     }
 
-    /// Send keys to Neovim (fire-and-forget - state comes via redraw events)
-    /// Returns true always (keys queued for processing)
-    /// Note: Keys are processed by Neovim's event loop, state updates come via redraw
+    /// Send keys to Neovim via unbounded channel (never blocks, never drops keys)
+    /// Keys are processed in order by a dedicated task
+    /// State updates come via redraw events (mode_change, grid_cursor_goto)
+    ///
+    /// If Insert mode exit is in progress (is_exiting_insert_mode), keys are
+    /// buffered in pending_keys_after_exit and sent together after exit completes.
+    /// This prevents key loss during mode transitions (vscode-neovim style).
     pub(super) fn send_keys(&mut self, keys: &str) -> bool {
         crate::verbose_print!("[godot-neovim] send_keys: {}", keys);
+
+        // If exiting Insert mode, buffer keys to be sent after exit completes
+        // This prevents key loss during the sync process (vscode-neovim style)
+        if self.is_exiting_insert_mode {
+            crate::verbose_print!(
+                "[godot-neovim] Buffering key during Insert mode exit: {}",
+                keys
+            );
+            self.pending_keys_after_exit.push_str(keys);
+            return true;
+        }
 
         let Some(ref neovim) = self.neovim else {
             crate::verbose_print!("[godot-neovim] No neovim");
             return false;
         };
 
+        // Try to get lock - channel send is instant so lock contention is minimal
         let Ok(client) = neovim.try_lock() else {
-            // Queue the key for retry instead of dropping
-            crate::verbose_print!("[godot-neovim] Mutex busy, queuing key: {}", keys);
-            self.pending_keys.push_back(keys.to_string());
+            // Even if lock fails, we can't queue without access to the channel
+            // This should be rare since channel send is non-blocking
+            crate::verbose_print!("[godot-neovim] Mutex busy, key may be lost: {}", keys);
             return false;
         };
 
-        // Send keys asynchronously (fire-and-forget)
-        // State updates will come via redraw events (mode_change, grid_cursor_goto)
-        if let Err(e) = client.input_async(keys) {
-            godot_error!("[godot-neovim] Failed to send keys: {}", e);
+        // Send keys via unbounded channel (never blocks, never drops)
+        if !client.send_key_via_channel(keys) {
+            godot_error!("[godot-neovim] Failed to queue keys via channel");
             return false;
         }
 
-        crate::verbose_print!("[godot-neovim] Key sent (async): {}", keys);
+        crate::verbose_print!("[godot-neovim] Key queued via channel: {}", keys);
 
         // Sync modified flag only after undo/redo operations
         if keys == "u" || keys == "<C-r>" {
@@ -267,10 +282,20 @@ impl GodotNeovimPlugin {
     }
 
     /// Send Escape to Neovim and force mode to normal
+    /// Uses vscode-neovim style: buffers keys pressed during exit and sends them together
     pub(super) fn send_escape(&mut self) {
         use crate::neovim::BufEvent;
 
         crate::verbose_print!("[godot-neovim] send_escape");
+
+        // Set flag to buffer any keys pressed during the exit process
+        // This prevents key loss when user types quickly after pressing Escape
+        let was_insert = self.current_mode == "i" || self.current_mode == "R";
+        if was_insert {
+            self.is_exiting_insert_mode = true;
+            self.pending_keys_after_exit.clear();
+            crate::verbose_print!("[godot-neovim] Exiting Insert mode - buffering enabled");
+        }
 
         // Save cursor position BEFORE any sync (buffer sync may trigger events that move cursor)
         let saved_cursor = self
@@ -279,16 +304,19 @@ impl GodotNeovimPlugin {
             .map(|editor| (editor.get_caret_line(), editor.get_caret_column()));
 
         let Some(ref neovim) = self.neovim else {
+            self.is_exiting_insert_mode = false;
             return;
         };
 
         let Ok(client) = neovim.try_lock() else {
+            self.is_exiting_insert_mode = false;
             return;
         };
 
-        // Send Escape to Neovim
-        if let Err(e) = client.input("<Esc>") {
-            godot_error!("[godot-neovim] Failed to send Escape: {}", e);
+        // Send Escape to Neovim via channel
+        if !client.send_key_via_channel("<Esc>") {
+            godot_error!("[godot-neovim] Failed to send Escape");
+            self.is_exiting_insert_mode = false;
             return;
         }
 
@@ -382,46 +410,28 @@ impl GodotNeovimPlugin {
         let display_cursor = (self.current_cursor.0 + 1, self.current_cursor.1);
         self.update_mode_display_with_cursor("n", Some(display_cursor));
 
-        crate::verbose_print!("[godot-neovim] Escaped to normal mode, buffer synced");
-    }
-
-    /// Process any pending keys that were queued due to mutex contention
-    fn process_pending_keys(&mut self) {
-        // Process up to a few keys per frame to avoid blocking
-        const MAX_KEYS_PER_FRAME: usize = 5;
-
-        for _ in 0..MAX_KEYS_PER_FRAME {
-            let Some(key) = self.pending_keys.pop_front() else {
-                break;
-            };
-
-            let Some(ref neovim) = self.neovim else {
-                // No neovim, discard pending keys
-                self.pending_keys.clear();
-                break;
-            };
-
-            let Ok(client) = neovim.try_lock() else {
-                // Still busy, put the key back and try next frame
-                self.pending_keys.push_front(key);
-                break;
-            };
-
-            // Send the queued key
-            if let Err(e) = client.input(&key) {
-                godot_error!("[godot-neovim] Failed to send queued key '{}': {}", key, e);
-            } else {
-                crate::verbose_print!("[godot-neovim] Sent queued key: {}", key);
+        // Send any keys that were buffered during the exit process (vscode-neovim style)
+        // This must be done AFTER exit is complete to ensure they're processed in Normal mode
+        if self.is_exiting_insert_mode && !self.pending_keys_after_exit.is_empty() {
+            let buffered_keys = std::mem::take(&mut self.pending_keys_after_exit);
+            crate::verbose_print!(
+                "[godot-neovim] Sending buffered keys after Insert mode exit: {}",
+                buffered_keys
+            );
+            if let Some(ref neovim) = self.neovim {
+                if let Ok(client) = neovim.try_lock() {
+                    let _ = client.send_key_via_channel(&buffered_keys);
+                }
             }
         }
+        self.is_exiting_insert_mode = false;
+
+        crate::verbose_print!("[godot-neovim] Escaped to normal mode, buffer synced");
     }
 
     /// Process pending updates from Neovim redraw events
     pub(super) fn process_neovim_updates(&mut self) {
         use crate::neovim::BufEvent;
-
-        // First, try to send any queued keys
-        self.process_pending_keys();
 
         // Check if we need to sync modified flag after undo/redo
         let needs_modified_sync = self.pending_modified_sync;

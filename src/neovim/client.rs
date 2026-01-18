@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::process::Command;
 use tokio::runtime::{Builder, Runtime};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::Mutex;
 
 #[cfg(target_os = "windows")]
@@ -119,6 +120,11 @@ pub struct NeovimClient {
     /// IO handler task - must be kept alive for events to be received
     #[allow(dead_code)]
     io_handle: Option<tokio::task::JoinHandle<Result<(), Box<nvim_rs::error::LoopError>>>>,
+    /// Key input channel sender (unbounded for no key drops)
+    key_input_tx: Option<UnboundedSender<String>>,
+    /// Key input processor task handle
+    #[allow(dead_code)]
+    key_input_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl NeovimClient {
@@ -140,6 +146,8 @@ impl NeovimClient {
             state,
             has_updates,
             io_handle: None,
+            key_input_tx: None,
+            key_input_handle: None,
         })
     }
 
@@ -321,17 +329,48 @@ impl NeovimClient {
 
         self.io_handle = Some(io_handle);
 
+        // Create unbounded channel for key input (no key drops)
+        let (tx, mut rx) = unbounded_channel::<String>();
+        self.key_input_tx = Some(tx);
+
+        // Spawn key input processor task
+        let neovim_arc = self.neovim.clone();
+        let key_input_handle = self.runtime.spawn(async move {
+            while let Some(keys) = rx.recv().await {
+                let nvim_lock = neovim_arc.lock().await;
+                if let Some(neovim) = nvim_lock.as_ref() {
+                    if let Err(e) = neovim.input(&keys).await {
+                        // Log error but continue processing
+                        // Note: Can't use godot_error here (tokio thread)
+                        eprintln!("[godot-neovim] Failed to send key '{}': {}", keys, e);
+                    }
+                }
+                // Release lock before next iteration
+                drop(nvim_lock);
+            }
+        });
+        self.key_input_handle = Some(key_input_handle);
+
         crate::verbose_print!(
             "[godot-neovim] IO handler spawned, has_updates={}",
             self.has_updates.load(std::sync::atomic::Ordering::SeqCst)
         );
+        crate::verbose_print!("[godot-neovim] Key input channel initialized (unbounded)");
 
         Ok(())
     }
 
     /// Stop Neovim process
     pub fn stop(&mut self) {
-        // Abort the IO handler first to prevent blocking on read
+        // Abort the key input handler first
+        if let Some(handle) = self.key_input_handle.take() {
+            handle.abort();
+            crate::verbose_print!("[godot-neovim] Key input handler aborted");
+        }
+        // Clear the key input sender
+        self.key_input_tx = None;
+
+        // Abort the IO handler to prevent blocking on read
         if let Some(handle) = self.io_handle.take() {
             handle.abort();
             crate::verbose_print!("[godot-neovim] IO handler aborted");
@@ -540,6 +579,18 @@ impl NeovimClient {
         });
 
         Ok(())
+    }
+
+    /// Send keys via unbounded channel (never blocks, never drops keys)
+    /// Keys are processed in order by a dedicated task
+    /// Returns true if key was queued, false if channel is not available
+    pub fn send_key_via_channel(&self, keys: &str) -> bool {
+        if let Some(ref tx) = self.key_input_tx {
+            // send() on unbounded channel never blocks and only fails if receiver is dropped
+            tx.send(keys.to_string()).is_ok()
+        } else {
+            false
+        }
     }
 
     /// Send a serial command (keyboard input, cursor movement)
