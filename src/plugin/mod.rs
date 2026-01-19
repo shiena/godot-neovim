@@ -872,6 +872,11 @@ impl GodotNeovimPlugin {
         // Update last_synced_cursor and sync to Neovim
         self.last_synced_cursor = (line as i64, col as i64);
         self.sync_cursor_to_neovim();
+
+        // Update mode label with new cursor position
+        // Display uses 1-indexed line number
+        let display_cursor = (line as i64 + 1, col as i64);
+        self.update_mode_display_with_cursor(&self.current_mode.clone(), Some(display_cursor));
     }
 
     #[func]
