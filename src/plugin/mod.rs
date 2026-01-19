@@ -2184,7 +2184,8 @@ impl GodotNeovimPlugin {
         }
 
         // Handle '0' for go to start of line (only when not part of a count)
-        if unicode_char == Some('0') && !key_event.is_ctrl_pressed() {
+        // Skip if last_key is "g" (g0 is handled separately for display line)
+        if unicode_char == Some('0') && !key_event.is_ctrl_pressed() && self.last_key != "g" {
             self.move_to_line_start();
             self.send_keys("0"); // Also send to Neovim
             if let Some(mut viewport) = self.base().get_viewport() {
@@ -2194,7 +2195,8 @@ impl GodotNeovimPlugin {
         }
 
         // Handle '^' for go to first non-blank
-        if unicode_char == Some('^') {
+        // Skip if last_key is "g" (g^ is handled separately for display line)
+        if unicode_char == Some('^') && self.last_key != "g" {
             self.move_to_first_non_blank();
             self.send_keys("^"); // Also send to Neovim
             if let Some(mut viewport) = self.base().get_viewport() {
@@ -2204,7 +2206,8 @@ impl GodotNeovimPlugin {
         }
 
         // Handle '$' for go to end of line
-        if unicode_char == Some('$') {
+        // Skip if last_key is "g" (g$ is handled separately for display line)
+        if unicode_char == Some('$') && self.last_key != "g" {
             self.move_to_line_end();
             self.send_keys("$"); // Also send to Neovim
             if let Some(mut viewport) = self.base().get_viewport() {
@@ -2916,16 +2919,14 @@ impl GodotNeovimPlugin {
                     }
                     "p" => {
                         // gp - paste and move cursor after pasted text
-                        // Note: paste_and_move_after() handles buffer sync internally
-                        // Don't send_keys("gp") as it would cause double execution
-                        self.paste_and_move_after();
+                        // Send to Neovim to preserve undo history and use Neovim registers
+                        self.send_keys("gp");
                         true
                     }
                     "P" => {
                         // gP - paste before and move cursor after pasted text
-                        // Note: paste_before_and_move_after() handles buffer sync internally
-                        // Don't send_keys("gP") as it would cause double execution
-                        self.paste_before_and_move_after();
+                        // Send to Neovim to preserve undo history and use Neovim registers
+                        self.send_keys("gP");
                         true
                     }
                     "e" => {
@@ -2936,14 +2937,14 @@ impl GodotNeovimPlugin {
                     }
                     "j" => {
                         // gj - move down by display line (wrapped line)
+                        // Local handling uses Godot's wrap info, cursor synced internally
                         self.move_display_line_down();
-                        self.send_keys("gj"); // Sync to Neovim
                         true
                     }
                     "k" => {
                         // gk - move up by display line (wrapped line)
+                        // Local handling uses Godot's wrap info, cursor synced internally
                         self.move_display_line_up();
-                        self.send_keys("gk"); // Sync to Neovim
                         true
                     }
                     "t" => {
@@ -2961,9 +2962,27 @@ impl GodotNeovimPlugin {
                         self.send_keys("<C-v>");
                         true
                     }
+                    "0" => {
+                        // g0 - move to start of display line (wrapped line)
+                        // Local handling uses Godot's wrap info, cursor synced internally
+                        self.move_to_display_line_start();
+                        true
+                    }
+                    "$" => {
+                        // g$ - move to end of display line (wrapped line)
+                        // Local handling uses Godot's wrap info, cursor synced internally
+                        self.move_to_display_line_end();
+                        true
+                    }
+                    "^" => {
+                        // g^ - move to first non-blank of display line
+                        // Local handling uses Godot's wrap info, cursor synced internally
+                        self.move_to_display_line_first_non_blank();
+                        true
+                    }
                     _ => {
                         // Unhandled g-command: send 'g' + second key to Neovim
-                        // (e.g., gg, g$, g0, g^, g_, etc.)
+                        // (e.g., gg, g_, etc.)
                         self.send_keys(&format!("g{}", keys));
                         true
                     }
