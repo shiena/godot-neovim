@@ -568,6 +568,18 @@ impl GodotNeovimPlugin {
                             path
                         );
                     }
+
+                    // Also reload Neovim buffer to discard changes there too
+                    if let Some(ref neovim) = self.neovim {
+                        if let Ok(client) = neovim.try_lock() {
+                            // :e! reloads the current buffer from disk
+                            let _ = client.command("e!");
+                            crate::verbose_print!(
+                                "[godot-neovim] ZQ - Reloaded Neovim buffer: {}",
+                                path
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -592,36 +604,77 @@ impl GodotNeovimPlugin {
     }
 
     /// :qa/:qall - Close all script tabs
+    /// Uses the same mechanism as Godot's "Close All" menu option
+    /// Note: Neovim buffer deletion is handled by on_script_close signal
     pub(super) fn cmd_close_all(&mut self) {
+        use godot::classes::MenuButton;
+
         // Disconnect from signals BEFORE closing
         self.disconnect_caret_changed_signal();
         self.disconnect_resized_signal();
 
-        // Don't clear references here - if user cancels save dialogs,
-        // scripts stay open and we need to keep the references.
-        // When scripts actually close, on_script_changed will handle cleanup.
+        // Set flag to skip on_script_changed processing during close all
+        // Will be reset by process() when operation completes
+        self.closing_all_tabs = true;
 
-        // Get the number of open scripts
+        // Clear current editor reference since it will be freed
+        self.current_editor = None;
+
         let editor = EditorInterface::singleton();
-        let script_count = if let Some(script_editor) = editor.get_script_editor() {
-            script_editor.get_open_scripts().len()
-        } else {
-            0
+        let Some(script_editor) = editor.get_script_editor() else {
+            godot_warn!("[godot-neovim] :qa - Could not find ScriptEditor");
+            self.closing_all_tabs = false;
+            return;
         };
 
-        // Close each script by simulating Ctrl+W multiple times
-        for _ in 0..script_count {
-            let mut key_event = InputEventKey::new_gd();
-            key_event.set_keycode(Key::W);
-            key_event.set_ctrl_pressed(true);
-            key_event.set_pressed(true);
-            Input::singleton().parse_input_event(&key_event);
+        let script_editor_node: Gd<Node> = script_editor.upcast();
+
+        // Structure: ScriptEditor -> VBoxContainer -> HBoxContainer (menu_hb) -> MenuButton (File)
+        let children = script_editor_node.get_children();
+        for i in 0..children.len() {
+            if let Some(child) = children.get(i) {
+                if child.is_class("VBoxContainer") {
+                    let vbox_children = child.get_children();
+                    for j in 0..vbox_children.len() {
+                        if let Some(vbox_child) = vbox_children.get(j) {
+                            if vbox_child.is_class("HBoxContainer") {
+                                // Found menu_hb, now find MenuButton (File)
+                                let hbox_children = vbox_child.get_children();
+                                for k in 0..hbox_children.len() {
+                                    if let Some(hbox_child) = hbox_children.get(k) {
+                                        if hbox_child.is_class("MenuButton") {
+                                            let menu_button: Gd<MenuButton> = hbox_child.cast();
+                                            if let Some(mut popup) = menu_button.get_popup() {
+                                                // FILE_MENU_CLOSE_ALL = 16
+                                                const FILE_MENU_CLOSE_ALL: i64 = 16;
+                                                // Use call_deferred to avoid borrow conflict:
+                                                // emit_signal triggers script_close synchronously,
+                                                // which calls on_script_close needing &mut self
+                                                popup.call_deferred(
+                                                    "emit_signal",
+                                                    &[
+                                                        "id_pressed".to_variant(),
+                                                        FILE_MENU_CLOSE_ALL.to_variant(),
+                                                    ],
+                                                );
+                                                crate::verbose_print!(
+                                                    "[godot-neovim] :qa - call_deferred emit_signal(id_pressed, {})",
+                                                    FILE_MENU_CLOSE_ALL
+                                                );
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        crate::verbose_print!(
-            "[godot-neovim] :qa - Close all triggered ({} scripts)",
-            script_count
-        );
+        godot_warn!("[godot-neovim] :qa - Could not find File menu in ScriptEditor");
+        self.closing_all_tabs = false;
     }
 
     /// :s/old/new/g or :%s/old/new/g - Substitute

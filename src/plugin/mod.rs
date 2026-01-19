@@ -266,6 +266,14 @@ pub struct GodotNeovimPlugin {
     /// Flag to skip cursor sync in on_script_changed (set by cmd_close)
     #[init(val = false)]
     cursor_synced_before_close: bool,
+    /// Flag to skip on_script_changed processing during :qa (Close All)
+    /// Reset when operation completes (detected in process())
+    #[init(val = false)]
+    closing_all_tabs: bool,
+    /// Buffers to delete from Neovim after :qa completes
+    /// Collected during closing_all_tabs to avoid sync commands during dialog processing
+    #[init(val = Vec::new())]
+    pending_buffer_deletions: Vec<String>,
     /// Last Neovim line we synced to (to prevent repeated clamping syncs)
     /// This is separate from last_synced_cursor because we need to track the NEOVIM line,
     /// not the Godot line, to prevent loops when user clicks on clamped line with different columns
@@ -401,6 +409,30 @@ impl IEditorPlugin for GodotNeovimPlugin {
     }
 
     fn process(&mut self, _delta: f64) {
+        // Event-driven reset for closing_all_tabs flag
+        // Only reset when ALL scripts are closed (not when cancelled)
+        if self.closing_all_tabs {
+            let editor = EditorInterface::singleton();
+            if let Some(script_editor) = editor.get_script_editor() {
+                let open_scripts = script_editor.get_open_scripts();
+
+                // Only reset when all scripts are closed
+                // If user cancels, the flag will be reset on next user input
+                if open_scripts.is_empty() {
+                    crate::verbose_print!(
+                        "[godot-neovim] :qa - All scripts closed, resetting flag"
+                    );
+                    self.closing_all_tabs = false;
+
+                    // Delete pending buffers from Neovim (deferred from on_script_close)
+                    let pending = std::mem::take(&mut self.pending_buffer_deletions);
+                    for path in pending {
+                        self.delete_neovim_buffer(&path);
+                    }
+                }
+            }
+        }
+
         // Handle deferred script change (set by on_script_changed to avoid borrow conflicts)
         if self.script_changed_pending.get() {
             self.script_changed_pending.set(false);
@@ -509,6 +541,17 @@ impl IEditorPlugin for GodotNeovimPlugin {
     }
 
     fn input(&mut self, event: Gd<godot::classes::InputEvent>) {
+        // Reset closing_all_tabs flag on user input (after :qa cancel)
+        // This reconnects to the current script after dialog processing completes
+        if self.closing_all_tabs {
+            self.closing_all_tabs = false;
+            // Clear pending deletions - user cancelled, so don't delete buffers
+            self.pending_buffer_deletions.clear();
+            crate::verbose_print!("[godot-neovim] :qa - Resetting flag on user input (cancelled)");
+            // Reconnect to current script
+            self.handle_script_changed();
+        }
+
         // Handle mouse click events - sync cursor position after click
         if let Ok(mouse_event) = event
             .clone()
@@ -666,6 +709,10 @@ impl GodotNeovimPlugin {
             // Connect to editor script changed signal
             let callable = self.base().callable("on_script_changed");
             script_editor.connect("editor_script_changed", &callable);
+
+            // Connect to script close signal (for Neovim buffer cleanup)
+            let close_callable = self.base().callable("on_script_close");
+            script_editor.connect("script_close", &close_callable);
         }
     }
 
@@ -846,6 +893,13 @@ impl GodotNeovimPlugin {
 
     #[func]
     fn on_script_changed(&mut self, script: Option<Gd<godot::classes::Script>>) {
+        // Skip processing during :qa (Close All) to avoid errors
+        // Flag will be reset by process() when operation completes
+        if self.closing_all_tabs {
+            crate::verbose_print!("[godot-neovim] Skipping on_script_changed (closing all tabs)");
+            return;
+        }
+
         // Sync cursor to Neovim before switching files
         // Skip if cursor was already synced by cmd_close (to avoid overwriting with wrong position)
         if self.cursor_synced_before_close {
@@ -895,6 +949,51 @@ impl GodotNeovimPlugin {
         // Only set flag - actual handling deferred to process() to avoid borrow conflicts
         // when signals are emitted during input processing (e.g., K command opening docs)
         self.script_changed_pending.set(true);
+    }
+
+    /// Called when a script is closed in Godot
+    /// Deletes the corresponding buffer from Neovim
+    #[func]
+    fn on_script_close(&mut self, script: Gd<godot::classes::Script>) {
+        let path = script.get_path().to_string();
+        if path.is_empty() {
+            return;
+        }
+
+        crate::verbose_print!("[godot-neovim] on_script_close: {}", path);
+
+        // During :qa, defer buffer deletion to avoid Viewport errors
+        // Neovim commands during dialog processing can cause issues
+        if self.closing_all_tabs {
+            self.pending_buffer_deletions.push(path);
+            crate::verbose_print!(
+                "[godot-neovim] on_script_close: Deferred deletion (closing_all_tabs)"
+            );
+            return;
+        }
+
+        // Delete the buffer from Neovim immediately
+        self.delete_neovim_buffer(&path);
+    }
+
+    /// Delete a buffer from Neovim by path
+    fn delete_neovim_buffer(&self, path: &str) {
+        let Some(ref neovim) = self.neovim else {
+            return;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            return;
+        };
+
+        // Use bwipeout to completely remove buffer (including undo history)
+        // This matches vscode-neovim's behavior with force=true
+        let cmd = format!("silent! bwipeout! {}", path);
+        if let Err(e) = client.command(&cmd) {
+            crate::verbose_print!("[godot-neovim] Failed to delete buffer {}: {}", path, e);
+        } else {
+            crate::verbose_print!("[godot-neovim] Deleted buffer from Neovim: {}", path);
+        }
     }
 
     #[func]
