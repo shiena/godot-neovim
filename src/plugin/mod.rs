@@ -1565,25 +1565,28 @@ impl GodotNeovimPlugin {
         if unicode > 0 {
             if let Some(c) = char::from_u32(unicode) {
                 self.pending_char_op = None;
+                // Build the key sequence for f/F/t/T
+                let keys = match op {
+                    'f' | 'F' | 't' | 'T' => Some(format!("{}{}", op, c)),
+                    _ => None,
+                };
+
                 match op {
-                    'f' => {
-                        self.find_char_forward(c, false);
-                        self.send_keys(&format!("f{}", c)); // Sync to Neovim for macro recording
-                    }
-                    'F' => {
-                        self.find_char_backward(c, false);
-                        self.send_keys(&format!("F{}", c)); // Sync to Neovim for macro recording
-                    }
-                    't' => {
-                        self.find_char_forward(c, true);
-                        self.send_keys(&format!("t{}", c)); // Sync to Neovim for macro recording
-                    }
-                    'T' => {
-                        self.find_char_backward(c, true);
-                        self.send_keys(&format!("T{}", c)); // Sync to Neovim for macro recording
-                    }
+                    'f' => self.find_char_forward(c, false),
+                    'F' => self.find_char_backward(c, false),
+                    't' => self.find_char_forward(c, true),
+                    'T' => self.find_char_backward(c, true),
                     'r' => self.replace_char(c),
                     _ => {}
+                }
+
+                // Send to Neovim and record to local macro buffer
+                if let Some(keys) = keys {
+                    self.send_keys(&keys);
+                    // Record to local macro buffer (early return skips normal recording)
+                    if self.recording_macro.is_some() && !self.playing_macro {
+                        self.macro_buffer.push(keys);
+                    }
                 }
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
@@ -2141,7 +2144,11 @@ impl GodotNeovimPlugin {
         // Handle ';' for repeat find char same direction
         if keycode == Key::SEMICOLON && !key_event.is_shift_pressed() {
             self.repeat_find_char(true);
-            self.send_keys(";"); // Sync to Neovim for macro recording
+            self.send_keys(";");
+            // Record to local macro buffer (early return skips normal recording)
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push(";".to_string());
+            }
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -2151,7 +2158,11 @@ impl GodotNeovimPlugin {
         // Handle ',' for repeat find char opposite direction
         if keycode == Key::COMMA && !key_event.is_shift_pressed() {
             self.repeat_find_char(false);
-            self.send_keys(","); // Sync to Neovim for macro recording
+            self.send_keys(",");
+            // Record to local macro buffer (early return skips normal recording)
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push(",".to_string());
+            }
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -2161,7 +2172,11 @@ impl GodotNeovimPlugin {
         // Handle '%' for matching bracket
         if unicode_char == Some('%') {
             self.jump_to_matching_bracket();
-            self.send_keys("%"); // Sync to Neovim for macro recording
+            self.send_keys("%");
+            // Record to local macro buffer (early return skips normal recording)
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("%".to_string());
+            }
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
