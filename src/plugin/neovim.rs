@@ -307,6 +307,30 @@ impl GodotNeovimPlugin {
         true
     }
 
+    /// Execute Neovim command directly via nvim_command API
+    /// This bypasses nvim_input and executes the command immediately
+    pub(super) fn execute_nvim_command(&mut self, cmd: &str) -> bool {
+        crate::verbose_print!("[godot-neovim] execute_nvim_command: {}", cmd);
+
+        let Some(ref neovim) = self.neovim else {
+            crate::verbose_print!("[godot-neovim] No neovim");
+            return false;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            crate::verbose_print!("[godot-neovim] Failed to lock neovim");
+            return false;
+        };
+
+        if let Err(e) = client.command(cmd) {
+            godot_error!("[godot-neovim] Failed to execute command '{}': {}", cmd, e);
+            return false;
+        }
+
+        crate::verbose_print!("[godot-neovim] Command executed: {}", cmd);
+        true
+    }
+
     /// Send Escape to Neovim and force mode to normal
     /// Uses vscode-neovim style: buffers keys pressed during exit and sends them together
     pub(super) fn send_escape(&mut self) {
@@ -729,10 +753,10 @@ impl GodotNeovimPlugin {
             change.last_line as i32
         };
 
-        // For full buffer replacement (first=0 and replacing most/all lines),
+        // For full buffer replacement (first=0 and replacing ALL lines),
         // use set_text directly to avoid line count drift issues
-        let is_full_replacement = first == 0
-            && (last as i64 >= line_count - 1 || last as i64 >= change.new_lines.len() as i64);
+        // Note: Only treat as full replacement when replacing the entire buffer
+        let is_full_replacement = first == 0 && last as i64 >= line_count;
 
         if is_full_replacement && !change.new_lines.is_empty() {
             // Full buffer replacement: use set_text for reliability

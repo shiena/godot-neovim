@@ -467,64 +467,24 @@ impl GodotNeovimPlugin {
             .add_theme_color_override("font_color", godot::prelude::Color::from_rgb(1.0, 1.0, 1.0));
     }
 
-    /// Insert at column 0 (gI command)
+    /// Insert at column 0 (gI command) - Neovim Master design
+    /// Send gI to Neovim and let it handle cursor positioning and mode change
     pub(super) fn insert_at_column_zero(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        // Save last insert position
-        let line_idx = editor.get_caret_line();
-        self.last_insert_position = Some((line_idx, 0));
-
-        // Move cursor to column 0
-        editor.set_caret_column(0);
-
-        // Enter insert mode by sending 'i' to Neovim
-        self.sync_cursor_to_neovim();
-        self.send_keys("i");
+        // Send gI to Neovim - it will move cursor to column 0 and enter insert mode
+        // Cursor position and mode change will be synced back via events
+        self.send_keys("gI");
         self.clear_last_key();
-        crate::verbose_print!(
-            "[godot-neovim] gI: Insert at column 0, line {}",
-            line_idx + 1
-        );
+        crate::verbose_print!("[godot-neovim] gI: Sent to Neovim");
     }
 
-    /// Insert at last insert position (gi command)
+    /// Insert at last insert position (gi command) - Neovim Master design
+    /// Send gi to Neovim and let it handle cursor positioning and mode change
     pub(super) fn insert_at_last_position(&mut self) {
-        let Some((line, col)) = self.last_insert_position else {
-            // No previous insert position - just enter insert mode
-            self.send_keys("i");
-            self.clear_last_key();
-            crate::verbose_print!(
-                "[godot-neovim] gi: No previous insert position, entering insert mode"
-            );
-            return;
-        };
-
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        // Clamp to valid range
-        let line_count = editor.get_line_count();
-        let target_line = line.min(line_count - 1);
-        let line_len = editor.get_line(target_line).len() as i32;
-        let target_col = col.min(line_len);
-
-        // Move to last insert position
-        editor.set_caret_line(target_line);
-        editor.set_caret_column(target_col);
-
-        // Enter insert mode
-        self.sync_cursor_to_neovim();
-        self.send_keys("i");
+        // Send gi to Neovim - it knows the last insert position
+        // Cursor position and mode change will be synced back via events
+        self.send_keys("gi");
         self.clear_last_key();
-        crate::verbose_print!(
-            "[godot-neovim] gi: Insert at last position ({}, {})",
-            target_line + 1,
-            target_col
-        );
+        crate::verbose_print!("[godot-neovim] gi: Sent to Neovim");
     }
 
     /// Go to file under cursor (gf command)

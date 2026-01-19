@@ -228,9 +228,6 @@ pub struct GodotNeovimPlugin {
     /// Last substitution: (pattern, replacement) for g& command
     #[init(val = None)]
     last_substitute: Option<(String, String)>,
-    /// Last insert position: (line, col) for gi command
-    #[init(val = None)]
-    last_insert_position: Option<(i32, i32)>,
     /// Last synced cursor position: (line, col) for detecting external cursor changes
     /// Used to prevent sync loops between Godot and Neovim
     #[init(val = (-1, -1))]
@@ -2503,7 +2500,12 @@ impl GodotNeovimPlugin {
 
         // Handle 'J' for join lines - send to Neovim (Neovim Master design)
         // Neovim will process the join and send buffer changes via nvim_buf_lines_event
-        if keycode == Key::J && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+        // Note: Skip if last_key is "g" to allow 'gJ' to be processed in g-prefix block
+        if keycode == Key::J
+            && key_event.is_shift_pressed()
+            && !key_event.is_ctrl_pressed()
+            && self.last_key != "g"
+        {
             self.send_keys("J");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -2735,14 +2737,14 @@ impl GodotNeovimPlugin {
                         true
                     }
                     "I" => {
-                        // gI - insert at column 0
-                        // Note: insert_at_column_zero() internally calls send_keys("i")
+                        // gI - insert at column 0 (Neovim Master design)
+                        // insert_at_column_zero() sends gI to Neovim
                         self.insert_at_column_zero();
                         true
                     }
                     "i" => {
-                        // gi - insert at last insert position
-                        // Note: insert_at_last_position() internally calls send_keys("i")
+                        // gi - insert at last insert position (Neovim Master design)
+                        // insert_at_last_position() sends gi to Neovim
                         self.insert_at_last_position();
                         true
                     }
@@ -2758,9 +2760,9 @@ impl GodotNeovimPlugin {
                         true
                     }
                     "J" => {
-                        // gJ - join lines without space - send to Neovim (Neovim Master design)
-                        // Neovim will process the join and send buffer changes via nvim_buf_lines_event
-                        self.send_keys("gJ");
+                        // gJ - join lines without space
+                        // Use Lua function from init.lua to handle comments option
+                        self.send_keys("<Cmd>lua require('godot_neovim').join_no_space()<CR>");
                         true
                     }
                     "p" => {

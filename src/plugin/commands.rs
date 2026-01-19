@@ -221,35 +221,16 @@ impl GodotNeovimPlugin {
         self.close_command_line();
     }
 
-    /// :{number} - Jump to specific line number
+    /// :{number} - Jump to specific line number (Neovim Master design)
     pub(super) fn cmd_goto_line(&mut self, line_num: i32) {
         // Add to jump list before jumping
         self.add_to_jump_list();
 
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
+        // Send command to Neovim - it will process and send win_viewport event
+        // This ensures cursor sync is consistent with Neovim's state
+        self.send_keys(&format!(":{}<CR>", line_num));
 
-        let line_count = editor.get_line_count();
-        // Convert 1-indexed to 0-indexed, clamp to valid range
-        let target_line = (line_num - 1).clamp(0, line_count - 1);
-
-        editor.set_caret_line(target_line);
-
-        // Move to first non-blank character (Vim behavior)
-        let line_text = editor.get_line(target_line).to_string();
-        let first_non_blank = line_text
-            .chars()
-            .position(|c| !c.is_whitespace())
-            .unwrap_or(0);
-        editor.set_caret_column(first_non_blank as i32);
-
-        self.sync_cursor_to_neovim();
-        crate::verbose_print!(
-            "[godot-neovim] :{}: Jumped to line {}",
-            line_num,
-            target_line + 1
-        );
+        crate::verbose_print!("[godot-neovim] :{}: Sent to Neovim", line_num);
     }
 
     /// :marks - Show all marks

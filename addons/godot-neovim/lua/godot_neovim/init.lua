@@ -264,6 +264,15 @@ function M.setup()
     end, {})
 end
 
+-- Join lines without space (gJ) while preserving comment leaders
+-- Temporarily clears 'comments' option to prevent comment leader removal
+function M.join_no_space()
+    local saved_comments = vim.bo.comments
+    vim.bo.comments = ''
+    vim.cmd('normal! gJ')
+    vim.bo.comments = saved_comments
+end
+
 -- Auto-setup on require
 M.setup()
 
