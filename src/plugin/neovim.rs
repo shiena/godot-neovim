@@ -89,6 +89,11 @@ impl GodotNeovimPlugin {
                     let width = 120i64;
                     // Ensure at least 10 lines to avoid too small window
                     let height = (visible_lines as i64).max(10);
+                    crate::verbose_print!(
+                        "[godot-neovim] Resize on script open: visible_lines={}, height={}",
+                        visible_lines,
+                        height
+                    );
                     client.ui_try_resize(width, height);
                 }
 
@@ -686,7 +691,7 @@ impl GodotNeovimPlugin {
 
         // Apply viewport changes from Neovim (zz, zt, zb, Ctrl+F, Ctrl+B, etc.)
         // win_viewport provides both viewport position and cursor position in buffer coordinates
-        if let Some((topline, _botline, curline, curcol)) = viewport_change {
+        if let Some((topline, botline, curline, curcol)) = viewport_change {
             // Clear skip_grid_cursor_after_switch flag - we now have valid viewport data
             self.skip_grid_cursor_after_switch = false;
 
@@ -736,6 +741,68 @@ impl GodotNeovimPlugin {
                     curline,
                     curcol
                 );
+
+                // Debug: Compare win_viewport cursor with nvim_win_get_cursor
+                // This helps identify if the issue is with win_viewport or Neovim itself
+                if let Some(ref neovim) = self.neovim {
+                    if let Ok(client) = neovim.try_lock() {
+                        if let Ok((api_line, api_col)) = client.get_cursor() {
+                            // api_line is 1-indexed, curline is 0-indexed
+                            if api_line - 1 != curline || api_col != curcol {
+                                crate::verbose_print!(
+                                    "[godot-neovim] CURSOR MISMATCH: win_viewport=({}, {}), nvim_win_get_cursor=({}, {})",
+                                    curline,
+                                    curcol,
+                                    api_line - 1,
+                                    api_col
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // Ctrl+B cursor correction for ext_multigrid
+                // When at end of file, Neovim reports wrong viewport height (e.g., 2 lines instead of 33),
+                // causing cursor to barely move. Correct by moving cursor to top of viewport.
+                if self.pending_page_up_correction {
+                    self.pending_page_up_correction = false;
+
+                    let viewport_height = botline - topline;
+                    // Check if cursor is near bottom of viewport (within last 3 lines)
+                    if curline > topline + viewport_height - 3 {
+                        // Move cursor to near top of viewport
+                        // At file beginning (topline=0): move to line 0
+                        // Otherwise: move to 2 lines from top
+                        let corrected_line = if topline == 0 { 0 } else { topline + 2 };
+                        crate::verbose_print!(
+                            "[godot-neovim] Ctrl+B cursor correction: {} -> {} (topline={}, botline={})",
+                            curline,
+                            corrected_line,
+                            topline,
+                            botline
+                        );
+
+                        // Update internal cursor state
+                        self.current_cursor = (corrected_line, curcol);
+
+                        // Sync corrected cursor to Godot editor
+                        self.sync_cursor_from_grid((corrected_line, curcol));
+
+                        // Sync corrected cursor to Neovim
+                        if let Some(ref neovim) = self.neovim {
+                            if let Ok(client) = neovim.try_lock() {
+                                // set_cursor expects 1-indexed line
+                                let _ = client.set_cursor(corrected_line + 1, curcol);
+                            }
+                        }
+
+                        // Update mode display with corrected position
+                        let display_cursor = (corrected_line + 1, curcol);
+                        if let Some((ref mode, _)) = state_from_redraw {
+                            self.update_mode_display_with_cursor(mode, Some(display_cursor));
+                        }
+                    }
+                }
             }
         }
     }

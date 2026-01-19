@@ -297,6 +297,11 @@ pub struct GodotNeovimPlugin {
     /// This flag prevents incorrect cursor positioning after :q and reopen
     #[init(val = false)]
     skip_grid_cursor_after_switch: bool,
+    /// Flag to apply cursor correction after Ctrl+B
+    /// With ext_multigrid, Ctrl+B at end of file reports wrong viewport height,
+    /// causing cursor to barely move. This flag triggers correction after viewport sync.
+    #[init(val = false)]
+    pending_page_up_correction: bool,
 }
 
 #[godot_api]
@@ -812,6 +817,11 @@ impl GodotNeovimPlugin {
 
             let width = 120i64;
             let height = (visible_lines as i64).max(10);
+            crate::verbose_print!(
+                "[godot-neovim] Resize on editor resize: visible_lines={}, height={}",
+                visible_lines,
+                height
+            );
             client.ui_try_resize(width, height);
         }
     }
@@ -1876,6 +1886,9 @@ impl GodotNeovimPlugin {
                 }
             } else {
                 // In normal mode: page up - send to Neovim, viewport syncs via win_viewport
+                // Set flag to correct cursor position after viewport sync
+                // (ext_multigrid reports wrong viewport height at end of file)
+                self.pending_page_up_correction = true;
                 self.send_keys("<C-b>");
             }
             if let Some(mut viewport) = self.base().get_viewport() {
