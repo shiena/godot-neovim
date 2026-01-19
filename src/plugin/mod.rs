@@ -283,6 +283,12 @@ pub struct GodotNeovimPlugin {
     /// Used to resize Neovim UI when Godot editor size changes
     #[init(val = 0)]
     last_visible_lines: i32,
+    /// Flag to skip grid_cursor_goto sync after buffer switch
+    /// When buffer is switched, viewport values may be the same as before close,
+    /// causing take_viewport() to return None and grid_cursor_goto to be used
+    /// This flag prevents incorrect cursor positioning after :q and reopen
+    #[init(val = false)]
+    skip_grid_cursor_after_switch: bool,
 }
 
 #[godot_api]
@@ -1014,8 +1020,12 @@ impl GodotNeovimPlugin {
                     safe_col
                 );
 
+                // Set syncing_from_grid to prevent on_caret_changed from setting user_cursor_sync
+                // This ensures zz/zt/zb viewport commands work after buffer switch
+                self.syncing_from_grid = true;
                 editor.set_caret_line(safe_line);
                 editor.set_caret_column(safe_col);
+                self.syncing_from_grid = false;
             }
         }
 

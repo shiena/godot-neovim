@@ -200,6 +200,16 @@ impl NeovimClient {
         })
     }
 
+    /// Force viewport_changed flag to true
+    /// Used after buffer switch to ensure next viewport event is processed
+    /// even if the values haven't changed from previous buffer
+    pub fn force_viewport_changed(&self) {
+        self.runtime.block_on(async {
+            let mut state = self.state.lock().await;
+            state.viewport_changed = true;
+        })
+    }
+
     /// Resize Neovim's UI to match Godot editor's visible area
     /// This is important for viewport commands (zz, zt, zb) to work correctly
     pub fn ui_try_resize(&self, width: i64, height: i64) {

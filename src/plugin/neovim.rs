@@ -92,9 +92,19 @@ impl GodotNeovimPlugin {
                     client.ui_try_resize(width, height);
                 }
 
+                // Force viewport_changed flag to ensure next viewport event is processed
+                // This is needed because viewport values may be same as before close
+                client.force_viewport_changed();
+
                 // Mark buffer as saved in Godot (only for new buffers to prevent false dirty flag on open)
                 // Don't call for existing buffers - it would clear dirty flag on tab switch
                 drop(client);
+
+                // Skip grid_cursor_goto sync until we receive viewport change
+                // This prevents incorrect cursor positioning when reopening a file after :q
+                // (viewport values may be same as before close, causing take_viewport() to return None)
+                self.skip_grid_cursor_after_switch = true;
+
                 if result.is_new {
                     if let Some(ref mut editor) = self.current_editor {
                         editor.tag_saved_version();
@@ -615,8 +625,12 @@ impl GodotNeovimPlugin {
             // while win_viewport gives accurate buffer position
             // IMPORTANT: Skip cursor sync during mode transitions (insert/visual) without viewport_change
             // because grid_cursor_goto gives screen-relative position which is wrong
-            let skip_grid_cursor =
-                entering_insert || leaving_insert || entering_visual || leaving_visual;
+            // Also skip after buffer switch until we receive viewport change
+            let skip_grid_cursor = entering_insert
+                || leaving_insert
+                || entering_visual
+                || leaving_visual
+                || self.skip_grid_cursor_after_switch;
             if viewport_change.is_none() && !skip_grid_cursor {
                 self.current_cursor = cursor;
 
@@ -667,6 +681,9 @@ impl GodotNeovimPlugin {
         // Apply viewport changes from Neovim (zz, zt, zb, Ctrl+F, Ctrl+B, etc.)
         // win_viewport provides both viewport position and cursor position in buffer coordinates
         if let Some((topline, _botline, curline, curcol)) = viewport_change {
+            // Clear skip_grid_cursor_after_switch flag - we now have valid viewport data
+            self.skip_grid_cursor_after_switch = false;
+
             // Use curline/curcol from win_viewport for cursor sync
             // This is more accurate than grid_cursor_goto which gives screen position
             let cursor = (curline, curcol);
