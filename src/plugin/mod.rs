@@ -1268,6 +1268,12 @@ impl GodotNeovimPlugin {
             return;
         };
 
+        // Check if label is still valid (may have been freed when script was closed)
+        if !label.is_instance_valid() {
+            self.mode_label = None;
+            return;
+        }
+
         // Get mode display name
         let mode_name = match mode {
             "n" => "NORMAL",
@@ -1319,6 +1325,13 @@ impl GodotNeovimPlugin {
         let Some(ref mut label) = self.mode_label else {
             return;
         };
+
+        // Check if label is still valid (may have been freed when script was closed)
+        if !label.is_instance_valid() {
+            self.mode_label = None;
+            return;
+        }
+
         let display_text = format!(" godot-neovim v{} ", VERSION);
         label.set_text(&display_text);
         // White color for version display

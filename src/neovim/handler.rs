@@ -370,20 +370,23 @@ impl NeovimHandler {
                                 let cursor_changed = state.viewport_curline != curline
                                     || state.viewport_curcol != curcol;
 
+                                // Always update state and set flag when win_viewport event arrives
+                                // Even if values are the same, we need to use win_viewport cursor
+                                // instead of grid_cursor_goto (which gives screen-relative position with ext_multigrid)
                                 if viewport_changed || cursor_changed {
                                     crate::verbose_print!(
                                         "[godot-neovim] win_viewport changed: viewport={}, cursor={}",
                                         viewport_changed, cursor_changed
                                     );
-                                    state.viewport_topline = topline;
-                                    state.viewport_botline = botline;
-                                    state.viewport_curline = curline;
-                                    state.viewport_curcol = curcol;
-                                    // Set flag when either viewport OR cursor changed
-                                    // so take_viewport() returns data for cursor sync from win_viewport
-                                    state.viewport_changed = viewport_changed || cursor_changed;
-                                    self.has_updates.store(true, Ordering::SeqCst);
                                 }
+                                state.viewport_topline = topline;
+                                state.viewport_botline = botline;
+                                state.viewport_curline = curline;
+                                state.viewport_curcol = curcol;
+                                // Always set flag so take_viewport() returns data
+                                // This ensures we use win_viewport cursor instead of grid_cursor_goto
+                                state.viewport_changed = true;
+                                self.has_updates.store(true, Ordering::SeqCst);
                             }
                             RedrawEvent::Flush | RedrawEvent::Unknown(_) => {
                                 // Flush: No longer needed since we set flag immediately
