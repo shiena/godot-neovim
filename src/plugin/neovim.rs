@@ -620,16 +620,22 @@ impl GodotNeovimPlugin {
             let entering_visual = is_visual && !was_visual;
             let leaving_visual = was_visual && !is_visual;
 
+            // Check if in operator-pending mode (d, c, y, etc. waiting for motion)
+            // In operator-pending mode, grid_cursor_goto returns screen-relative position
+            let is_operator_pending = mode == "operator" || mode == "no";
+
             // Only sync cursor from grid_cursor_goto if no viewport_change
             // When ext_multigrid is enabled, grid_cursor_goto gives screen position,
             // while win_viewport gives accurate buffer position
             // IMPORTANT: Skip cursor sync during mode transitions (insert/visual) without viewport_change
             // because grid_cursor_goto gives screen-relative position which is wrong
             // Also skip after buffer switch until we receive viewport change
+            // Also skip in operator-pending mode (d, c, y waiting for motion)
             let skip_grid_cursor = entering_insert
                 || leaving_insert
                 || entering_visual
                 || leaving_visual
+                || is_operator_pending
                 || self.skip_grid_cursor_after_switch;
             if viewport_change.is_none() && !skip_grid_cursor {
                 self.current_cursor = cursor;
