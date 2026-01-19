@@ -264,6 +264,11 @@ impl GodotNeovimPlugin {
     pub(super) fn send_keys(&mut self, keys: &str) -> bool {
         crate::verbose_print!("[godot-neovim] send_keys: {}", keys);
 
+        // Clear user_cursor_sync flag when sending keys
+        // This ensures Neovim's cursor updates are applied after keyboard input
+        // (user_cursor_sync is set by mouse click to prevent viewport override)
+        self.user_cursor_sync = false;
+
         // If exiting Insert mode, buffer keys to be sent after exit completes
         // This prevents key loss during the sync process (vscode-neovim style)
         if self.is_exiting_insert_mode {

@@ -1427,10 +1427,22 @@ impl GodotNeovimPlugin {
             if let Some(c) = char::from_u32(unicode) {
                 self.pending_char_op = None;
                 match op {
-                    'f' => self.find_char_forward(c, false),
-                    'F' => self.find_char_backward(c, false),
-                    't' => self.find_char_forward(c, true),
-                    'T' => self.find_char_backward(c, true),
+                    'f' => {
+                        self.find_char_forward(c, false);
+                        self.send_keys(&format!("f{}", c)); // Sync to Neovim for macro recording
+                    }
+                    'F' => {
+                        self.find_char_backward(c, false);
+                        self.send_keys(&format!("F{}", c)); // Sync to Neovim for macro recording
+                    }
+                    't' => {
+                        self.find_char_forward(c, true);
+                        self.send_keys(&format!("t{}", c)); // Sync to Neovim for macro recording
+                    }
+                    'T' => {
+                        self.find_char_backward(c, true);
+                        self.send_keys(&format!("T{}", c)); // Sync to Neovim for macro recording
+                    }
                     'r' => self.replace_char(c),
                     _ => {}
                 }
@@ -1987,6 +1999,7 @@ impl GodotNeovimPlugin {
         // Handle ';' for repeat find char same direction
         if keycode == Key::SEMICOLON && !key_event.is_shift_pressed() {
             self.repeat_find_char(true);
+            self.send_keys(";"); // Sync to Neovim for macro recording
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1996,6 +2009,7 @@ impl GodotNeovimPlugin {
         // Handle ',' for repeat find char opposite direction
         if keycode == Key::COMMA && !key_event.is_shift_pressed() {
             self.repeat_find_char(false);
+            self.send_keys(","); // Sync to Neovim for macro recording
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -2005,6 +2019,7 @@ impl GodotNeovimPlugin {
         // Handle '%' for matching bracket
         if unicode_char == Some('%') {
             self.jump_to_matching_bracket();
+            self.send_keys("%"); // Sync to Neovim for macro recording
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -2296,7 +2311,22 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle '[p' for paste before with indent adjustment
+        // Handle 'g' prefix - don't send to Neovim yet, wait for next key
+        // (like '[' and ']' prefixes)
+        // Note: Skip if last_key is already "g" to allow 'gg' to be processed
+        if unicode_char == Some('g')
+            && !key_event.is_ctrl_pressed()
+            && !key_event.is_shift_pressed()
+            && self.last_key != "g"
+        {
+            self.set_last_key("g");
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
+        // Handle '[' prefix - don't send to Neovim yet, wait for next key
         if unicode_char == Some('[') {
             self.set_last_key("[");
             if let Some(mut viewport) = self.base().get_viewport() {
@@ -2305,7 +2335,7 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle ']p' for paste after with indent adjustment
+        // Handle ']' prefix - don't send to Neovim yet, wait for next key
         if unicode_char == Some(']') {
             self.set_last_key("]");
             if let Some(mut viewport) = self.base().get_viewport() {
@@ -2374,6 +2404,7 @@ impl GodotNeovimPlugin {
                 }
                 Some('{') => {
                     self.jump_to_block_start('{', '}');
+                    self.send_keys("[{"); // Sync to Neovim for macro recording
                     self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
@@ -2382,6 +2413,7 @@ impl GodotNeovimPlugin {
                 }
                 Some('(') => {
                     self.jump_to_block_start('(', ')');
+                    self.send_keys("[("); // Sync to Neovim for macro recording
                     self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
@@ -2390,6 +2422,7 @@ impl GodotNeovimPlugin {
                 }
                 Some('m') => {
                     self.jump_to_prev_method();
+                    self.send_keys("[m"); // Sync to Neovim for macro recording
                     self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
@@ -2426,6 +2459,7 @@ impl GodotNeovimPlugin {
                 }
                 Some('}') => {
                     self.jump_to_block_end('{', '}');
+                    self.send_keys("]}"); // Sync to Neovim for macro recording
                     self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
@@ -2434,6 +2468,7 @@ impl GodotNeovimPlugin {
                 }
                 Some(')') => {
                     self.jump_to_block_end('(', ')');
+                    self.send_keys("])"); // Sync to Neovim for macro recording
                     self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
@@ -2442,6 +2477,7 @@ impl GodotNeovimPlugin {
                 }
                 Some('m') => {
                     self.jump_to_next_method();
+                    self.send_keys("]m"); // Sync to Neovim for macro recording
                     self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
@@ -2465,9 +2501,10 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle 'J' for join lines
+        // Handle 'J' for join lines - send to Neovim (Neovim Master design)
+        // Neovim will process the join and send buffer changes via nvim_buf_lines_event
         if keycode == Key::J && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
-            self.join_lines();
+            self.send_keys("J");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -2656,27 +2693,17 @@ impl GodotNeovimPlugin {
 
         // Forward key to Neovim (normal/visual/etc modes)
         if let Some(keys) = self.key_event_to_nvim_string(key_event) {
-            // Intercept g-prefix commands that should be handled locally
-            // (either because they conflict with Neovim's built-in commands, or because
-            // they need Godot-specific handling)
+            // Intercept g-prefix commands
+            // Note: 'g' is NOT sent to Neovim when typed - we wait for the second key
+            // and send the full command (like 'ge', 'gj', etc.) or 'g' + second key for unhandled commands
             if self.last_key == "g" {
-                // Helper to cancel pending 'g' operator in Neovim
-                let cancel_pending_g = |s: &mut Self| {
-                    if let Some(ref neovim) = s.neovim {
-                        if let Ok(client) = neovim.try_lock() {
-                            let _ = client.input("<Esc>");
-                        }
-                    }
-                };
-
                 let handled = match keys.as_str() {
                     "x" => {
-                        // gx - open URL under cursor
+                        // gx - open URL under cursor (Godot-specific, don't send to Neovim)
                         let saved_cursor = self
                             .current_editor
                             .as_ref()
                             .map(|e| (e.get_caret_line(), e.get_caret_column()));
-                        cancel_pending_g(self);
                         if let (Some((line, col)), Some(ref mut editor)) =
                             (saved_cursor, self.current_editor.as_mut())
                         {
@@ -2687,18 +2714,16 @@ impl GodotNeovimPlugin {
                         true
                     }
                     "f" => {
-                        // gf - go to file under cursor
-                        cancel_pending_g(self);
+                        // gf - go to file under cursor (Godot-specific, don't send to Neovim)
                         self.go_to_file_under_cursor();
                         true
                     }
                     "d" => {
-                        // gd - go to definition (using Godot LSP)
+                        // gd - go to definition (Godot LSP, don't send to Neovim)
                         let saved_cursor = self
                             .current_editor
                             .as_ref()
                             .map(|editor| (editor.get_caret_line(), editor.get_caret_column()));
-                        cancel_pending_g(self);
                         if let (Some((line, col)), Some(ref mut editor)) =
                             (saved_cursor, self.current_editor.as_mut())
                         {
@@ -2711,83 +2736,86 @@ impl GodotNeovimPlugin {
                     }
                     "I" => {
                         // gI - insert at column 0
-                        cancel_pending_g(self);
+                        // Note: insert_at_column_zero() internally calls send_keys("i")
                         self.insert_at_column_zero();
                         true
                     }
                     "i" => {
                         // gi - insert at last insert position
-                        cancel_pending_g(self);
+                        // Note: insert_at_last_position() internally calls send_keys("i")
                         self.insert_at_last_position();
                         true
                     }
                     "a" => {
-                        // ga - show character info under cursor
-                        cancel_pending_g(self);
+                        // ga - show character info under cursor (Godot-specific display)
                         self.show_char_info();
                         true
                     }
                     "&" => {
                         // g& - repeat last substitution on entire buffer
-                        cancel_pending_g(self);
+                        // Note: repeat_substitute() handles buffer sync internally
                         self.repeat_substitute();
                         true
                     }
                     "J" => {
-                        // gJ - join lines without space
-                        cancel_pending_g(self);
-                        self.join_lines_no_space();
+                        // gJ - join lines without space - send to Neovim (Neovim Master design)
+                        // Neovim will process the join and send buffer changes via nvim_buf_lines_event
+                        self.send_keys("gJ");
                         true
                     }
                     "p" => {
                         // gp - paste and move cursor after pasted text
-                        cancel_pending_g(self);
+                        // Note: paste_and_move_after() handles buffer sync internally
+                        // Don't send_keys("gp") as it would cause double execution
                         self.paste_and_move_after();
                         true
                     }
                     "P" => {
                         // gP - paste before and move cursor after pasted text
-                        cancel_pending_g(self);
+                        // Note: paste_before_and_move_after() handles buffer sync internally
+                        // Don't send_keys("gP") as it would cause double execution
                         self.paste_before_and_move_after();
                         true
                     }
                     "e" => {
                         // ge - move to end of previous word
-                        cancel_pending_g(self);
                         self.move_to_word_end_backward();
+                        self.send_keys("ge"); // Sync to Neovim
                         true
                     }
                     "j" => {
                         // gj - move down by display line (wrapped line)
-                        cancel_pending_g(self);
                         self.move_display_line_down();
+                        self.send_keys("gj"); // Sync to Neovim
                         true
                     }
                     "k" => {
                         // gk - move up by display line (wrapped line)
-                        cancel_pending_g(self);
                         self.move_display_line_up();
+                        self.send_keys("gk"); // Sync to Neovim
                         true
                     }
                     "t" => {
-                        // gt - go to next tab
-                        cancel_pending_g(self);
+                        // gt - go to next tab (Godot-specific, don't send to Neovim)
                         self.next_script_tab();
                         true
                     }
                     "T" => {
-                        // gT - go to previous tab
-                        cancel_pending_g(self);
+                        // gT - go to previous tab (Godot-specific, don't send to Neovim)
                         self.prev_script_tab();
                         true
                     }
                     "v" => {
                         // gv - enter visual block mode (alternative to Ctrl+V)
-                        cancel_pending_g(self);
                         self.send_keys("<C-v>");
                         true
                     }
-                    _ => false,
+                    _ => {
+                        // Unhandled g-command: send 'g' + second key to Neovim
+                        // (e.g., gg, g$, g0, g^, g_, etc.)
+                        self.send_keys(&format!("g{}", keys));
+                        true
+                    }
                 };
 
                 if handled {
