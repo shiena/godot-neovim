@@ -335,6 +335,32 @@ impl GodotNeovimPlugin {
             .as_ref()
             .map(|editor| (editor.get_caret_line(), editor.get_caret_column()));
 
+        // For gi command support: sync buffer and cursor BEFORE sending Escape
+        // This way Neovim will set '^' mark at the correct position when exiting insert mode
+        if was_insert {
+            // Sync buffer from Godot to Neovim (user was typing in Godot)
+            // Use keep_undo variant to preserve undo history so 'u' works
+            self.sync_buffer_to_neovim_keep_undo();
+
+            // Set Neovim cursor to Godot's cursor position before Escape
+            // This ensures Neovim's '^' mark is set at the right location
+            if let Some((line, col)) = saved_cursor {
+                if let Some(ref neovim) = self.neovim {
+                    if let Ok(client) = neovim.try_lock() {
+                        // nvim_win_set_cursor uses 1-indexed line, 0-indexed column
+                        let nvim_line = (line + 1) as i64;
+                        let nvim_col = col as i64;
+                        let _ = client.set_cursor(nvim_line, nvim_col);
+                        crate::verbose_print!(
+                            "[godot-neovim] Set Neovim cursor to ({}, {}) before Escape for gi",
+                            nvim_line,
+                            nvim_col
+                        );
+                    }
+                }
+            }
+        }
+
         let Some(ref neovim) = self.neovim else {
             self.is_exiting_insert_mode = false;
             return;
@@ -346,6 +372,7 @@ impl GodotNeovimPlugin {
         };
 
         // Send Escape to Neovim via channel
+        // Neovim will automatically set '^' mark at current cursor position
         if !client.send_key_via_channel("<Esc>") {
             godot_error!("[godot-neovim] Failed to send Escape");
             self.is_exiting_insert_mode = false;
@@ -355,10 +382,10 @@ impl GodotNeovimPlugin {
         // Release lock
         drop(client);
 
-        // Sync buffer from Godot to Neovim (user was typing in Godot)
-        // Use keep_undo variant to preserve undo history so 'u' works
-        // This will cause nvim_buf_lines_event which we need to handle
-        self.sync_buffer_to_neovim_keep_undo();
+        // For non-insert modes, sync buffer after Escape
+        if !was_insert {
+            self.sync_buffer_to_neovim_keep_undo();
+        }
 
         // Process any buffer events triggered by sync_buffer_to_neovim
         // to prevent them from moving cursor later
@@ -414,7 +441,7 @@ impl GodotNeovimPlugin {
             }
         }
 
-        // Restore cursor position after handling buffer events
+        // Restore cursor position in Godot after handling buffer events
         if let Some((line, col)) = saved_cursor {
             if let Some(ref mut editor) = self.current_editor {
                 self.last_synced_cursor = (line as i64, col as i64);
@@ -424,8 +451,10 @@ impl GodotNeovimPlugin {
             self.current_cursor = (line as i64, col as i64);
         }
 
-        // Sync cursor to Neovim
-        self.sync_cursor_to_neovim();
+        // Sync cursor to Neovim (for non-insert mode exits)
+        if !was_insert {
+            self.sync_cursor_to_neovim();
+        }
 
         // Force mode to normal (ESC always returns to normal mode)
         self.current_mode = "n".to_string();
