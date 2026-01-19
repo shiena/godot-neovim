@@ -1302,6 +1302,11 @@ impl GodotNeovimPlugin {
         Self::is_visual_mode(&self.current_mode)
     }
 
+    /// Check if mode is operator-pending mode (d, c, y, etc. waiting for motion)
+    fn is_operator_pending_mode(mode: &str) -> bool {
+        matches!(mode, "operator" | "no")
+    }
+
     /// Clear all pending input states to ensure mutual exclusivity
     /// Call this before setting any pending state
     fn clear_pending_input_states(&mut self) {
@@ -2679,7 +2684,11 @@ impl GodotNeovimPlugin {
             && (keycode == Key::H || keycode == Key::M || keycode == Key::L)
             && key_event.is_shift_pressed()
         {
-            self.cancel_pending_operator();
+            // H/M/L are valid motions in all contexts:
+            // - Normal mode: move cursor
+            // - Visual mode: extend selection
+            // - Operator-pending mode (d, c, y + H/M/L): complete the operation
+            // Do NOT cancel pending operator - let Neovim handle it
             // Shift+h/m/l = H/M/L (uppercase) - send to Neovim for viewport-aware handling
             match keycode {
                 Key::H => {
@@ -2991,8 +3000,12 @@ impl GodotNeovimPlugin {
 
             // Track last key for sequence detection, unless:
             // - scroll command was handled, or
-            // - we entered insert/replace mode (no sequence expected in those modes)
-            if !scroll_handled && !self.is_insert_mode() && !self.is_replace_mode() {
+            // - we entered insert/replace/visual mode (no sequence expected in those modes)
+            if !scroll_handled
+                && !self.is_insert_mode()
+                && !self.is_replace_mode()
+                && !self.is_in_visual_mode()
+            {
                 self.set_last_key(keys);
             }
 

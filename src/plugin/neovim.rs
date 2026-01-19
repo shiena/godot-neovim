@@ -602,9 +602,11 @@ impl GodotNeovimPlugin {
         }
 
         // Track visual mode state for use in both redraw and viewport_change processing
-        let mut is_visual = false;
-        let mut was_visual = false;
-        let mut visual_line_mode = false;
+        // Initialize from current mode - this handles cases where H/M/L are pressed in visual mode
+        // without triggering a mode_change event (is_visual would otherwise stay false)
+        let mut is_visual = Self::is_visual_mode(&self.current_mode);
+        let mut was_visual = is_visual;
+        let mut visual_line_mode = self.current_mode == "V";
 
         // Process state update from redraw events
         if let Some((ref mode, cursor)) = state_from_redraw {
@@ -627,7 +629,9 @@ impl GodotNeovimPlugin {
 
             // Check if in operator-pending mode (d, c, y, etc. waiting for motion)
             // In operator-pending mode, grid_cursor_goto returns screen-relative position
-            let is_operator_pending = mode == "operator" || mode == "no";
+            let was_operator_pending =
+                Self::is_operator_pending_mode(&old_mode) && !Self::is_operator_pending_mode(mode);
+            let is_operator_pending = Self::is_operator_pending_mode(mode);
 
             // Only sync cursor from grid_cursor_goto if no viewport_change
             // When ext_multigrid is enabled, grid_cursor_goto gives screen position,
@@ -636,11 +640,13 @@ impl GodotNeovimPlugin {
             // because grid_cursor_goto gives screen-relative position which is wrong
             // Also skip after buffer switch until we receive viewport change
             // Also skip in operator-pending mode (d, c, y waiting for motion)
+            // Also skip when leaving operator-pending mode (e.g., after yL completes)
             let skip_grid_cursor = entering_insert
                 || leaving_insert
                 || entering_visual
                 || leaving_visual
                 || is_operator_pending
+                || was_operator_pending
                 || self.skip_grid_cursor_after_switch;
             if viewport_change.is_none() && !skip_grid_cursor {
                 self.current_cursor = cursor;
@@ -666,8 +672,9 @@ impl GodotNeovimPlugin {
                 }
             }
 
-            // Clear pending key state when entering Insert/Replace mode
-            if entering_insert {
+            // Clear pending key state when entering Insert/Replace/Visual mode
+            // This prevents 'v' from being treated as a pending operator
+            if entering_insert || entering_visual {
                 self.clear_last_key();
             }
 
