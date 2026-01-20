@@ -97,6 +97,25 @@ impl GodotNeovimPlugin {
     }
 
     /// Execute the current command
+    /// Check if a command starts with a line range specifier
+    /// Line ranges: numbers (1,5), special chars (., $), marks ('a, '<, '>), relative (+1, -1)
+    fn has_line_range(cmd: &str) -> bool {
+        let first_char = cmd.chars().next();
+        match first_char {
+            // Number: :1,5d, :10d
+            Some(c) if c.is_ascii_digit() => true,
+            // Current line: :.,$d, :.d
+            Some('.') => true,
+            // Last line: :$d
+            Some('$') => true,
+            // Mark: :'<,'>s/old/new/g, :'a,'bd
+            Some('\'') => true,
+            // Relative: :+1d, :-1d
+            Some('+') | Some('-') => true,
+            _ => false,
+        }
+    }
+
     pub(super) fn execute_command(&mut self) {
         let command = self.command_buffer.clone();
 
@@ -128,8 +147,13 @@ impl GodotNeovimPlugin {
             }
             "e!" | "edit!" => self.cmd_reload(),
             _ => {
+                // Check for line range commands (e.g., :1,5d, :.,$s/old/new/g)
+                // Forward to Neovim for processing (Neovim Master design)
+                if Self::has_line_range(cmd) {
+                    self.cmd_forward_to_neovim(cmd);
+                }
                 // Check for :{number} - jump to line
-                if let Ok(line_num) = cmd.parse::<i32>() {
+                else if let Ok(line_num) = cmd.parse::<i32>() {
                     self.cmd_goto_line(line_num);
                 }
                 // Check for :marks - show marks
@@ -231,6 +255,15 @@ impl GodotNeovimPlugin {
         self.send_keys(&format!(":{}<CR>", line_num));
 
         crate::verbose_print!("[godot-neovim] :{}: Sent to Neovim", line_num);
+    }
+
+    /// Forward line range commands to Neovim (Neovim Master design)
+    /// Examples: :1,5d, :.,$s/old/new/g, :'<,'>d
+    fn cmd_forward_to_neovim(&mut self, cmd: &str) {
+        // Send command to Neovim - buffer changes will come back via nvim_buf_lines_event
+        self.send_keys(&format!(":{}<CR>", cmd));
+
+        crate::verbose_print!("[godot-neovim] :{}: Forwarded to Neovim", cmd);
     }
 
     /// :marks - Show all marks
