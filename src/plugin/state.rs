@@ -108,10 +108,19 @@ impl GodotNeovimPlugin {
         }
 
         // Get mode display name
+        // Note: Neovim returns "visual" for all visual modes (v, V, Ctrl+V)
+        // We use visual_mode_type to distinguish between them
         let mode_name = match mode {
             "n" | "normal" => "NORMAL",
             "i" | "insert" => "INSERT",
-            "v" | "visual" => "VISUAL",
+            "v" | "visual" => {
+                // Use tracked visual mode type since Neovim returns "visual" for all
+                match self.visual_mode_type {
+                    'V' => "V-LINE",
+                    '\x16' => "V-BLOCK",
+                    _ => "VISUAL",
+                }
+            }
             "V" | "visual-line" => "V-LINE",
             "\x16" | "^V" | "CTRL-V" | "visual-block" => "V-BLOCK",
             "c" | "command" => "COMMAND",

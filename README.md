@@ -18,6 +18,7 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 - Real Neovim backend (not just keybinding emulation)
 - Mode indicator with cursor position (e.g., `NORMAL 123:45`)
 - Cursor synchronization between Godot and Neovim
+- Float window support (undocked script editor panels)
 - Mouse drag selection syncs to Neovim visual mode
 - Support for count prefixes (e.g., `4j`, `10gg`)
 - Support for operator-pending commands (e.g., `gg`, `dd`, `yy`)

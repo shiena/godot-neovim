@@ -1,6 +1,7 @@
 //! Command-line mode management: open/close, history, execute
 
 use super::super::GodotNeovimPlugin;
+use godot::classes::Label;
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
@@ -10,10 +11,16 @@ impl GodotNeovimPlugin {
         self.command_mode = true;
         self.command_buffer = ":".to_string();
 
-        // Show command in mode label
+        // Show command in mode label with yellow color
         if let Some(ref mut label) = self.mode_label {
             label.set_text(":");
+            Self::set_command_mode_color(label);
         }
+    }
+
+    /// Set yellow color for command mode
+    fn set_command_mode_color(label: &mut Gd<Label>) {
+        label.add_theme_color_override("font_color", Color::from_rgb(1.0, 1.0, 0.4));
     }
 
     /// Close command-line mode

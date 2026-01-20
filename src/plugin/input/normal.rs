@@ -20,6 +20,7 @@ impl GodotNeovimPlugin {
             self.cancel_pending_operator();
             if Self::is_visual_mode(&self.current_mode) {
                 // In visual mode: switch to visual block (Ctrl+V alternative since Godot intercepts it)
+                self.visual_mode_type = '\x16'; // Ctrl+V = visual block
                 let completed = self.send_keys("<C-v>");
                 if completed {
                     self.clear_last_key();
@@ -1041,6 +1042,18 @@ impl GodotNeovimPlugin {
             }
         }
 
+        // Track visual mode type when entering visual mode
+        // Neovim returns "visual" for all visual modes, so we track the key pressed
+        if keycode == Key::V && !key_event.is_ctrl_pressed() {
+            if key_event.is_shift_pressed() {
+                // V (shift+V) - visual line mode
+                self.visual_mode_type = 'V';
+            } else {
+                // v - visual char mode
+                self.visual_mode_type = 'v';
+            }
+        }
+
         // Forward key to Neovim (normal/visual/etc modes)
         if let Some(keys) = self.key_event_to_nvim_string(key_event) {
             // Intercept g-prefix commands
@@ -1155,6 +1168,7 @@ impl GodotNeovimPlugin {
                     }
                     "v" => {
                         // gv - enter visual block mode (alternative to Ctrl+V)
+                        self.visual_mode_type = '\x16'; // Ctrl+V = visual block
                         self.send_keys("<C-v>");
                         true
                     }

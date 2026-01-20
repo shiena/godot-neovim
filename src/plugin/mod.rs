@@ -312,6 +312,10 @@ pub struct GodotNeovimPlugin {
     /// Set when syncing mouse selection to Neovim, cleared after sync completes
     #[init(val = false)]
     mouse_selection_syncing: bool,
+    /// Visual mode subtype: 'v' for char, 'V' for line, '\x16' for block
+    /// Neovim returns "visual" for all visual modes, so we track the key pressed
+    #[init(val = 'v')]
+    visual_mode_type: char,
 }
 
 #[godot_api]
@@ -407,6 +411,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
                 label.queue_free();
             }
         }
+
+        // Disconnect from gui_input signal
+        self.disconnect_gui_input_signal();
 
         // Clear current editor reference
         self.current_editor = None;
@@ -627,6 +634,10 @@ impl IEditorPlugin for GodotNeovimPlugin {
             keycode.ord(),
             Key::BRACKETLEFT.ord()
         );
+
+        // Clear user_cursor_sync flag to allow viewport sync from Neovim
+        // This flag might be set from previous mouse interactions
+        self.user_cursor_sync = false;
 
         // Handle command-line mode input
         if self.command_mode {
@@ -1120,6 +1131,150 @@ impl GodotNeovimPlugin {
 
         self.update_cursor_from_editor();
         self.sync_cursor_to_neovim();
+    }
+
+    /// Handle input from CodeEdit's gui_input signal
+    /// Float windows don't receive input through EditorPlugin.input(), so we connect to gui_input signal
+    /// This allows us to intercept and consume input before CodeEdit processes it
+    #[func]
+    fn on_codeedit_gui_input(&mut self, event: Gd<godot::classes::InputEvent>) {
+        // Only process if this is a float window
+        // Main window input is handled by EditorPlugin.input()
+        if !self.is_in_float_window() {
+            return;
+        }
+
+        // Reset closing_all_tabs flag on user input (after :qa cancel)
+        if self.closing_all_tabs {
+            self.closing_all_tabs = false;
+            self.pending_buffer_deletions.clear();
+            crate::verbose_print!("[godot-neovim] :qa - Resetting flag on gui_input (cancelled)");
+            self.handle_script_changed();
+        }
+
+        // Handle mouse click events
+        if let Ok(mouse_event) = event
+            .clone()
+            .try_cast::<godot::classes::InputEventMouseButton>()
+        {
+            if mouse_event.get_button_index() == godot::global::MouseButton::LEFT {
+                if mouse_event.is_pressed() {
+                    self.mouse_dragging = true;
+                    self.mouse_selection_syncing = false;
+                    if let Some(ref mut editor) = self.current_editor {
+                        editor.set_selecting_enabled(true);
+                    }
+                } else {
+                    self.mouse_dragging = false;
+                    self.base_mut()
+                        .call_deferred("sync_mouse_selection_to_neovim", &[]);
+                }
+            }
+            return;
+        }
+
+        // Only handle key events
+        let Ok(key_event) = event.try_cast::<godot::classes::InputEventKey>() else {
+            return;
+        };
+
+        // Only handle key press (not release)
+        if !key_event.is_pressed() {
+            return;
+        }
+
+        // Check if Neovim is connected
+        if self.neovim.is_none() {
+            crate::verbose_print!("[godot-neovim] gui_input: No neovim");
+            return;
+        }
+
+        // Clear user_cursor_sync flag to allow viewport sync from Neovim
+        self.user_cursor_sync = false;
+
+        // Accept the event to prevent CodeEdit from processing it
+        // This must be done in Normal/Visual modes to prevent characters from being typed
+        // In Insert/Replace modes, we let CodeEdit handle the input normally
+        let should_consume = !self.is_insert_mode() && !self.is_replace_mode();
+        if should_consume {
+            if let Some(ref mut editor) = self.current_editor {
+                editor.accept_event();
+            }
+        }
+
+        // Handle command-line mode input
+        if self.command_mode {
+            self.handle_command_mode_input(&key_event);
+            return;
+        }
+
+        // Handle search mode input (/ or ?)
+        if self.search_mode {
+            self.handle_search_mode_input(&key_event);
+            return;
+        }
+
+        // Handle pending character operator (f, F, t, T, r)
+        if self.handle_pending_char_op(&key_event) {
+            return;
+        }
+
+        // Handle pending mark operation (m, ', `)
+        if self.handle_pending_mark_op(&key_event) {
+            return;
+        }
+
+        // Handle pending macro operation (q for record, @ for play)
+        if self.handle_pending_macro_op(&key_event) {
+            return;
+        }
+
+        // Handle pending register selection (waiting for register char after ")
+        if self.handle_pending_register(&key_event) {
+            return;
+        }
+
+        // Handle insert mode
+        if self.is_insert_mode() {
+            self.handle_insert_mode_input(&key_event);
+            return;
+        }
+
+        // Handle replace mode
+        if self.is_replace_mode() {
+            self.handle_replace_mode_input(&key_event);
+            return;
+        }
+
+        // Handle normal/visual mode input
+        self.handle_normal_mode_input(&key_event);
+    }
+
+    /// Check if current CodeEdit is in a float window
+    fn is_in_float_window(&self) -> bool {
+        let Some(ref editor) = self.current_editor else {
+            return false;
+        };
+
+        let Some(window) = editor.get_window() else {
+            return false;
+        };
+
+        let main_window = EditorInterface::singleton()
+            .get_base_control()
+            .and_then(|c| c.get_window());
+
+        match main_window {
+            Some(ref main) => window.instance_id() != main.instance_id(),
+            None => false,
+        }
+    }
+
+    /// Handle input from float windows (legacy - kept for compatibility)
+    /// Now using gui_input signal instead
+    #[func]
+    fn on_float_window_input(&mut self, _event: Gd<godot::classes::InputEvent>) {
+        // Legacy handler - now using gui_input signal via on_codeedit_gui_input
     }
 }
 

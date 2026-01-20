@@ -322,7 +322,10 @@ impl NeovimHandler {
         };
 
         let mut events = self.buf_events.lock().await;
-        events.push_back(BufEvent::ModifiedChanged { _buf: buf, modified });
+        events.push_back(BufEvent::ModifiedChanged {
+            _buf: buf,
+            modified,
+        });
         self.has_buf_events.store(true, Ordering::SeqCst);
     }
 

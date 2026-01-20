@@ -615,7 +615,8 @@ impl GodotNeovimPlugin {
         // without triggering a mode_change event (is_visual would otherwise stay false)
         let mut is_visual = Self::is_visual_mode(&self.current_mode);
         let mut was_visual = is_visual;
-        let mut visual_line_mode = self.current_mode == "V";
+        // Use visual_mode_type since Neovim returns "visual" for all visual modes
+        let mut visual_line_mode = self.visual_mode_type == 'V';
 
         // Process state update from redraw events
         if let Some((ref mode, cursor)) = state_from_redraw {
@@ -632,7 +633,8 @@ impl GodotNeovimPlugin {
             // Check if entering/leaving visual mode
             was_visual = Self::is_visual_mode(&old_mode);
             is_visual = Self::is_visual_mode(mode);
-            visual_line_mode = mode == "V";
+            // Use visual_mode_type since Neovim returns "visual" for all visual modes
+            visual_line_mode = self.visual_mode_type == 'V';
             let entering_visual = is_visual && !was_visual;
             let leaving_visual = was_visual && !is_visual;
 
