@@ -717,6 +717,12 @@ impl GodotNeovimPlugin {
                     "[godot-neovim] Skipping viewport sync (user cursor sync): topline={}",
                     topline
                 );
+
+                // Still update mode display even when skipping viewport sync
+                let display_cursor = (curline + 1, curcol);
+                if let Some((ref mode, _)) = state_from_redraw {
+                    self.update_mode_display_with_cursor(mode, Some(display_cursor));
+                }
             } else {
                 // Set cursor FIRST - this may trigger Godot's auto-scroll
                 self.sync_cursor_from_grid(cursor);
@@ -819,6 +825,15 @@ impl GodotNeovimPlugin {
     /// Apply viewport (scroll position) from Neovim to Godot editor
     /// topline is the first visible line (0-indexed)
     fn apply_viewport_from_neovim(&mut self, topline: i64) {
+        // Skip if mouse selection is being synced (preserve user's viewport)
+        if self.mouse_selection_syncing {
+            crate::verbose_print!(
+                "[godot-neovim] Skipping viewport sync (mouse selection syncing): topline={}",
+                topline
+            );
+            return;
+        }
+
         let Some(ref mut editor) = self.current_editor else {
             return;
         };

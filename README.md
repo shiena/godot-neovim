@@ -18,6 +18,7 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 - Real Neovim backend (not just keybinding emulation)
 - Mode indicator with input mode and cursor position (e.g., `NORMAL (Hybrid) 123:45`)
 - Cursor synchronization between Godot and Neovim
+- Mouse drag selection syncs to Neovim visual mode
 - Support for count prefixes (e.g., `4j`, `10gg`)
 - Support for operator-pending commands (e.g., `gg`, `dd`, `yy`)
 - Configurable input mode (hybrid for Godot auto-completion, strict for full Neovim control)
@@ -442,7 +443,6 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 | Neovim config | `init.lua` and plugins are not loaded by default (`neovim_clean = true`). Can be enabled but may cause compatibility issues with some plugins (e.g., copilot.vim, lexima.vim). |
 | `K` for signals | Signal documentation lookup not supported (class/method/property/constant only) |
 | `[m`/`]m` for GDScript | Method jump commands require Neovim treesitter or language support. GDScript is not recognized by Neovim. |
-| Mouse drag selection | Mouse drag does not enter visual mode. Use `v`/`V`/`Ctrl+V` for selection. Click moves cursor only. |
 
 ### Known Issues
 

@@ -302,6 +302,13 @@ pub struct GodotNeovimPlugin {
     /// causing cursor to barely move. This flag triggers correction after viewport sync.
     #[init(val = false)]
     pending_page_up_correction: bool,
+    /// Flag indicating mouse is being dragged (for visual mode sync on release)
+    #[init(val = false)]
+    mouse_dragging: bool,
+    /// Flag to skip Neovim's visual selection update after mouse drag sync
+    /// Set when syncing mouse selection to Neovim, cleared after sync completes
+    #[init(val = false)]
+    mouse_selection_syncing: bool,
 }
 
 #[godot_api]
@@ -557,7 +564,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
             self.handle_script_changed();
         }
 
-        // Handle mouse click events - sync cursor position after click
+        // Handle mouse click events - Godot controls selection, sync to Neovim on release
         if let Ok(mouse_event) = event
             .clone()
             .try_cast::<godot::classes::InputEventMouseButton>()
@@ -566,26 +573,23 @@ impl IEditorPlugin for GodotNeovimPlugin {
             if mouse_event.get_button_index() == godot::global::MouseButton::LEFT
                 && self.editor_has_focus()
             {
-                let in_visual_mode = self.is_in_visual_mode();
-
                 if mouse_event.is_pressed() {
-                    // In normal mode, disable selecting to prevent accidental selection
-                    // from mouse scroll + click being interpreted as drag
-                    if !in_visual_mode {
-                        if let Some(ref mut editor) = self.current_editor {
-                            editor.set_selecting_enabled(false);
-                        }
-                    }
-                    // Use deferred call to sync cursor after Godot updates caret position
-                    self.base_mut()
-                        .call_deferred("sync_cursor_to_neovim_deferred", &[]);
-                } else {
-                    // On mouse button release, re-enable selecting
+                    // Start tracking drag
+                    self.mouse_dragging = true;
+                    // Reset mouse selection sync flag (new drag/click started)
+                    self.mouse_selection_syncing = false;
+
+                    // Enable selecting - let Godot handle selection natively
                     if let Some(ref mut editor) = self.current_editor {
                         editor.set_selecting_enabled(true);
                     }
-                    // Clear any accidental selection that might have occurred
-                    self.clear_accidental_selection();
+                } else {
+                    // Mouse release - sync to Neovim
+                    self.mouse_dragging = false;
+
+                    // Use deferred call to handle sync after Godot finalizes selection
+                    self.base_mut()
+                        .call_deferred("sync_mouse_selection_to_neovim", &[]);
                 }
             }
             return;
@@ -854,6 +858,11 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        // Skip during mouse drag - will sync on release
+        if self.mouse_dragging {
+            return;
+        }
+
         // Skip sync in Insert/Replace modes - cursor moves with every keystroke
         // and Neovim isn't receiving the input, so syncing is meaningless and causes freezes
         if self.is_insert_mode() || self.is_replace_mode() {
@@ -922,8 +931,108 @@ impl GodotNeovimPlugin {
         self.sync_cursor_to_neovim();
     }
 
+    /// Sync mouse selection to Neovim on mouse release
+    /// If there's a selection (drag), enter visual mode and sync selection range
+    /// If no selection (click), just sync cursor position
+    #[func]
+    fn sync_mouse_selection_to_neovim(&mut self) {
+        let in_visual_mode = self.is_in_visual_mode();
+
+        // Get selection info from editor first to avoid borrow conflicts
+        let selection_info = {
+            let Some(ref editor) = self.current_editor else {
+                return;
+            };
+
+            if editor.has_selection() {
+                Some((
+                    editor.get_selection_from_line(),
+                    editor.get_selection_from_column(),
+                    editor.get_selection_to_line(),
+                    editor.get_selection_to_column(),
+                ))
+            } else {
+                None
+            }
+        };
+
+        let cursor_pos = {
+            let Some(ref editor) = self.current_editor else {
+                return;
+            };
+            (editor.get_caret_line(), editor.get_caret_column())
+        };
+
+        // Set flag to skip viewport sync from Neovim
+        self.user_cursor_sync = true;
+
+        if let Some((from_line, from_col, to_line, to_col)) = selection_info {
+            // Drag occurred - sync selection to Neovim as visual mode
+            crate::verbose_print!(
+                "[godot-neovim] Mouse drag selection: ({}, {}) -> ({}, {})",
+                from_line + 1,
+                from_col,
+                to_line + 1,
+                to_col
+            );
+
+            // Set flag to skip Neovim's visual selection update
+            self.mouse_selection_syncing = true;
+
+            // Update last synced cursor to selection end
+            self.last_synced_cursor = (to_line as i64, to_col as i64);
+
+            // Use Lua function to atomically set visual selection
+            // This ensures ordering: move to start -> enter visual mode -> move to end
+            if let Some(ref neovim) = self.neovim {
+                if let Ok(client) = neovim.try_lock() {
+                    // Lua function expects 1-indexed line numbers
+                    match client.set_visual_selection(
+                        (from_line + 1) as i64,
+                        from_col as i64,
+                        (to_line + 1) as i64,
+                        to_col as i64,
+                    ) {
+                        Ok(mode) => {
+                            crate::verbose_print!(
+                                "[godot-neovim] Visual selection set via Lua, mode: {}",
+                                mode
+                            );
+                        }
+                        Err(e) => {
+                            crate::verbose_print!(
+                                "[godot-neovim] Failed to set visual selection: {}",
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Re-apply Godot selection (Neovim response may overwrite it)
+            if let Some(ref mut ed) = self.current_editor {
+                ed.select(from_line, from_col, to_line, to_col);
+            }
+        } else {
+            // Simple click - just sync cursor position
+            let (line, col) = cursor_pos;
+
+            crate::verbose_print!("[godot-neovim] Mouse click at ({}, {})", line + 1, col);
+
+            // If in visual mode, exit first
+            if in_visual_mode {
+                self.send_keys("<Esc>");
+            }
+
+            // Sync cursor position
+            self.last_synced_cursor = (line as i64, col as i64);
+            self.sync_cursor_to_neovim();
+        }
+    }
+
     /// Clear any accidental selection created by mouse operations
     /// Called on mouse button release to ensure clean state
+    #[allow(dead_code)]
     fn clear_accidental_selection(&mut self) {
         // Check visual mode first to avoid borrow conflict
         let in_visual_mode = self.is_in_visual_mode();
@@ -1436,7 +1545,7 @@ impl GodotNeovimPlugin {
 
         // Get mode display name
         let mode_name = match mode {
-            "n" => "NORMAL",
+            "n" | "normal" => "NORMAL",
             "i" | "insert" => "INSERT",
             "v" | "visual" => "VISUAL",
             "V" | "visual-line" => "V-LINE",
@@ -1457,7 +1566,7 @@ impl GodotNeovimPlugin {
 
         // Set color based on mode
         let color = match mode {
-            "n" => Color::from_rgb(0.0, 1.0, 0.5), // Green for normal
+            "n" | "normal" => Color::from_rgb(0.0, 1.0, 0.5), // Green for normal
             "i" | "insert" => Color::from_rgb(0.4, 0.6, 1.0), // Blue for insert
             "R" | "replace" => Color::from_rgb(1.0, 0.3, 0.3), // Red for replace
             "v" | "V" | "\x16" | "^V" | "CTRL-V" | "visual" | "visual-line" | "visual-block" => {

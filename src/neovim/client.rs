@@ -563,6 +563,66 @@ impl NeovimClient {
         })
     }
 
+    /// Set visual selection atomically via Lua
+    /// This ensures cursor movement and visual mode entry happen in the correct order
+    /// @param from_line: Selection start line (1-indexed)
+    /// @param from_col: Selection start column (0-indexed)
+    /// @param to_line: Selection end line (1-indexed)
+    /// @param to_col: Selection end column (0-indexed)
+    pub fn set_visual_selection(
+        &self,
+        from_line: i64,
+        from_col: i64,
+        to_line: i64,
+        to_col: i64,
+    ) -> Result<String, String> {
+        use rmpv::Value;
+        let neovim_arc = self.neovim.clone();
+
+        self.runtime.block_on(async {
+            let result =
+                tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    if let Some(neovim) = nvim_lock.as_ref() {
+                        let result = neovim
+                            .exec_lua(
+                                "return _G.godot_neovim.set_visual_selection(...)",
+                                vec![
+                                    Value::from(from_line),
+                                    Value::from(from_col),
+                                    Value::from(to_line),
+                                    Value::from(to_col),
+                                ],
+                            )
+                            .await
+                            .map_err(|e| format!("Failed to set visual selection: {}", e))?;
+
+                        // Parse result { mode }
+                        if let Value::Map(map) = result {
+                            for (k, v) in map {
+                                if let Value::String(key) = k {
+                                    if key.as_str() == Some("mode") {
+                                        if let Value::String(m) = v {
+                                            return Ok(m.as_str().unwrap_or("v").to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Ok("v".to_string())
+                    } else {
+                        Err("Neovim not connected".to_string())
+                    }
+                })
+                .await;
+
+            match result {
+                Ok(inner) => inner,
+                Err(_) => Err("Timeout setting visual selection".to_string()),
+            }
+        })
+    }
+
     /// Get current mode and cursor position via Lua
     /// Returns (mode, cursor_line, cursor_col) where line is 1-indexed
     #[allow(dead_code)]

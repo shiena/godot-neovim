@@ -273,6 +273,32 @@ function M.join_no_space()
     vim.bo.comments = saved_comments
 end
 
+-- Set visual selection atomically (for mouse drag selection sync)
+-- This ensures cursor movement and visual mode entry happen in correct order
+-- @param from_line number: Selection start line (1-indexed)
+-- @param from_col number: Selection start column (0-indexed)
+-- @param to_line number: Selection end line (1-indexed)
+-- @param to_col number: Selection end column (0-indexed)
+-- @return table: { mode = current mode after selection }
+function M.set_visual_selection(from_line, from_col, to_line, to_col)
+    -- Exit any existing visual mode first
+    local mode = vim.api.nvim_get_mode().mode
+    if mode:match('^[vV\x16]') then
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'nx', false)
+    end
+
+    -- Move cursor to selection start
+    vim.api.nvim_win_set_cursor(0, {from_line, from_col})
+
+    -- Enter visual mode
+    vim.cmd('normal! v')
+
+    -- Move cursor to selection end
+    vim.api.nvim_win_set_cursor(0, {to_line, to_col})
+
+    return { mode = vim.api.nvim_get_mode().mode }
+end
+
 -- Auto-setup on require
 M.setup()
 
