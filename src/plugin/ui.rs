@@ -152,4 +152,33 @@ impl GodotNeovimPlugin {
             crate::verbose_print!("[godot-neovim] Disconnected from resized signal");
         }
     }
+
+    /// Connect to CodeEdit gui_input signal for float window input handling
+    /// Float windows don't receive input through EditorPlugin.input()
+    pub(super) fn connect_gui_input_signal(&mut self) {
+        let callable = self.base().callable("on_codeedit_gui_input");
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        if !editor.is_connected("gui_input", &callable) {
+            editor.connect("gui_input", &callable);
+            crate::verbose_print!("[godot-neovim] Connected to gui_input signal");
+        }
+    }
+
+    /// Disconnect from CodeEdit gui_input signal
+    pub(super) fn disconnect_gui_input_signal(&mut self) {
+        let callable = self.base().callable("on_codeedit_gui_input");
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        if editor.is_connected("gui_input", &callable) {
+            editor.disconnect("gui_input", &callable);
+            crate::verbose_print!("[godot-neovim] Disconnected from gui_input signal");
+        }
+    }
 }

@@ -10,8 +10,10 @@ impl GodotNeovimPlugin {
         key_event: &Gd<godot::classes::InputEventKey>,
     ) {
         let keycode = key_event.get_keycode();
+        let ctrl_pressed = key_event.is_ctrl_pressed();
 
-        if keycode == Key::ESCAPE {
+        // Escape or Ctrl+[ closes command line
+        if keycode == Key::ESCAPE || (ctrl_pressed && keycode == Key::BRACKETLEFT) {
             self.close_command_line();
         } else if keycode == Key::ENTER {
             self.execute_command();
