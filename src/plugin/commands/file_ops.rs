@@ -352,37 +352,63 @@ impl GodotNeovimPlugin {
         self.disconnect_caret_changed_signal();
         self.disconnect_resized_signal();
 
-        let editor = EditorInterface::singleton();
-        if let Some(mut script_editor) = editor.get_script_editor() {
-            // Reload the script from disk and sync the CodeEdit
-            if let Some(mut current_script) = script_editor.get_current_script() {
-                let path = current_script.get_path();
-                if !path.is_empty() {
-                    // Reload the script from disk
-                    let _ = current_script.reload();
+        // Reload from disk using Lua function (same as :e!)
+        // This ensures we get the actual disk content, not stale Script data
+        if let Some(ref neovim) = self.neovim {
+            if let Ok(client) = neovim.try_lock() {
+                match client.execute_lua_with_result("return _G.godot_neovim.reload_buffer()") {
+                    Ok(result) => {
+                        if let rmpv::Value::Map(map) = result {
+                            let mut lines: Vec<String> = Vec::new();
 
-                    // Also update the CodeEdit to match the reloaded script
-                    if let Some(mut code_edit) = self.current_editor.clone() {
-                        let source = current_script.get_source_code();
-                        code_edit.set_text(&source);
-                        // Mark as saved to clear the unsaved state
-                        code_edit.tag_saved_version();
-                        crate::verbose_print!(
-                            "[godot-neovim] ZQ - Synced CodeEdit and tagged as saved: {}",
-                            path
-                        );
-                    }
+                            for (key, value) in map {
+                                if let rmpv::Value::String(k) = key {
+                                    if k.as_str() == Some("lines") {
+                                        if let rmpv::Value::Array(arr) = value {
+                                            lines = arr
+                                                .into_iter()
+                                                .filter_map(|v| {
+                                                    if let rmpv::Value::String(s) = v {
+                                                        s.into_str()
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                                .collect();
+                                        }
+                                    }
+                                }
+                            }
 
-                    // Also reload Neovim buffer to discard changes there too
-                    if let Some(ref neovim) = self.neovim {
-                        if let Ok(client) = neovim.try_lock() {
-                            // :e! reloads the current buffer from disk
-                            let _ = client.command("e!");
-                            crate::verbose_print!(
-                                "[godot-neovim] ZQ - Reloaded Neovim buffer: {}",
-                                path
-                            );
+                            let text = lines.join("\n");
+
+                            // Apply disk content to CodeEdit before closing
+                            if let Some(ref mut code_edit) = self.current_editor {
+                                code_edit.set_text(&text);
+                                code_edit.tag_saved_version();
+                                crate::verbose_print!(
+                                    "[godot-neovim] ZQ - Restored {} lines to CodeEdit",
+                                    lines.len()
+                                );
+                            }
+
+                            // Also update the Script resource to prevent Godot from
+                            // caching the modified content when reopening
+                            let editor = EditorInterface::singleton();
+                            if let Some(mut script_editor) = editor.get_script_editor() {
+                                if let Some(mut current_script) = script_editor.get_current_script()
+                                {
+                                    current_script.set_source_code(&text);
+                                    crate::verbose_print!(
+                                        "[godot-neovim] ZQ - Restored {} lines to Script",
+                                        lines.len()
+                                    );
+                                }
+                            }
                         }
+                    }
+                    Err(e) => {
+                        godot_warn!("[godot-neovim] ZQ - Failed to reload from disk: {}", e);
                     }
                 }
             }
