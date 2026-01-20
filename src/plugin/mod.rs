@@ -2092,11 +2092,14 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle 'f' for find char forward (but not after 'g' - that's 'gf' for go to file)
+        // Handle 'f' for find char forward (but not after 'g' - that's 'gf' for go to file,
+        // and not after 'i'/'a' - that's text object selection like 'vif')
         if keycode == Key::F
             && !key_event.is_shift_pressed()
             && !key_event.is_ctrl_pressed()
             && self.last_key != "g"
+            && self.last_key != "i"
+            && self.last_key != "a"
         {
             self.clear_pending_input_states();
             self.pending_char_op = Some('f');
@@ -2106,8 +2109,13 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle 'F' for find char backward
-        if keycode == Key::F && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+        // Handle 'F' for find char backward (not after 'i'/'a' - text object selection)
+        if keycode == Key::F
+            && key_event.is_shift_pressed()
+            && !key_event.is_ctrl_pressed()
+            && self.last_key != "i"
+            && self.last_key != "a"
+        {
             self.clear_pending_input_states();
             self.pending_char_op = Some('F');
             if let Some(mut viewport) = self.base().get_viewport() {
@@ -2117,12 +2125,15 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 't' for till char forward (but not after 'g' - that's gt for tab navigation,
-        // and not after 'z' - that's zt for scroll cursor to top)
+        // not after 'z' - that's zt for scroll cursor to top,
+        // and not after 'i'/'a' - that's text object selection like 'vit')
         if keycode == Key::T
             && !key_event.is_shift_pressed()
             && !key_event.is_ctrl_pressed()
             && self.last_key != "g"
             && self.last_key != "z"
+            && self.last_key != "i"
+            && self.last_key != "a"
         {
             self.clear_pending_input_states();
             self.pending_char_op = Some('t');
@@ -2132,11 +2143,14 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle 'T' for till char backward (but not after 'g' - that's gT for tab navigation)
+        // Handle 'T' for till char backward (but not after 'g' - that's gT for tab navigation,
+        // and not after 'i'/'a' - text object selection)
         if keycode == Key::T
             && key_event.is_shift_pressed()
             && !key_event.is_ctrl_pressed()
             && self.last_key != "g"
+            && self.last_key != "i"
+            && self.last_key != "a"
         {
             self.clear_pending_input_states();
             self.pending_char_op = Some('T');
@@ -3077,13 +3091,17 @@ impl GodotNeovimPlugin {
 
             // Track last key for sequence detection, unless:
             // - scroll command was handled, or
-            // - we entered insert/replace/visual mode (no sequence expected in those modes)
-            if !scroll_handled
-                && !self.is_insert_mode()
-                && !self.is_replace_mode()
-                && !self.is_in_visual_mode()
-            {
-                self.set_last_key(keys);
+            // - we entered insert/replace mode (no sequence expected in those modes)
+            // Note: In visual mode, we still track 'i' and 'a' for text object selection (vit, vat, etc.)
+            if !scroll_handled && !self.is_insert_mode() && !self.is_replace_mode() {
+                // In visual mode, only track 'i' and 'a' for text object prefix
+                if self.is_in_visual_mode() {
+                    if keys == "i" || keys == "a" {
+                        self.set_last_key(keys);
+                    }
+                } else {
+                    self.set_last_key(keys);
+                }
             }
 
             // Consume the event to prevent Godot's default handling
