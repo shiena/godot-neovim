@@ -187,6 +187,7 @@
 ## - Insert mode commands (Ctrl+O, Ctrl+W, etc.) not available[br]
 ## - Neovim config (init.lua, plugins) not loaded by default (neovim_clean=true)[br]
 ## - Uses Godot's undo system instead of Neovim's[br]
-## - [code][m ]m[/code] method jumps require treesitter (GDScript not supported by Neovim)
+## - [code][m ]m[/code] method jumps require treesitter (GDScript not supported by Neovim)[br]
+## - [code]:e![/code] leaves (*) marker until tab switch (gt/gT)
 class_name GodotNeovim
 extends RefCounted

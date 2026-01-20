@@ -434,6 +434,7 @@ Insert mode uses Godot's native input system to support auto-completion and othe
 | Issue | Workaround |
 |-------|------------|
 | Dirty flag not set after some operations (named register paste, macro playback) | Switch to another script tab and back (`gt` then `gT`) |
+| `(*)` marker remains after `:e!` reload | Switch tabs with `gt`/`gT` to clear the marker |
 
 ## Roadmap
 

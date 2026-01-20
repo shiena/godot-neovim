@@ -33,16 +33,17 @@ pub struct NeovimState {
 
 /// Buffer events from nvim_buf_attach
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum BufEvent {
     /// Buffer lines changed
     Lines(BufLinesEvent),
     /// Only changedtick updated (no content change)
-    ChangedTick { buf: i64, tick: i64 },
+    ChangedTick { _buf: i64, tick: i64 },
     /// Buffer detached
     Detach { buf: i64 },
     /// Buffer modified flag changed (from BufModifiedSet autocmd)
-    ModifiedChanged { buf: i64, modified: bool },
+    ModifiedChanged { _buf: i64, modified: bool },
+    /// Buffer entered (from BufEnter autocmd - for cross-buffer jumps)
+    BufEnter { _buf: i64, path: String },
 }
 
 /// Handler for Neovim RPC notifications and requests
@@ -96,12 +97,6 @@ impl NeovimHandler {
     /// Get a clone of the has_buf_events flag
     pub fn get_buf_events_flag(&self) -> Arc<AtomicBool> {
         self.has_buf_events.clone()
-    }
-
-    /// Check and clear the updates flag
-    #[allow(dead_code)]
-    pub fn take_updates(&self) -> bool {
-        self.has_updates.swap(false, Ordering::SeqCst)
     }
 
     /// Parse nvim_buf_lines_event notification
@@ -281,7 +276,7 @@ impl NeovimHandler {
         };
 
         let mut events = self.buf_events.lock().await;
-        events.push_back(BufEvent::ChangedTick { buf, tick });
+        events.push_back(BufEvent::ChangedTick { _buf: buf, tick });
         self.has_buf_events.store(true, Ordering::SeqCst);
     }
 
@@ -327,7 +322,31 @@ impl NeovimHandler {
         };
 
         let mut events = self.buf_events.lock().await;
-        events.push_back(BufEvent::ModifiedChanged { buf, modified });
+        events.push_back(BufEvent::ModifiedChanged { _buf: buf, modified });
+        self.has_buf_events.store(true, Ordering::SeqCst);
+    }
+
+    /// Parse godot_buf_enter notification from Lua BufEnter autocmd
+    /// args: [buf, path]
+    async fn handle_godot_buf_enter(&self, args: Vec<Value>) {
+        if args.len() < 2 {
+            return;
+        }
+
+        let buf = match &args[0] {
+            Value::Integer(i) => i.as_i64().unwrap_or(0),
+            _ => return,
+        };
+
+        let path = match &args[1] {
+            Value::String(s) => s.as_str().unwrap_or("").to_string(),
+            _ => return,
+        };
+
+        crate::verbose_print!("[godot-neovim] BufEnter: buf={}, path={}", buf, path);
+
+        let mut events = self.buf_events.lock().await;
+        events.push_back(BufEvent::BufEnter { _buf: buf, path });
         self.has_buf_events.store(true, Ordering::SeqCst);
     }
 
@@ -425,6 +444,7 @@ impl Handler for NeovimHandler {
             "godot_buf_lines" => self.handle_godot_buf_lines(args).await,
             "godot_cursor_moved" => self.handle_godot_cursor_moved(args).await,
             "godot_modified_changed" => self.handle_godot_modified_changed(args).await,
+            "godot_buf_enter" => self.handle_godot_buf_enter(args).await,
             _ => {}
         }
     }
