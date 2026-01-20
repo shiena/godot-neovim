@@ -562,14 +562,31 @@ impl IEditorPlugin for GodotNeovimPlugin {
             .clone()
             .try_cast::<godot::classes::InputEventMouseButton>()
         {
-            // Only handle left mouse button press when editor has focus
-            if mouse_event.is_pressed()
-                && mouse_event.get_button_index() == godot::global::MouseButton::LEFT
+            // Only handle left mouse button when editor has focus
+            if mouse_event.get_button_index() == godot::global::MouseButton::LEFT
                 && self.editor_has_focus()
             {
-                // Use deferred call to sync cursor after Godot updates caret position
-                self.base_mut()
-                    .call_deferred("sync_cursor_to_neovim_deferred", &[]);
+                let in_visual_mode = self.is_in_visual_mode();
+
+                if mouse_event.is_pressed() {
+                    // In normal mode, disable selecting to prevent accidental selection
+                    // from mouse scroll + click being interpreted as drag
+                    if !in_visual_mode {
+                        if let Some(ref mut editor) = self.current_editor {
+                            editor.set_selecting_enabled(false);
+                        }
+                    }
+                    // Use deferred call to sync cursor after Godot updates caret position
+                    self.base_mut()
+                        .call_deferred("sync_cursor_to_neovim_deferred", &[]);
+                } else {
+                    // On mouse button release, re-enable selecting
+                    if let Some(ref mut editor) = self.current_editor {
+                        editor.set_selecting_enabled(true);
+                    }
+                    // Clear any accidental selection that might have occurred
+                    self.clear_accidental_selection();
+                }
             }
             return;
         }
@@ -899,6 +916,23 @@ impl GodotNeovimPlugin {
         // Update last_synced_cursor and sync to Neovim
         self.last_synced_cursor = (line as i64, col as i64);
         self.sync_cursor_to_neovim();
+    }
+
+    /// Clear any accidental selection created by mouse operations
+    /// Called on mouse button release to ensure clean state
+    fn clear_accidental_selection(&mut self) {
+        // Check visual mode first to avoid borrow conflict
+        let in_visual_mode = self.is_in_visual_mode();
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        // Only clear selection if we're not in visual mode
+        if !in_visual_mode && editor.has_selection() {
+            editor.deselect();
+            crate::verbose_print!("[godot-neovim] Cleared accidental selection on mouse release");
+        }
     }
 
     #[func]

@@ -190,6 +190,7 @@
 ## - Insert mode commands (Ctrl+O, Ctrl+W, etc.) not available in hybrid mode[br]
 ## - Neovim config (init.lua, plugins) not loaded by default (neovim_clean=true)[br]
 ## - Uses Godot's undo system instead of Neovim's[br]
-## - [code][m ]m[/code] method jumps require treesitter (GDScript not supported by Neovim)
+## - [code][m ]m[/code] method jumps require treesitter (GDScript not supported by Neovim)[br]
+## - Mouse drag selection is disabled; use [code]v[/code]/[code]V[/code]/[code]Ctrl+V[/code] for selection
 class_name GodotNeovim
 extends RefCounted
