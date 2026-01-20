@@ -595,10 +595,13 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
+        let keycode = key_event.get_keycode();
         crate::verbose_print!(
-            "[godot-neovim] input: mode={}, key={:?}",
+            "[godot-neovim] input: mode={}, key={:?}, keycode_ord={}, BRACKETLEFT_ord={}",
             self.current_mode,
-            key_event.get_keycode()
+            keycode,
+            keycode.ord(),
+            Key::BRACKETLEFT.ord()
         );
 
         // Handle command-line mode input
@@ -1974,8 +1977,9 @@ impl GodotNeovimPlugin {
         }
 
         // Handle Ctrl+O for jump back in jump list
+        // Neovim Master: send to Neovim for proper jumplist support
         if key_event.is_ctrl_pressed() && keycode == Key::O {
-            self.jump_back();
+            self.send_keys("<C-o>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -1983,8 +1987,9 @@ impl GodotNeovimPlugin {
         }
 
         // Handle Ctrl+I (Tab) for jump forward in jump list
+        // Neovim Master: send to Neovim for proper jumplist support
         if key_event.is_ctrl_pressed() && keycode == Key::I {
-            self.jump_forward();
+            self.send_keys("<C-i>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -2232,7 +2237,8 @@ impl GodotNeovimPlugin {
         }
 
         // Handle '{' for previous paragraph (send to Neovim for proper cursor positioning)
-        if unicode_char == Some('{') {
+        // Skip if last_key is '[' or ']' - these are [{ / ]{ commands handled later
+        if unicode_char == Some('{') && self.last_key != "[" && self.last_key != "]" {
             self.send_keys("{");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -2241,7 +2247,8 @@ impl GodotNeovimPlugin {
         }
 
         // Handle '}' for next paragraph (send to Neovim for proper cursor positioning)
-        if unicode_char == Some('}') {
+        // Skip if last_key is '[' or ']' - these are [} / ]} commands handled later
+        if unicode_char == Some('}') && self.last_key != "[" && self.last_key != "]" {
             self.send_keys("}");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -2487,7 +2494,11 @@ impl GodotNeovimPlugin {
         }
 
         // Handle '[' prefix - don't send to Neovim yet, wait for next key
-        if unicode_char == Some('[') {
+        // Use keycode for keyboard layout independence (JP keyboard may have different unicode)
+        if keycode == Key::BRACKETLEFT
+            && !key_event.is_shift_pressed()
+            && !key_event.is_ctrl_pressed()
+        {
             self.set_last_key("[");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -2496,7 +2507,11 @@ impl GodotNeovimPlugin {
         }
 
         // Handle ']' prefix - don't send to Neovim yet, wait for next key
-        if unicode_char == Some(']') {
+        // Use keycode for keyboard layout independence (JP keyboard may have different unicode)
+        if keycode == Key::BRACKETRIGHT
+            && !key_event.is_shift_pressed()
+            && !key_event.is_ctrl_pressed()
+        {
             self.set_last_key("]");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -2563,8 +2578,8 @@ impl GodotNeovimPlugin {
                     return;
                 }
                 Some('{') => {
-                    self.jump_to_block_start('{', '}');
-                    self.send_keys("[{"); // Sync to Neovim for macro recording
+                    // Neovim Master: send to Neovim for proper jumplist support
+                    self.send_keys("[{");
                     self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
@@ -2572,8 +2587,8 @@ impl GodotNeovimPlugin {
                     return;
                 }
                 Some('(') => {
-                    self.jump_to_block_start('(', ')');
-                    self.send_keys("[("); // Sync to Neovim for macro recording
+                    // Neovim Master: send to Neovim for proper jumplist support
+                    self.send_keys("[(");
                     self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
@@ -2581,13 +2596,16 @@ impl GodotNeovimPlugin {
                     return;
                 }
                 Some('m') => {
-                    self.jump_to_prev_method();
-                    self.send_keys("[m"); // Sync to Neovim for macro recording
+                    // Neovim Master: send to Neovim for proper jumplist support
+                    self.send_keys("[m");
                     self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
                     return;
+                }
+                Some('\0') | None => {
+                    // Modifier-only key (SHIFT, etc.) or NUL char - don't clear last_key
                 }
                 _ => {
                     // Not a recognized [ command, clear and continue
@@ -2618,8 +2636,8 @@ impl GodotNeovimPlugin {
                     return;
                 }
                 Some('}') => {
-                    self.jump_to_block_end('{', '}');
-                    self.send_keys("]}"); // Sync to Neovim for macro recording
+                    // Neovim Master: send to Neovim for proper jumplist support
+                    self.send_keys("]}");
                     self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
@@ -2627,8 +2645,8 @@ impl GodotNeovimPlugin {
                     return;
                 }
                 Some(')') => {
-                    self.jump_to_block_end('(', ')');
-                    self.send_keys("])"); // Sync to Neovim for macro recording
+                    // Neovim Master: send to Neovim for proper jumplist support
+                    self.send_keys("])");
                     self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
@@ -2636,13 +2654,16 @@ impl GodotNeovimPlugin {
                     return;
                 }
                 Some('m') => {
-                    self.jump_to_next_method();
-                    self.send_keys("]m"); // Sync to Neovim for macro recording
+                    // Neovim Master: send to Neovim for proper jumplist support
+                    self.send_keys("]m");
                     self.clear_last_key();
                     if let Some(mut viewport) = self.base().get_viewport() {
                         viewport.set_input_as_handled();
                     }
                     return;
+                }
+                Some('\0') | None => {
+                    // Modifier-only key (SHIFT, etc.) or NUL char - don't clear last_key
                 }
                 _ => {
                     // Not a recognized ] command, clear and continue

@@ -118,6 +118,8 @@ impl GodotNeovimPlugin {
     }
 
     /// Jump back in jump list (Ctrl+O)
+    /// Note: Currently unused - Ctrl+O is sent to Neovim for jumplist support
+    #[allow(dead_code)]
     pub(super) fn jump_back(&mut self) {
         if self.jump_list.is_empty() {
             crate::verbose_print!("[godot-neovim] Ctrl+O: Jump list empty");
@@ -161,6 +163,8 @@ impl GodotNeovimPlugin {
     }
 
     /// Jump forward in jump list (Ctrl+I)
+    /// Note: Currently unused - Ctrl+I is sent to Neovim for jumplist support
+    #[allow(dead_code)]
     pub(super) fn jump_forward(&mut self) {
         if self.jump_list.is_empty() || self.jump_list_pos >= self.jump_list.len() - 1 {
             crate::verbose_print!("[godot-neovim] Ctrl+I: No newer position");
