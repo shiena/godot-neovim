@@ -2497,9 +2497,12 @@ impl GodotNeovimPlugin {
 
         // Handle '[' prefix - don't send to Neovim yet, wait for next key
         // Use keycode for keyboard layout independence (JP keyboard may have different unicode)
+        // Skip if last_key is already '[' or ']' (to allow [[, ]], [], ][ sequences)
         if keycode == Key::BRACKETLEFT
             && !key_event.is_shift_pressed()
             && !key_event.is_ctrl_pressed()
+            && self.last_key != "["
+            && self.last_key != "]"
         {
             self.set_last_key("[");
             if let Some(mut viewport) = self.base().get_viewport() {
@@ -2510,9 +2513,12 @@ impl GodotNeovimPlugin {
 
         // Handle ']' prefix - don't send to Neovim yet, wait for next key
         // Use keycode for keyboard layout independence (JP keyboard may have different unicode)
+        // Skip if last_key is already '[' or ']' (to allow [[, ]], [], ][ sequences)
         if keycode == Key::BRACKETRIGHT
             && !key_event.is_shift_pressed()
             && !key_event.is_ctrl_pressed()
+            && self.last_key != "["
+            && self.last_key != "]"
         {
             self.set_last_key("]");
             if let Some(mut viewport) = self.base().get_viewport() {
@@ -2559,26 +2565,33 @@ impl GodotNeovimPlugin {
         }
 
         // Handle '[' commands
+        // Use keycode for keyboard layout independence (JP keyboard support)
         if self.last_key == "[" {
+            // [[ - jump to previous '{' at start of line (send to Neovim)
+            if keycode == Key::BRACKETLEFT
+                && !key_event.is_shift_pressed()
+                && !key_event.is_ctrl_pressed()
+            {
+                self.send_keys("[[");
+                self.clear_last_key();
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
+            // [] - jump to previous '}' at start of line (send to Neovim)
+            if keycode == Key::BRACKETRIGHT
+                && !key_event.is_shift_pressed()
+                && !key_event.is_ctrl_pressed()
+            {
+                self.send_keys("[]");
+                self.clear_last_key();
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
             match unicode_char {
-                Some('[') => {
-                    // [[ - jump to previous '{' at start of line (send to Neovim)
-                    self.send_keys("[[");
-                    self.clear_last_key();
-                    if let Some(mut viewport) = self.base().get_viewport() {
-                        viewport.set_input_as_handled();
-                    }
-                    return;
-                }
-                Some(']') => {
-                    // [] - jump to previous '}' at start of line (send to Neovim)
-                    self.send_keys("[]");
-                    self.clear_last_key();
-                    if let Some(mut viewport) = self.base().get_viewport() {
-                        viewport.set_input_as_handled();
-                    }
-                    return;
-                }
                 Some('{') => {
                     // Neovim Master: send to Neovim for proper jumplist support
                     self.send_keys("[{");
@@ -2617,26 +2630,33 @@ impl GodotNeovimPlugin {
         }
 
         // Handle ']' commands
+        // Use keycode for keyboard layout independence (JP keyboard support)
         if self.last_key == "]" {
+            // ]] - jump to next '{' at start of line (send to Neovim)
+            if keycode == Key::BRACKETRIGHT
+                && !key_event.is_shift_pressed()
+                && !key_event.is_ctrl_pressed()
+            {
+                self.send_keys("]]");
+                self.clear_last_key();
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
+            // ][ - jump to next '}' at start of line (send to Neovim)
+            if keycode == Key::BRACKETLEFT
+                && !key_event.is_shift_pressed()
+                && !key_event.is_ctrl_pressed()
+            {
+                self.send_keys("][");
+                self.clear_last_key();
+                if let Some(mut viewport) = self.base().get_viewport() {
+                    viewport.set_input_as_handled();
+                }
+                return;
+            }
             match unicode_char {
-                Some(']') => {
-                    // ]] - jump to next '{' at start of line (send to Neovim)
-                    self.send_keys("]]");
-                    self.clear_last_key();
-                    if let Some(mut viewport) = self.base().get_viewport() {
-                        viewport.set_input_as_handled();
-                    }
-                    return;
-                }
-                Some('[') => {
-                    // ][ - jump to next '}' at start of line (send to Neovim)
-                    self.send_keys("][");
-                    self.clear_last_key();
-                    if let Some(mut viewport) = self.base().get_viewport() {
-                        viewport.set_input_as_handled();
-                    }
-                    return;
-                }
                 Some('}') => {
                     // Neovim Master: send to Neovim for proper jumplist support
                     self.send_keys("]}");

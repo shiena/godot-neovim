@@ -442,6 +442,7 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 | Neovim config | `init.lua` and plugins are not loaded by default (`neovim_clean = true`). Can be enabled but may cause compatibility issues with some plugins (e.g., copilot.vim, lexima.vim). |
 | `K` for signals | Signal documentation lookup not supported (class/method/property/constant only) |
 | `[m`/`]m` for GDScript | Method jump commands require Neovim treesitter or language support. GDScript is not recognized by Neovim. |
+| `it`/`at` text objects | Tag text objects (`vit`, `vat`) may not work reliably in `--clean` mode or with non-HTML files. |
 
 ### Known Issues
 
@@ -465,15 +466,15 @@ Features requiring plugin-side implementation:
 | Medium | Argument text object | `ia`, `aa` | ⭐⭐⭐ Hard | Select function argument (requires parsing) |
 | Low | Visual block insert | `I`/`A` (v-block) | ⭐⭐⭐ Hard | Insert/append on multiple lines |
 
-### Likely Already Working (Testing Needed)
+### Verified Working Through Neovim Backend
 
-These features may already work through Neovim backend:
+These features work through the Neovim backend:
 
 | Category | Commands |
 |----------|----------|
-| Motions | `(`, `)`, `[[`, `]]` |
-| Text Objects | `is`, `as` (sentence), `ip`, `ap` (paragraph), `it`, `at` (tag) |
-| Line Range | `:1,10d`, `:.,$s/old/new/g` |
+| Motions | `(`, `)` (sentence), `[[`, `]]`, `[]`, `][` (section) |
+| Text Objects | `is`, `as` (sentence), `ip`, `ap` (paragraph) |
+| Line Range | `:1,10d`, `:.,$s/old/new/g`, `:'<,'>d` |
 
 ## Architecture
 
