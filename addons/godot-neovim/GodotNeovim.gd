@@ -25,6 +25,7 @@
 ## [code]{ }[/code] - Previous/Next paragraph[br]
 ## [code]H M L[/code] - Screen top, middle, bottom[br]
 ## [code]gj gk[/code] - Display line down/up (wrapped lines)[br]
+## [code]g0 g$ g^ g_[/code] - Display line start/end/first non-blank/last non-blank[br]
 ##
 ## [br][b]Scrolling[/b][br]
 ## [code]Ctrl+F Ctrl+B[/code] - Full page down/up[br]
@@ -42,7 +43,7 @@
 ## [br][b]Block/Method Jumps[/b][br]
 ## [code][{ ]}[/code] - Previous/Next unmatched {[br]
 ## [code][( ])[/code] - Previous/Next unmatched ([br]
-## [code][m ]m[/code] - Previous/Next method start[br]
+## [code][m ]m[/code] - Previous/Next method start (requires treesitter, not available for GDScript)[br]
 ##
 ## [br][b]Operators[/b][br]
 ## [code]d{motion}[/code] - Delete[br]
@@ -86,11 +87,14 @@
 ## [code]o O[/code] - Open line below/above[br]
 ## [code]gI[/code] - Insert at column 0[br]
 ## [code]gi[/code] - Insert at last insert position[br]
+## [code]R[/code] - Replace mode (overwrite)[br]
+## [code]Escape Ctrl+[[/code] - Return to normal mode[br]
 ##
 ## [br][b]Visual Mode[/b][br]
 ## [code]v[/code] - Character-wise visual[br]
 ## [code]V[/code] - Line-wise visual[br]
-## [code]gv[/code] - Visual block / Reselect last[br]
+## [code]Ctrl+V gv[/code] - Visual block (gv as alternative)[br]
+## [code]Ctrl+B[/code] - Switch to visual block (in visual mode)[br]
 ## [code]o[/code] - Toggle selection direction[br]
 ##
 ## [br][b]Marks[/b][br]
@@ -104,7 +108,7 @@
 ## [code]"+ "*[/code] - System clipboard[br]
 ## [code]"_[/code] - Black hole register[br]
 ## [code]"0[/code] - Yank register[br]
-## [code]:registers[/code] - Show all registers[br]
+## [code]:registers :reg[/code] - Show all registers[br]
 ##
 ## [br][b]Macros[/b][br]
 ## [code]q{a-z}[/code] - Start recording macro[br]
@@ -156,6 +160,7 @@
 ## [code]:w :wa[/code] - Save / Save all[br]
 ## [code]:q :qa[/code] - Close / Close all[br]
 ## [code]:wq :x[/code] - Save and close[br]
+## [code]:wqa[/code] - Save all and close all[br]
 ## [code]:e {file}[/code] - Open file[br]
 ## [code]:e![/code] - Reload from disk[br]
 ## [code]:bn :bp :bd[/code] - Next/Previous/Delete buffer[br]
@@ -170,6 +175,8 @@
 ## [code]ZZ[/code] - Save and close (normal mode)[br]
 ## [code]ZQ[/code] - Close without saving[br]
 ## [code]@:[/code] - Repeat last Ex command[br]
+## [code]g&[/code] - Repeat last :s on entire file[br]
+## [code]Up Down[/code] - Browse command history[br]
 ##
 ## [br][b]Settings[/b][br]
 ## Configure via [code]Editor > Editor Settings > Godot Neovim[/code].[br]
@@ -182,6 +189,7 @@
 ## [br][b]Limitations[/b][br]
 ## - Insert mode commands (Ctrl+O, Ctrl+W, etc.) not available in hybrid mode[br]
 ## - Neovim config (init.lua, plugins) not loaded by default (neovim_clean=true)[br]
-## - Uses Godot's undo system instead of Neovim's
+## - Uses Godot's undo system instead of Neovim's[br]
+## - [code][m ]m[/code] method jumps require treesitter (GDScript not supported by Neovim)
 class_name GodotNeovim
 extends RefCounted

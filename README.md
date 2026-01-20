@@ -39,14 +39,14 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 | | Language | Rust | Rust |
 | | Auto-completion | ✅ (hybrid mode) | ❌ |
 | **Modes** | Normal, Insert, Visual, V-Line | ✅ | ✅ |
-| | Visual Block | ✅ (`gv`) | ✅ |
+| | Visual Block | ✅ (`Ctrl+V`, `gv`) | ✅ |
 | | Replace | ✅ (`R`) | ✅ |
 | | Command-line | ✅ (`:` commands) | ✅ |
 | **Navigation** | Basic (hjkl, w, b, e, gg, G) | ✅ | ✅ |
 | | Paragraph (`{`, `}`) | ✅ | ✅ |
-| | Display lines (`gj`, `gk`) | ✅ | ❌ |
+| | Display lines (`gj`, `gk`, `g0`, `g$`, `g_`) | ✅ | ❌ |
 | | Block jump (`[{`, `]}`) | ✅ | ❌ |
-| | Method jump (`[m`, `]m`) | ✅ | ❌ |
+| | Method jump (`[m`, `]m`) | ⚠️* | ❌ |
 | **Scrolling** | Ctrl+F/B/D/U | ✅ | ✅ |
 | | Ctrl+Y/E, zz/zt/zb | ✅ | ✅ |
 | **Search** | `/`, `?` | ✅ | ✅ |
@@ -74,6 +74,8 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 | | `:bn`, `:bp`, `:bd`, `:ls` | ✅ | ❌ |
 | | `ZZ`, `ZQ`, `@:`, `Ctrl+G` | ✅ | ❌ |
 | **Other** | Custom key mappings | ❌ | ✅ |
+
+\* `[m`/`]m` requires Neovim's treesitter or language-specific support. GDScript is not recognized by Neovim, so these commands may not work as expected.
 
 **Summary:**
 - **godot-neovim**: Full Neovim backend with all Ex commands, named registers, Godot auto-completion support (hybrid mode). Requires Neovim 0.9+ installation.
@@ -205,6 +207,7 @@ Once the plugin is enabled:
 |---------|-------------|
 | `h`, `j`, `k`, `l` | Basic cursor movement |
 | `w`, `b`, `e`, `ge` | Word movement |
+| `W`, `B`, `E` | WORD movement (whitespace-delimited) |
 | `0` | Go to start of line |
 | `^` | Go to first non-blank character |
 | `$` | Go to end of line |
@@ -227,6 +230,10 @@ Once the plugin is enabled:
 | `zb` | Cursor line at bottom |
 | `gj` | Move down by display line (wrapped) |
 | `gk` | Move up by display line (wrapped) |
+| `g0` | Go to start of display line |
+| `g$` | Go to end of display line |
+| `g^` | Go to first non-blank of display line |
+| `g_` | Go to last non-blank character of line |
 | `[{` | Jump to previous unmatched `{` |
 | `]}` | Jump to next unmatched `}` |
 | `[(` | Jump to previous unmatched `(` |
@@ -349,12 +356,15 @@ Once the plugin is enabled:
 | Command | Description |
 |---------|-------------|
 | `i`, `a`, `o`, `O` | Enter insert mode |
+| `I` | Insert at first non-blank character |
+| `A` | Insert at end of line |
 | `gi` | Insert at last insert position |
 | `gI` | Insert at column 0 (ignore indent) |
 | `R` | Enter replace mode (overwrite) |
 | `v` | Enter visual mode |
 | `V` | Enter visual line mode |
-| `gv` | Enter visual block mode |
+| `Ctrl+V`, `gv` | Enter visual block mode (`gv` as alternative since Godot intercepts Ctrl+V) |
+| `Ctrl+B` (visual) | Switch to visual block mode |
 | `o` (visual) | Toggle selection direction |
 | `Escape`, `Ctrl+[` | Return to normal mode |
 | `:` | Enter command-line mode |
@@ -431,6 +441,7 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 | Neovim undo | Uses Godot's undo system |
 | Neovim config | `init.lua` and plugins are not loaded by default (`neovim_clean = true`). Can be enabled but may cause compatibility issues with some plugins (e.g., copilot.vim, lexima.vim). |
 | `K` for signals | Signal documentation lookup not supported (class/method/property/constant only) |
+| `[m`/`]m` for GDScript | Method jump commands require Neovim treesitter or language support. GDScript is not recognized by Neovim. |
 
 ### Known Issues
 
@@ -460,7 +471,7 @@ These features may already work through Neovim backend:
 
 | Category | Commands |
 |----------|----------|
-| Motions | `g0`, `g$`, `(`, `)`, `[[`, `]]` |
+| Motions | `(`, `)`, `[[`, `]]` |
 | Text Objects | `is`, `as` (sentence), `ip`, `ap` (paragraph), `it`, `at` (tag) |
 | Line Range | `:1,10d`, `:.,$s/old/new/g` |
 
