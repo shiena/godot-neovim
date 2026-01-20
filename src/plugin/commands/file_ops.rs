@@ -157,29 +157,103 @@ impl GodotNeovimPlugin {
     }
 
     /// :e!/:edit! - Reload current file from disk (discard changes)
+    /// Uses Neovim Master design: call Lua reload_buffer to reload and re-attach
     pub(in crate::plugin) fn cmd_reload(&mut self) {
-        let editor = EditorInterface::singleton();
-        if let Some(mut script_editor) = editor.get_script_editor() {
-            if let Some(mut current_script) = script_editor.get_current_script() {
-                let path = current_script.get_path();
-                if !path.is_empty() {
-                    // Reload the script from disk
-                    let _ = current_script.reload();
+        let Some(ref neovim) = self.neovim else {
+            godot_warn!("[godot-neovim] :e! - Neovim not connected");
+            return;
+        };
 
-                    // Update the CodeEdit to match the reloaded script
-                    if let Some(ref mut code_edit) = self.current_editor {
-                        let source = current_script.get_source_code();
-                        code_edit.set_text(&source);
-                        code_edit.tag_saved_version();
+        let Ok(client) = neovim.try_lock() else {
+            godot_warn!("[godot-neovim] :e! - Failed to lock Neovim");
+            return;
+        };
 
-                        // Sync to Neovim
-                        self.sync_buffer_to_neovim();
+        // Call Lua reload_buffer function which:
+        // 1. Executes :e! to reload from disk
+        // 2. Re-attaches for notifications
+        // 3. Returns the new buffer content
+        match client.execute_lua_with_result("return _G.godot_neovim.reload_buffer()") {
+            Ok(result) => {
+                // Parse result: { lines = [...], tick = number, attached = bool, cursor = {row, col} }
+                if let rmpv::Value::Map(map) = result {
+                    let mut lines: Vec<String> = Vec::new();
+                    let mut tick: i64 = 0;
+                    let mut cursor: Option<(i64, i64)> = None;
+
+                    for (key, value) in map {
+                        if let rmpv::Value::String(k) = key {
+                            match k.as_str() {
+                                Some("lines") => {
+                                    if let rmpv::Value::Array(arr) = value {
+                                        lines = arr
+                                            .into_iter()
+                                            .filter_map(|v| {
+                                                if let rmpv::Value::String(s) = v {
+                                                    s.into_str()
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect();
+                                    }
+                                }
+                                Some("tick") => {
+                                    if let rmpv::Value::Integer(i) = value {
+                                        tick = i.as_i64().unwrap_or(0);
+                                    }
+                                }
+                                Some("cursor") => {
+                                    // cursor is {row, col} - row is 1-indexed from Neovim
+                                    if let rmpv::Value::Array(arr) = value {
+                                        if arr.len() >= 2 {
+                                            let row = arr[0].as_i64().unwrap_or(1);
+                                            let col = arr[1].as_i64().unwrap_or(0);
+                                            cursor = Some((row, col));
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
                     }
 
-                    crate::verbose_print!("[godot-neovim] :e! - Reloaded: {}", path);
-                } else {
-                    godot_warn!("[godot-neovim] :e! - No file to reload (new buffer)");
+                    // Apply the reloaded content from Neovim to Godot CodeEdit
+                    if let Some(ref mut code_edit) = self.current_editor {
+                        let line_count = lines.len() as i32;
+                        let text = lines.join("\n");
+                        code_edit.set_text(&text);
+                        code_edit.tag_saved_version();
+
+                        // Apply cursor position (convert from 1-indexed to 0-indexed line)
+                        if let Some((row, col)) = cursor {
+                            let line = (row - 1).max(0) as i32;
+                            let column = col as i32;
+                            code_edit.set_caret_line(line);
+                            code_edit.set_caret_column(column);
+                            crate::verbose_print!(
+                                "[godot-neovim] :e! - Set cursor to line={}, col={}",
+                                line,
+                                column
+                            );
+                        }
+
+                        // Update sync manager with new tick and line count
+                        self.sync_manager.set_initial_sync_tick(tick);
+                        self.sync_manager.set_line_count(line_count);
+
+                        crate::verbose_print!(
+                            "[godot-neovim] :e! - Reloaded {} lines, tick={}",
+                            line_count,
+                            tick
+                        );
+                    }
+                    // Note: (*) marker may still show until tab switch
+                    // This is a Godot limitation - set_text() marks as modified
                 }
+            }
+            Err(e) => {
+                godot_warn!("[godot-neovim] :e! - Lua call failed: {}", e);
             }
         }
     }
