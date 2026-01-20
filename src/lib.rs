@@ -2,6 +2,7 @@ mod lsp;
 mod neovim;
 mod plugin;
 mod settings;
+mod sync;
 
 use godot::prelude::*;
 

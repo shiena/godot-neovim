@@ -16,11 +16,11 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 ## Features
 
 - Real Neovim backend (not just keybinding emulation)
-- Mode indicator with input mode and cursor position (e.g., `NORMAL (Hybrid) 123:45`)
+- Mode indicator with cursor position (e.g., `NORMAL 123:45`)
 - Cursor synchronization between Godot and Neovim
+- Mouse drag selection syncs to Neovim visual mode
 - Support for count prefixes (e.g., `4j`, `10gg`)
 - Support for operator-pending commands (e.g., `gg`, `dd`, `yy`)
-- Configurable input mode (hybrid for Godot auto-completion, strict for full Neovim control)
 - Ctrl+[ as Escape alternative (terminal standard)
 - Full/half page scrolling (`Ctrl+F`, `Ctrl+B`, `Ctrl+D`, `Ctrl+U`)
 - Word search under cursor (`*`, `#`, `n`, `N`)
@@ -37,16 +37,16 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 |----------|---------|:------------:|:---------:|
 | **Architecture** | Backend | Neovim (RPC) | GDExtension |
 | | Language | Rust | Rust |
-| | Auto-completion | ✅ (hybrid mode) | ❌ |
+| | Auto-completion | ✅ | ❌ |
 | **Modes** | Normal, Insert, Visual, V-Line | ✅ | ✅ |
-| | Visual Block | ✅ (`gv`) | ✅ |
+| | Visual Block | ✅ (`Ctrl+V`, `gv`) | ✅ |
 | | Replace | ✅ (`R`) | ✅ |
 | | Command-line | ✅ (`:` commands) | ✅ |
 | **Navigation** | Basic (hjkl, w, b, e, gg, G) | ✅ | ✅ |
 | | Paragraph (`{`, `}`) | ✅ | ✅ |
-| | Display lines (`gj`, `gk`) | ✅ | ❌ |
+| | Display lines (`gj`, `gk`, `g0`, `g$`, `g_`) | ✅ | ❌ |
 | | Block jump (`[{`, `]}`) | ✅ | ❌ |
-| | Method jump (`[m`, `]m`) | ✅ | ❌ |
+| | Method jump (`[m`, `]m`) | ⚠️* | ❌ |
 | **Scrolling** | Ctrl+F/B/D/U | ✅ | ✅ |
 | | Ctrl+Y/E, zz/zt/zb | ✅ | ✅ |
 | **Search** | `/`, `?` | ✅ | ✅ |
@@ -75,8 +75,10 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 | | `ZZ`, `ZQ`, `@:`, `Ctrl+G` | ✅ | ❌ |
 | **Other** | Custom key mappings | ❌ | ✅ |
 
+\* `[m`/`]m` requires Neovim's treesitter or language-specific support. GDScript is not recognized by Neovim, so these commands may not work as expected.
+
 **Summary:**
-- **godot-neovim**: Full Neovim backend with all Ex commands, named registers, Godot auto-completion support (hybrid mode). Requires Neovim 0.9+ installation.
+- **godot-neovim**: Full Neovim backend with all Ex commands, named registers, Godot auto-completion support. Requires Neovim 0.9+ installation.
 - **GodotVim**: GDExtension-based emulator with custom key mapping support. No external dependencies.
 
 ## Requirements
@@ -113,19 +115,24 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 3. Copy the built library to the addons folder:
    ```bash
    # Windows (x64)
-   cp target/release/godot_neovim.dll addons/godot-neovim/
+   mkdir -p addons/godot-neovim/bin/windows
+   cp target/release/godot_neovim.dll addons/godot-neovim/bin/windows/
 
    # Linux (x64)
-   cp target/release/libgodot_neovim.so addons/godot-neovim/
+   mkdir -p addons/godot-neovim/bin/linux
+   cp target/release/libgodot_neovim.so addons/godot-neovim/bin/linux/
 
    # Linux (ARM64)
-   cp target/release/libgodot_neovim.so addons/godot-neovim/libgodot_neovim.arm64.so
+   mkdir -p addons/godot-neovim/bin/linux-arm64
+   cp target/release/libgodot_neovim.so addons/godot-neovim/bin/linux-arm64/
 
    # macOS (Apple Silicon)
-   cp target/release/libgodot_neovim.dylib addons/godot-neovim/libgodot_neovim.arm64.dylib
+   mkdir -p addons/godot-neovim/bin/macos-arm64
+   cp target/release/libgodot_neovim.dylib addons/godot-neovim/bin/macos-arm64/
 
    # macOS (Intel)
-   cp target/release/libgodot_neovim.dylib addons/godot-neovim/libgodot_neovim.x86_64.dylib
+   mkdir -p addons/godot-neovim/bin/macos-x86_64
+   cp target/release/libgodot_neovim.dylib addons/godot-neovim/bin/macos-x86_64/
    ```
 
 4. Copy the addons folder to your Godot project:
@@ -139,23 +146,13 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 
 All settings are available in `Editor > Editor Settings > Godot Neovim`.
 
+> **Note**: You need to enable **"Advanced Settings"** toggle in the Editor Settings to see the `godot_neovim` section.
+
 | Setting | Description | Default |
 |---------|-------------|---------|
 | Neovim Executable Path | Path to Neovim executable. The plugin validates this path on startup. | `nvim.exe` (Windows) / `nvim` (macOS/Linux) |
-| Input Mode | How insert mode input is handled. `Hybrid` uses Godot's native input for auto-completion support. `Strict` sends all input to Neovim. | Hybrid |
-| Neovim Clean | Equivalent to the `--clean` startup option. When enabled, Neovim starts without loading any config files (init.lua, plugins, etc.). | false |
+| Neovim Clean | Equivalent to the `--clean` startup option. When enabled, Neovim starts without loading any config files (init.lua, plugins, etc.). Recommended to keep enabled to avoid plugin compatibility issues. | true |
 | Timeoutlen *(advanced)* | Time in milliseconds to wait for a mapped key sequence to complete. This setting appears when "Advanced Settings" is enabled in Editor Settings. | 1000 |
-
-### Input Mode Details
-
-| Mode | Description | Auto-completion |
-|------|-------------|:---------------:|
-| `Hybrid` (default) | Insert mode uses Godot's native input | ✅ |
-| `Strict` | Insert mode also handled by Neovim | ❌ |
-
-**Hybrid mode** is recommended for most users as it allows using Godot's auto-completion, code hints, and other editor features directly in insert mode.
-
-**Strict mode** provides a more authentic Neovim experience where all keystrokes are processed by Neovim, but Godot's auto-completion is not available.
 
 ### Go to Definition (gd)
 
@@ -198,6 +195,7 @@ Once the plugin is enabled:
 |---------|-------------|
 | `h`, `j`, `k`, `l` | Basic cursor movement |
 | `w`, `b`, `e`, `ge` | Word movement |
+| `W`, `B`, `E` | WORD movement (whitespace-delimited) |
 | `0` | Go to start of line |
 | `^` | Go to first non-blank character |
 | `$` | Go to end of line |
@@ -220,6 +218,10 @@ Once the plugin is enabled:
 | `zb` | Cursor line at bottom |
 | `gj` | Move down by display line (wrapped) |
 | `gk` | Move up by display line (wrapped) |
+| `g0` | Go to start of display line |
+| `g$` | Go to end of display line |
+| `g^` | Go to first non-blank of display line |
+| `g_` | Go to last non-blank character of line |
 | `[{` | Jump to previous unmatched `{` |
 | `]}` | Jump to next unmatched `}` |
 | `[(` | Jump to previous unmatched `(` |
@@ -342,12 +344,15 @@ Once the plugin is enabled:
 | Command | Description |
 |---------|-------------|
 | `i`, `a`, `o`, `O` | Enter insert mode |
+| `I` | Insert at first non-blank character |
+| `A` | Insert at end of line |
 | `gi` | Insert at last insert position |
 | `gI` | Insert at column 0 (ignore indent) |
 | `R` | Enter replace mode (overwrite) |
 | `v` | Enter visual mode |
 | `V` | Enter visual line mode |
-| `gv` | Enter visual block mode |
+| `Ctrl+V`, `gv` | Enter visual block mode (`gv` as alternative since Godot intercepts Ctrl+V) |
+| `Ctrl+B` (visual) | Switch to visual block mode |
 | `o` (visual) | Toggle selection direction |
 | `Escape`, `Ctrl+[` | Return to normal mode |
 | `:` | Enter command-line mode |
@@ -368,13 +373,11 @@ Once the plugin is enabled:
 |---------|-------------|
 | `:help`, `:h` | Open GodotNeovim help |
 | `:version`, `:ver` | Show version in status label |
-| `:hybrid` | Switch to Hybrid input mode |
-| `:strict` | Switch to Strict input mode |
 | `:e` | Open quick open dialog for scripts |
 | `:e {file}` | Open specified script file |
-| `:e!` | Discard changes and reload |
+| `:e!`, `:edit!` | Discard changes and reload |
 | `:w` | Save file |
-| `:wa` | Save all open files |
+| `:wa`, `:wall` | Save all open files |
 | `:q` | Close current script tab |
 | `:qa`, `:qall` | Close all script tabs |
 | `:wq`, `:x` | Save and close |
@@ -394,7 +397,7 @@ Once the plugin is enabled:
 | `:{number}` | Jump to line number (e.g., `:123`) |
 | `:marks` | Show all marks (output to console) |
 | `:registers`, `:reg` | Show all registers (output to console) |
-| `:jumps` | Show jump list (output to console) |
+| `:jumps`, `:ju` | Show jump list (output to console) |
 | `:changes` | Show change list (output to console) |
 | `@:` | Repeat last Ex command |
 | `Ctrl+G` | Show file info |
@@ -404,9 +407,9 @@ Once the plugin is enabled:
 
 This plugin has architectural limitations due to using Godot's native CodeEdit for text editing.
 
-### Insert Mode (Hybrid Mode)
+### Insert Mode
 
-In hybrid mode (default), insert mode uses Godot's native input system to support auto-completion and other editor features. As a result, Vim's insert mode commands are **not available**:
+Insert mode uses Godot's native input system to support auto-completion and other editor features. As a result, Vim's insert mode commands are **not available**:
 
 | Not Supported | Description |
 |---------------|-------------|
@@ -422,8 +425,9 @@ In hybrid mode (default), insert mode uses Godot's native input system to suppor
 | Feature | Description |
 |---------|-------------|
 | Neovim undo | Uses Godot's undo system |
-| Neovim config | `init.lua` and plugins are not loaded |
+| Neovim config | `init.lua` and plugins are not loaded by default (`neovim_clean = true`). Can be enabled but may cause compatibility issues with some plugins (e.g., copilot.vim, lexima.vim). |
 | `K` for signals | Signal documentation lookup not supported (class/method/property/constant only) |
+| `[m`/`]m` for GDScript | Method jump commands require Neovim treesitter or language support. GDScript is not recognized by Neovim. |
 
 ### Known Issues
 
@@ -447,15 +451,15 @@ Features requiring plugin-side implementation:
 | Medium | Argument text object | `ia`, `aa` | ⭐⭐⭐ Hard | Select function argument (requires parsing) |
 | Low | Visual block insert | `I`/`A` (v-block) | ⭐⭐⭐ Hard | Insert/append on multiple lines |
 
-### Likely Already Working (Testing Needed)
+### Verified Working Through Neovim Backend
 
-These features may already work through Neovim backend:
+These features work through the Neovim backend:
 
 | Category | Commands |
 |----------|----------|
-| Motions | `g0`, `g$`, `(`, `)`, `[[`, `]]` |
+| Motions | `(`, `)` (sentence), `[[`, `]]`, `[]`, `][` (section) |
 | Text Objects | `is`, `as` (sentence), `ip`, `ap` (paragraph), `it`, `at` (tag) |
-| Line Range | `:1,10d`, `:.,$s/old/new/g` |
+| Line Range | `:1,10d`, `:.,$s/old/new/g`, `:'<,'>d` |
 
 ## Architecture
 
@@ -496,6 +500,7 @@ These features may already work through Neovim backend:
 - [wovri-github/godot-vim-joshnajera](https://github.com/wovri-github/godot-vim-joshnajera) - GDScript, joshnajera fork with K (docs)
 
 ### Other
+- [ComradeNeovim](https://github.com/beeender/ComradeNeovim) - IntelliJ/CLion plugin with Neovim backend
 - [vscode-neovim](https://github.com/vscode-neovim/vscode-neovim) - VSCode extension with Neovim backend
 - [neovide](https://github.com/neovide/neovide) - Neovim GUI client in Rust (architecture reference)
 

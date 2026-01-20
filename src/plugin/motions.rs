@@ -3,24 +3,15 @@
 use super::GodotNeovimPlugin;
 
 impl GodotNeovimPlugin {
-    /// Handle scroll and fold command sequences (zz, zt, zb, za, zo, zc, zM, zR)
+    /// Handle scroll and fold command sequences (za, zo, zc, zM, zR)
+    /// Note: zz, zt, zb are now handled by Neovim via win_viewport events
     pub(super) fn handle_scroll_command(&mut self, keys: &str) -> bool {
         if self.last_key == "z" {
             match keys {
-                "z" => {
-                    self.center_cursor();
+                // zz, zt, zb are handled by Neovim - just clear last_key but don't handle locally
+                "z" | "t" | "b" => {
                     self.clear_last_key();
-                    return true;
-                }
-                "t" => {
-                    self.scroll_cursor_to_top();
-                    self.clear_last_key();
-                    return true;
-                }
-                "b" => {
-                    self.scroll_cursor_to_bottom();
-                    self.clear_last_key();
-                    return true;
+                    return false; // Let Neovim handle via win_viewport
                 }
                 "a" => {
                     self.toggle_fold();
@@ -53,117 +44,8 @@ impl GodotNeovimPlugin {
         false
     }
 
-    /// Center cursor on screen (zz command)
-    fn center_cursor(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let current_line = editor.get_caret_line();
-        let visible_lines = editor.get_visible_line_count();
-        let half_visible = visible_lines / 2;
-
-        let target_first = (current_line - half_visible).max(0);
-        editor.set_line_as_first_visible(target_first);
-
-        crate::verbose_print!(
-            "[godot-neovim] zz: Centered cursor on line {}",
-            current_line + 1
-        );
-    }
-
-    /// Scroll cursor line to top (zt command)
-    fn scroll_cursor_to_top(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let current_line = editor.get_caret_line();
-        editor.set_line_as_first_visible(current_line);
-
-        crate::verbose_print!("[godot-neovim] zt: Cursor line {} at top", current_line + 1);
-    }
-
-    /// Scroll cursor line to bottom (zb command)
-    fn scroll_cursor_to_bottom(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let current_line = editor.get_caret_line();
-        let visible_lines = editor.get_visible_line_count();
-
-        let target_first = (current_line - visible_lines + 1).max(0);
-        editor.set_line_as_first_visible(target_first);
-
-        crate::verbose_print!(
-            "[godot-neovim] zb: Cursor line {} at bottom",
-            current_line + 1
-        );
-    }
-
-    /// Move cursor to top of visible area (H command)
-    pub(super) fn move_cursor_to_visible_top(&mut self) {
-        let target_line = {
-            let Some(ref mut editor) = self.current_editor else {
-                return;
-            };
-            let first_visible = editor.get_first_visible_line();
-            editor.set_caret_line(first_visible);
-            editor.set_caret_column(0);
-            first_visible
-        };
-
-        crate::verbose_print!("[godot-neovim] H: moved to line {}", target_line);
-
-        // Sync to Neovim (non-blocking, errors are logged but ignored)
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-    }
-
-    /// Move cursor to middle of visible area (M command)
-    pub(super) fn move_cursor_to_visible_middle(&mut self) {
-        let target_line = {
-            let Some(ref mut editor) = self.current_editor else {
-                return;
-            };
-            let first_visible = editor.get_first_visible_line();
-            let visible_lines = editor.get_visible_line_count();
-            let middle_line = first_visible + visible_lines / 2;
-            let line_count = editor.get_line_count();
-            let target = middle_line.min(line_count - 1);
-            editor.set_caret_line(target);
-            editor.set_caret_column(0);
-            target
-        };
-
-        crate::verbose_print!("[godot-neovim] M: moved to line {}", target_line);
-
-        // Sync to Neovim (non-blocking, errors are logged but ignored)
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-    }
-
-    /// Move cursor to bottom of visible area (L command)
-    pub(super) fn move_cursor_to_visible_bottom(&mut self) {
-        let target_line = {
-            let Some(ref mut editor) = self.current_editor else {
-                return;
-            };
-            let last_visible = editor.get_last_full_visible_line();
-            let line_count = editor.get_line_count();
-            let target = last_visible.min(line_count - 1);
-            editor.set_caret_line(target);
-            editor.set_caret_column(0);
-            target
-        };
-
-        crate::verbose_print!("[godot-neovim] L: moved to line {}", target_line);
-
-        // Sync to Neovim (non-blocking, errors are logged but ignored)
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-    }
+    // Note: zz, zt, zb, H, M, L are now handled by Neovim via win_viewport events
+    // Local implementations have been removed
 
     /// Scroll viewport up (Ctrl+Y command)
     pub(super) fn scroll_viewport_up(&mut self) {
@@ -305,8 +187,12 @@ impl GodotNeovimPlugin {
         );
     }
 
-    /// Move cursor to specified position and sync with Neovim
+    /// Move cursor to specified position (Godot local only, does not sync to Neovim)
+    /// Caller is responsible for sending the corresponding key to Neovim
     pub(super) fn move_cursor_to(&mut self, line: i32, col: i32) {
+        // Set flag to prevent on_caret_changed from triggering sync_cursor_to_neovim
+        self.syncing_from_grid = true;
+
         // Update last_synced_cursor BEFORE setting caret to prevent
         // caret_changed signal from triggering extra sync_cursor_to_neovim
         self.last_synced_cursor = (line as i64, col as i64);
@@ -320,113 +206,17 @@ impl GodotNeovimPlugin {
         // Update cached cursor position
         self.current_cursor = (line as i64, col as i64);
 
-        // Sync to Neovim
-        self.sync_cursor_to_neovim();
+        // Clear flag
+        self.syncing_from_grid = false;
 
         // Update display
         let display_cursor = (line as i64 + 1, col as i64);
         self.update_mode_display_with_cursor(&self.current_mode.clone(), Some(display_cursor));
     }
 
-    /// Move half page down (Ctrl+D command)
-    pub(super) fn half_page_down(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let visible_lines = editor.get_visible_line_count();
-        let half_page = visible_lines / 2;
-        let current_line = editor.get_caret_line();
-        let line_count = editor.get_line_count();
-
-        let target_line = (current_line + half_page).min(line_count - 1);
-        editor.set_caret_line(target_line);
-
-        // Also scroll the viewport
-        let first_visible = editor.get_first_visible_line();
-        let new_first = (first_visible + half_page).min(line_count - visible_lines);
-        if new_first > first_visible {
-            editor.set_line_as_first_visible(new_first.max(0));
-        }
-
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-        crate::verbose_print!("[godot-neovim] Ctrl+D: Moved to line {}", target_line + 1);
-    }
-
-    /// Move half page up (Ctrl+U command)
-    pub(super) fn half_page_up(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let visible_lines = editor.get_visible_line_count();
-        let half_page = visible_lines / 2;
-        let current_line = editor.get_caret_line();
-
-        let target_line = (current_line - half_page).max(0);
-        editor.set_caret_line(target_line);
-
-        // Also scroll the viewport
-        let first_visible = editor.get_first_visible_line();
-        let new_first = (first_visible - half_page).max(0);
-        if new_first < first_visible {
-            editor.set_line_as_first_visible(new_first);
-        }
-
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-        crate::verbose_print!("[godot-neovim] Ctrl+U: Moved to line {}", target_line + 1);
-    }
-
-    /// Move full page down (Ctrl+F command)
-    pub(super) fn page_down(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let visible_lines = editor.get_visible_line_count();
-        let current_line = editor.get_caret_line();
-        let line_count = editor.get_line_count();
-
-        let target_line = (current_line + visible_lines).min(line_count - 1);
-        editor.set_caret_line(target_line);
-
-        // Also scroll the viewport
-        let first_visible = editor.get_first_visible_line();
-        let new_first = (first_visible + visible_lines).min(line_count - visible_lines);
-        if new_first > first_visible {
-            editor.set_line_as_first_visible(new_first.max(0));
-        }
-
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-        crate::verbose_print!("[godot-neovim] Ctrl+F: Moved to line {}", target_line + 1);
-    }
-
-    /// Move full page up (Ctrl+B command)
-    pub(super) fn page_up(&mut self) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        let visible_lines = editor.get_visible_line_count();
-        let current_line = editor.get_caret_line();
-
-        let target_line = (current_line - visible_lines).max(0);
-        editor.set_caret_line(target_line);
-
-        // Also scroll the viewport
-        let first_visible = editor.get_first_visible_line();
-        let new_first = (first_visible - visible_lines).max(0);
-        if new_first < first_visible {
-            editor.set_line_as_first_visible(new_first);
-        }
-
-        self.sync_cursor_to_neovim();
-        self.update_cursor_from_editor();
-        crate::verbose_print!("[godot-neovim] Ctrl+B: Moved to line {}", target_line + 1);
-    }
+    // Note: half_page_down (Ctrl+D), half_page_up (Ctrl+U), page_down (Ctrl+F),
+    // and page_up (Ctrl+B) are now handled by Neovim via win_viewport events
+    // for proper viewport synchronization
 
     /// Jump to matching bracket (% command)
     pub(super) fn jump_to_matching_bracket(&mut self) {
@@ -527,185 +317,221 @@ impl GodotNeovimPlugin {
     }
 
     /// Move down by display line (gj command)
+    /// If the current line is wrapped, moves to the next wrap segment.
+    /// Otherwise, moves to the next logical line.
     pub(super) fn move_display_line_down(&mut self) {
         let Some(ref mut editor) = self.current_editor else {
             return;
         };
 
         let current_line = editor.get_caret_line();
+        let current_col = editor.get_caret_column();
         let line_count = editor.get_line_count();
+        let wrap_count = editor.get_line_wrap_count(current_line);
+        let current_wrap_index = editor.get_caret_wrap_index();
 
-        // Simply move to next line for now (CodeEdit doesn't expose wrapped line info easily)
-        let target_line = (current_line + 1).min(line_count - 1);
-        editor.set_caret_line(target_line);
+        if current_wrap_index < wrap_count {
+            // Move to next wrap segment on same line
+            // Get the wrapped text to find the start of next wrap segment
+            let wrapped_text = editor.get_line_wrapped_text(current_line);
+            if let Some(next_segment) = wrapped_text.get((current_wrap_index + 1) as usize) {
+                // Calculate column offset for the next wrap segment
+                let mut col_offset = 0i32;
+                for i in 0..=current_wrap_index {
+                    if let Some(seg) = wrapped_text.get(i as usize) {
+                        col_offset += seg.len() as i32;
+                    }
+                }
+                // Try to maintain similar column position in the wrap
+                let target_col =
+                    col_offset + (current_col - col_offset + next_segment.len() as i32).min(0);
+                let target_col = target_col.max(col_offset);
+                editor.set_caret_column(target_col);
+            }
+        } else {
+            // Move to next logical line
+            let target_line = (current_line + 1).min(line_count - 1);
+            editor.set_caret_line(target_line);
+        }
 
         self.sync_cursor_to_neovim();
-        crate::verbose_print!("[godot-neovim] gj: Moved to line {}", target_line + 1);
+        crate::verbose_print!(
+            "[godot-neovim] gj: wrap_count={}, wrap_index={}",
+            wrap_count,
+            current_wrap_index
+        );
     }
 
     /// Move up by display line (gk command)
+    /// If on a wrapped segment, moves to the previous wrap segment.
+    /// Otherwise, moves to the previous logical line (last wrap segment).
     pub(super) fn move_display_line_up(&mut self) {
         let Some(ref mut editor) = self.current_editor else {
             return;
         };
 
         let current_line = editor.get_caret_line();
+        let current_wrap_index = editor.get_caret_wrap_index();
 
-        // Simply move to previous line for now
-        let target_line = (current_line - 1).max(0);
-        editor.set_caret_line(target_line);
+        if current_wrap_index > 0 {
+            // Move to previous wrap segment on same line
+            let wrapped_text = editor.get_line_wrapped_text(current_line);
+            let mut col_offset = 0i32;
+            for i in 0..(current_wrap_index - 1) {
+                if let Some(seg) = wrapped_text.get(i as usize) {
+                    col_offset += seg.len() as i32;
+                }
+            }
+            editor.set_caret_column(col_offset);
+        } else {
+            // Move to previous logical line (at its last wrap segment if wrapped)
+            let target_line = (current_line - 1).max(0);
+            editor.set_caret_line(target_line);
+            // Move to last wrap segment of previous line
+            let prev_wrap_count = editor.get_line_wrap_count(target_line);
+            if prev_wrap_count > 0 {
+                let wrapped_text = editor.get_line_wrapped_text(target_line);
+                let mut col_offset = 0i32;
+                for i in 0..prev_wrap_count {
+                    if let Some(seg) = wrapped_text.get(i as usize) {
+                        col_offset += seg.len() as i32;
+                    }
+                }
+                editor.set_caret_column(col_offset);
+            }
+        }
 
         self.sync_cursor_to_neovim();
-        crate::verbose_print!("[godot-neovim] gk: Moved to line {}", target_line + 1);
+        crate::verbose_print!("[godot-neovim] gk: wrap_index={}", current_wrap_index);
     }
 
-    /// Jump to start of enclosing block ([{ command)
-    pub(super) fn jump_to_block_start(&mut self, open_char: char, close_char: char) {
-        self.add_to_jump_list();
+    /// Move to start of display line (g0 command)
+    /// If on a wrapped segment, moves to the start of that segment.
+    pub(super) fn move_to_display_line_start(&mut self) {
+        let (current_wrap_index, target_col) = {
+            let Some(ref mut editor) = self.current_editor else {
+                return;
+            };
 
-        let Some(ref editor) = self.current_editor else {
-            return;
+            let current_line = editor.get_caret_line();
+            let current_wrap_index = editor.get_caret_wrap_index();
+
+            let target_col = if current_wrap_index == 0 {
+                // First wrap segment - move to column 0
+                0
+            } else {
+                // Calculate column offset for this wrap segment
+                let wrapped_text = editor.get_line_wrapped_text(current_line);
+                let mut col_offset = 0i32;
+                for i in 0..current_wrap_index {
+                    if let Some(seg) = wrapped_text.get(i as usize) {
+                        col_offset += seg.len() as i32;
+                    }
+                }
+                col_offset
+            };
+            editor.set_caret_column(target_col);
+            (current_wrap_index, target_col)
         };
 
-        let mut line = editor.get_caret_line();
-        let mut col = editor.get_caret_column() - 1;
-        let mut depth = 0;
-
-        // Search backward for unmatched opening bracket
-        while line >= 0 {
-            let text = editor.get_line(line).to_string();
-            let chars: Vec<char> = text.chars().collect();
-
-            if col < 0 {
-                col = chars.len() as i32 - 1;
-            }
-
-            while col >= 0 {
-                let c = chars.get(col as usize).copied().unwrap_or(' ');
-                if c == close_char {
-                    depth += 1;
-                } else if c == open_char {
-                    if depth == 0 {
-                        self.move_cursor_to(line, col);
-                        crate::verbose_print!(
-                            "[godot-neovim] [{}: Jump to {}:{}",
-                            open_char,
-                            line + 1,
-                            col
-                        );
-                        return;
-                    }
-                    depth -= 1;
-                }
-                col -= 1;
-            }
-            line -= 1;
-            if line >= 0 {
-                col = editor.get_line(line).len() as i32 - 1;
-            }
-        }
-
+        self.sync_cursor_to_neovim();
         crate::verbose_print!(
-            "[godot-neovim] [{}: No matching block start found",
-            open_char
+            "[godot-neovim] g0: wrap_index={}, col={}",
+            current_wrap_index,
+            target_col
         );
     }
 
-    /// Jump to end of enclosing block (]} command)
-    pub(super) fn jump_to_block_end(&mut self, open_char: char, close_char: char) {
-        self.add_to_jump_list();
+    /// Move to end of display line (g$ command)
+    /// If on a wrapped segment, moves to the end of that segment.
+    pub(super) fn move_to_display_line_end(&mut self) {
+        let (current_wrap_index, target_col) = {
+            let Some(ref mut editor) = self.current_editor else {
+                return;
+            };
 
-        let Some(ref editor) = self.current_editor else {
-            return;
+            let current_line = editor.get_caret_line();
+            let current_wrap_index = editor.get_caret_wrap_index();
+            let wrap_count = editor.get_line_wrap_count(current_line);
+
+            let wrapped_text = editor.get_line_wrapped_text(current_line);
+            let mut col_offset = 0i32;
+            let mut target_col = 0i32;
+
+            for i in 0..=current_wrap_index {
+                if let Some(seg) = wrapped_text.get(i as usize) {
+                    if i == current_wrap_index {
+                        // This is our segment - move to end (minus 1 for Vim behavior)
+                        target_col = if current_wrap_index < wrap_count {
+                            // Not the last segment - go to last char of segment
+                            col_offset + seg.len() as i32 - 1
+                        } else {
+                            // Last segment - go to actual end of line
+                            let line_len = editor.get_line(current_line).len() as i32;
+                            (line_len - 1).max(0)
+                        };
+                        break;
+                    }
+                    col_offset += seg.len() as i32;
+                }
+            }
+            editor.set_caret_column(target_col.max(0));
+            (current_wrap_index, target_col)
         };
 
-        let line_count = editor.get_line_count();
-        let mut line = editor.get_caret_line();
-        let mut col = editor.get_caret_column() as usize + 1;
-        let mut depth = 0;
-
-        // Search forward for unmatched closing bracket
-        while line < line_count {
-            let text = editor.get_line(line).to_string();
-            let chars: Vec<char> = text.chars().collect();
-
-            while col < chars.len() {
-                let c = chars[col];
-                if c == open_char {
-                    depth += 1;
-                } else if c == close_char {
-                    if depth == 0 {
-                        self.move_cursor_to(line, col as i32);
-                        crate::verbose_print!(
-                            "[godot-neovim] ]{}: Jump to {}:{}",
-                            close_char,
-                            line + 1,
-                            col
-                        );
-                        return;
-                    }
-                    depth -= 1;
-                }
-                col += 1;
-            }
-            line += 1;
-            col = 0;
-        }
-
+        self.sync_cursor_to_neovim();
         crate::verbose_print!(
-            "[godot-neovim] ]{}: No matching block end found",
-            close_char
+            "[godot-neovim] g$: wrap_index={}, col={}",
+            current_wrap_index,
+            target_col
         );
     }
 
-    /// Jump to previous method/function definition ([m command)
-    pub(super) fn jump_to_prev_method(&mut self) {
-        self.add_to_jump_list();
+    /// Move to first non-blank of display line (g^ command)
+    pub(super) fn move_to_display_line_first_non_blank(&mut self) {
+        let (current_wrap_index, target_col) = {
+            let Some(ref mut editor) = self.current_editor else {
+                return;
+            };
 
-        let Some(ref editor) = self.current_editor else {
-            return;
+            let current_line = editor.get_caret_line();
+            let current_wrap_index = editor.get_caret_wrap_index();
+
+            let wrapped_text = editor.get_line_wrapped_text(current_line);
+            let mut col_offset = 0i32;
+            let mut target_col = 0i32;
+
+            for i in 0..=current_wrap_index {
+                if let Some(seg) = wrapped_text.get(i as usize) {
+                    if i == current_wrap_index {
+                        // Find first non-whitespace in this segment
+                        let seg_str = seg.to_string();
+                        let mut found = false;
+                        for (j, c) in seg_str.chars().enumerate() {
+                            if !c.is_whitespace() {
+                                target_col = col_offset + j as i32;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if !found {
+                            // All whitespace - just go to start
+                            target_col = col_offset;
+                        }
+                        break;
+                    }
+                    col_offset += seg.len() as i32;
+                }
+            }
+            editor.set_caret_column(target_col);
+            (current_wrap_index, target_col)
         };
 
-        let current_line = editor.get_caret_line();
-
-        // Search backward for 'func ' at the start of a line (GDScript)
-        for line in (0..current_line).rev() {
-            let text = editor.get_line(line).to_string();
-            let trimmed = text.trim_start();
-            if trimmed.starts_with("func ") {
-                let col = text.find("func").unwrap_or(0) as i32;
-                self.move_cursor_to(line, col);
-                crate::verbose_print!("[godot-neovim] [m: Jump to method at line {}", line + 1);
-                return;
-            }
-        }
-
-        crate::verbose_print!("[godot-neovim] [m: No previous method found");
-    }
-
-    /// Jump to next method/function definition (]m command)
-    pub(super) fn jump_to_next_method(&mut self) {
-        self.add_to_jump_list();
-
-        let Some(ref editor) = self.current_editor else {
-            return;
-        };
-
-        let current_line = editor.get_caret_line();
-        let line_count = editor.get_line_count();
-
-        // Search forward for 'func ' at the start of a line (GDScript)
-        for line in (current_line + 1)..line_count {
-            let text = editor.get_line(line).to_string();
-            let trimmed = text.trim_start();
-            if trimmed.starts_with("func ") {
-                let col = text.find("func").unwrap_or(0) as i32;
-                self.move_cursor_to(line, col);
-                crate::verbose_print!("[godot-neovim] ]m: Jump to method at line {}", line + 1);
-                return;
-            }
-        }
-
-        crate::verbose_print!("[godot-neovim] ]m: No next method found");
+        self.sync_cursor_to_neovim();
+        crate::verbose_print!(
+            "[godot-neovim] g^: wrap_index={}, col={}",
+            current_wrap_index,
+            target_col
+        );
     }
 }

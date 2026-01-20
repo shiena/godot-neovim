@@ -4,38 +4,11 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 const SETTING_NEOVIM_PATH: &str = "godot_neovim/neovim_executable_path";
-const SETTING_INPUT_MODE: &str = "godot_neovim/input_mode";
 const SETTING_NEOVIM_CLEAN: &str = "godot_neovim/neovim_clean";
 const SETTING_TIMEOUTLEN: &str = "godot_neovim/timeoutlen";
 
 /// Default timeout for multi-key sequences (matches Neovim's default)
 pub const DEFAULT_TIMEOUTLEN_MS: i64 = 1000;
-
-/// Input mode for insert mode handling
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum InputMode {
-    /// Hybrid mode: Godot handles insert mode natively (IME support)
-    #[default]
-    Hybrid,
-    /// Strict mode: Neovim handles all modes including insert (no IME)
-    Strict,
-}
-
-impl InputMode {
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "strict" => InputMode::Strict,
-            _ => InputMode::Hybrid,
-        }
-    }
-
-    pub fn from_int(i: i64) -> Self {
-        match i {
-            1 => InputMode::Strict,
-            _ => InputMode::Hybrid,
-        }
-    }
-}
 
 /// Result of validating Neovim executable path
 #[derive(Debug, Clone)]
@@ -66,9 +39,9 @@ pub fn initialize_settings() {
         settings.set_setting(SETTING_NEOVIM_PATH, &Variant::from(default_path));
     }
 
-    // Set initial value metadata (p_basic=true: visible by default)
+    // Set initial value for Revert button (update_current=false: don't overwrite user's value)
     let default_path = get_default_neovim_path();
-    settings.set_initial_value(SETTING_NEOVIM_PATH, &Variant::from(default_path), true);
+    settings.set_initial_value(SETTING_NEOVIM_PATH, &Variant::from(default_path), false);
 
     // Add property info for better UI
     #[allow(deprecated)]
@@ -80,31 +53,14 @@ pub fn initialize_settings() {
 
     settings.add_property_info(&property_info);
 
-    // Add input_mode setting if it doesn't exist
-    if !settings.has_setting(SETTING_INPUT_MODE) {
-        settings.set_setting(SETTING_INPUT_MODE, &Variant::from(0i64));
-    }
-
-    // Set initial value for input_mode (0 = Hybrid, p_basic=true: visible by default)
-    settings.set_initial_value(SETTING_INPUT_MODE, &Variant::from(0i64), true);
-
-    // Add property info for input_mode (dropdown)
-    #[allow(deprecated)]
-    let mut input_mode_info = Dictionary::new();
-    input_mode_info.set("name", SETTING_INPUT_MODE);
-    input_mode_info.set("type", VariantType::INT.ord());
-    input_mode_info.set("hint", godot::global::PropertyHint::ENUM.ord());
-    input_mode_info.set("hint_string", "Hybrid,Strict");
-
-    settings.add_property_info(&input_mode_info);
-
     // Add neovim_clean setting if it doesn't exist
+    // Default is true (--clean) for safety - avoids plugin compatibility issues
     if !settings.has_setting(SETTING_NEOVIM_CLEAN) {
-        settings.set_setting(SETTING_NEOVIM_CLEAN, &Variant::from(false));
+        settings.set_setting(SETTING_NEOVIM_CLEAN, &Variant::from(true));
     }
 
-    // Set initial value for neovim_clean (p_basic=true: visible by default)
-    settings.set_initial_value(SETTING_NEOVIM_CLEAN, &Variant::from(false), true);
+    // Set initial value for Revert button (update_current=false: don't overwrite user's value)
+    settings.set_initial_value(SETTING_NEOVIM_CLEAN, &Variant::from(true), false);
 
     // Add property info for neovim_clean (checkbox)
     #[allow(deprecated)]
@@ -119,7 +75,7 @@ pub fn initialize_settings() {
         settings.set_setting(SETTING_TIMEOUTLEN, &Variant::from(DEFAULT_TIMEOUTLEN_MS));
     }
 
-    // Set initial value for timeoutlen (p_basic=false: advanced setting, hidden by default)
+    // Set initial value for Revert button (update_current=false: don't overwrite user's value)
     settings.set_initial_value(
         SETTING_TIMEOUTLEN,
         &Variant::from(DEFAULT_TIMEOUTLEN_MS),
@@ -137,9 +93,8 @@ pub fn initialize_settings() {
     settings.add_property_info(&timeoutlen_info);
 
     crate::verbose_print!(
-        "[godot-neovim] Settings initialized. Neovim path: {}, Input mode: {:?}, Clean: {}, Timeoutlen: {}ms",
+        "[godot-neovim] Settings initialized. Neovim path: {}, Clean: {}, Timeoutlen: {}ms",
         get_neovim_path(),
-        get_input_mode(),
         get_neovim_clean(),
         get_timeoutlen()
     );
@@ -189,46 +144,12 @@ pub fn get_neovim_path() -> String {
     get_default_neovim_path().to_string()
 }
 
-/// Get the configured input mode
-pub fn get_input_mode() -> InputMode {
-    let editor = EditorInterface::singleton();
-    let Some(settings) = editor.get_editor_settings() else {
-        return InputMode::default();
-    };
-
-    if settings.has_setting(SETTING_INPUT_MODE) {
-        let value = settings.get_setting(SETTING_INPUT_MODE);
-        // Try INT first (new format)
-        if let Ok(mode_int) = value.try_to::<i64>() {
-            return InputMode::from_int(mode_int);
-        }
-        // Fallback to STRING (old format for compatibility)
-        if let Ok(mode_str) = value.try_to::<GString>() {
-            return InputMode::from_str(&mode_str.to_string());
-        }
-    }
-
-    InputMode::default()
-}
-
-/// Set input mode in EditorSettings
-pub fn set_input_mode(mode: InputMode) {
-    let editor = EditorInterface::singleton();
-    let Some(mut settings) = editor.get_editor_settings() else {
-        return;
-    };
-    let value = match mode {
-        InputMode::Hybrid => 0i64,
-        InputMode::Strict => 1i64,
-    };
-    settings.set_setting(SETTING_INPUT_MODE, &Variant::from(value));
-}
-
 /// Get the configured neovim clean mode
+/// Default is true (--clean) for safety - avoids plugin compatibility issues
 pub fn get_neovim_clean() -> bool {
     let editor = EditorInterface::singleton();
     let Some(settings) = editor.get_editor_settings() else {
-        return false;
+        return true; // Default to clean mode
     };
 
     if settings.has_setting(SETTING_NEOVIM_CLEAN) {
@@ -238,7 +159,7 @@ pub fn get_neovim_clean() -> bool {
         }
     }
 
-    false
+    true // Default to clean mode
 }
 
 /// Get the configured timeoutlen (multi-key sequence timeout in milliseconds)

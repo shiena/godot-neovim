@@ -12,6 +12,18 @@ pub enum RedrawEvent {
     ModeChange { mode: String, mode_index: u64 },
     /// Cursor moved to position on grid
     GridCursorGoto { grid: u64, row: u64, col: u64 },
+    /// Window viewport changed (from ext_multigrid)
+    /// Contains viewport information for scroll synchronization
+    WinViewport {
+        grid: u64,
+        win: i64,
+        topline: i64,
+        botline: i64,
+        curline: i64,
+        curcol: i64,
+        line_count: i64,
+        scroll_delta: i64,
+    },
     /// Flush signals end of redraw batch
     Flush,
     /// Unknown or unhandled event
@@ -59,6 +71,14 @@ impl RedrawEvent {
                 // grid_cursor_goto: ["grid_cursor_goto", [grid, row, col], ...]
                 for i in 1..event_data.len() {
                     if let Some(event) = Self::parse_grid_cursor_goto(event_data.get(i))? {
+                        events.push(event);
+                    }
+                }
+            }
+            "win_viewport" => {
+                // win_viewport: ["win_viewport", [grid, win, topline, botline, curline, curcol, line_count, scroll_delta], ...]
+                for i in 1..event_data.len() {
+                    if let Some(event) = Self::parse_win_viewport(event_data.get(i))? {
                         events.push(event);
                     }
                 }
@@ -132,6 +152,47 @@ impl RedrawEvent {
 
         Ok(Some(RedrawEvent::GridCursorGoto { grid, row, col }))
     }
+
+    fn parse_win_viewport(value: Option<&Value>) -> Result<Option<RedrawEvent>, ParseError> {
+        let Some(Value::Array(info)) = value else {
+            return Ok(None);
+        };
+
+        if info.len() < 8 {
+            return Err(ParseError {
+                event_name: "win_viewport".to_string(),
+                reason: format!("Expected 8 values, got {}", info.len()),
+            });
+        }
+
+        // Fields: grid, win, topline, botline, curline, curcol, line_count, scroll_delta
+        let grid = info
+            .first()
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| ParseError {
+                event_name: "win_viewport".to_string(),
+                reason: "Invalid grid id".to_string(),
+            })?;
+
+        let win = info.get(1).and_then(|v| v.as_i64()).unwrap_or(0);
+        let topline = info.get(2).and_then(|v| v.as_i64()).unwrap_or(0);
+        let botline = info.get(3).and_then(|v| v.as_i64()).unwrap_or(0);
+        let curline = info.get(4).and_then(|v| v.as_i64()).unwrap_or(0);
+        let curcol = info.get(5).and_then(|v| v.as_i64()).unwrap_or(0);
+        let line_count = info.get(6).and_then(|v| v.as_i64()).unwrap_or(0);
+        let scroll_delta = info.get(7).and_then(|v| v.as_i64()).unwrap_or(0);
+
+        Ok(Some(RedrawEvent::WinViewport {
+            grid,
+            win,
+            topline,
+            botline,
+            curline,
+            curcol,
+            line_count,
+            scroll_delta,
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -175,6 +236,39 @@ mod tests {
                 grid: 1,
                 row: 10,
                 col: 5
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_win_viewport() {
+        let event_data = vec![
+            Value::from("win_viewport"),
+            Value::Array(vec![
+                Value::from(1u64),    // grid
+                Value::from(1000i64), // win
+                Value::from(10i64),   // topline
+                Value::from(30i64),   // botline
+                Value::from(15i64),   // curline
+                Value::from(5i64),    // curcol
+                Value::from(100i64),  // line_count
+                Value::from(0i64),    // scroll_delta
+            ]),
+        ];
+
+        let events = RedrawEvent::parse(&event_data).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0],
+            RedrawEvent::WinViewport {
+                grid: 1,
+                win: 1000,
+                topline: 10,
+                botline: 30,
+                curline: 15,
+                curcol: 5,
+                line_count: 100,
+                scroll_delta: 0,
             }
         );
     }

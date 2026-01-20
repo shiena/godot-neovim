@@ -1,8 +1,7 @@
 //! Command-line mode and Ex commands
 
 use super::{CodeEditExt, GodotNeovimPlugin};
-use crate::settings;
-use godot::classes::{EditorInterface, Input, InputEventKey, ResourceSaver};
+use godot::classes::{EditorInterface, Input, InputEventKey, MenuButton, ResourceSaver};
 use godot::global::Key;
 use godot::prelude::*;
 
@@ -98,6 +97,25 @@ impl GodotNeovimPlugin {
     }
 
     /// Execute the current command
+    /// Check if a command starts with a line range specifier
+    /// Line ranges: numbers (1,5), special chars (., $), marks ('a, '<, '>), relative (+1, -1)
+    fn has_line_range(cmd: &str) -> bool {
+        let first_char = cmd.chars().next();
+        match first_char {
+            // Number: :1,5d, :10d
+            Some(c) if c.is_ascii_digit() => true,
+            // Current line: :.,$d, :.d
+            Some('.') => true,
+            // Last line: :$d
+            Some('$') => true,
+            // Mark: :'<,'>s/old/new/g, :'a,'bd
+            Some('\'') => true,
+            // Relative: :+1d, :-1d
+            Some('+') | Some('-') => true,
+            _ => false,
+        }
+    }
+
     pub(super) fn execute_command(&mut self) {
         let command = self.command_buffer.clone();
 
@@ -121,10 +139,7 @@ impl GodotNeovimPlugin {
             "w" => self.cmd_save(),
             "q" => self.cmd_close(),
             "qa" | "qall" => self.cmd_close_all(),
-            "wq" | "x" => {
-                self.cmd_save();
-                self.cmd_close();
-            }
+            "wq" | "x" => self.cmd_save_and_close(),
             "wa" | "wall" => self.cmd_save_all(),
             "wqa" | "wqall" | "xa" | "xall" => {
                 self.cmd_save_all();
@@ -132,8 +147,13 @@ impl GodotNeovimPlugin {
             }
             "e!" | "edit!" => self.cmd_reload(),
             _ => {
+                // Check for line range commands (e.g., :1,5d, :.,$s/old/new/g)
+                // Forward to Neovim for processing (Neovim Master design)
+                if Self::has_line_range(cmd) {
+                    self.cmd_forward_to_neovim(cmd);
+                }
                 // Check for :{number} - jump to line
-                if let Ok(line_num) = cmd.parse::<i32>() {
+                else if let Ok(line_num) = cmd.parse::<i32>() {
                     self.cmd_goto_line(line_num);
                 }
                 // Check for :marks - show marks
@@ -216,12 +236,6 @@ impl GodotNeovimPlugin {
                 // :version - show version in status label
                 else if cmd == "version" || cmd == "ver" {
                     self.cmd_version();
-                }
-                // :hybrid / :strict - switch input mode
-                else if cmd == "hybrid" {
-                    self.cmd_set_input_mode(settings::InputMode::Hybrid);
-                } else if cmd == "strict" {
-                    self.cmd_set_input_mode(settings::InputMode::Strict);
                 } else {
                     godot_warn!("[godot-neovim] Unknown command: {}", cmd);
                 }
@@ -231,35 +245,25 @@ impl GodotNeovimPlugin {
         self.close_command_line();
     }
 
-    /// :{number} - Jump to specific line number
+    /// :{number} - Jump to specific line number (Neovim Master design)
     pub(super) fn cmd_goto_line(&mut self, line_num: i32) {
         // Add to jump list before jumping
         self.add_to_jump_list();
 
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
+        // Send command to Neovim - it will process and send win_viewport event
+        // This ensures cursor sync is consistent with Neovim's state
+        self.send_keys(&format!(":{}<CR>", line_num));
 
-        let line_count = editor.get_line_count();
-        // Convert 1-indexed to 0-indexed, clamp to valid range
-        let target_line = (line_num - 1).clamp(0, line_count - 1);
+        crate::verbose_print!("[godot-neovim] :{}: Sent to Neovim", line_num);
+    }
 
-        editor.set_caret_line(target_line);
+    /// Forward line range commands to Neovim (Neovim Master design)
+    /// Examples: :1,5d, :.,$s/old/new/g, :'<,'>d
+    fn cmd_forward_to_neovim(&mut self, cmd: &str) {
+        // Send command to Neovim - buffer changes will come back via nvim_buf_lines_event
+        self.send_keys(&format!(":{}<CR>", cmd));
 
-        // Move to first non-blank character (Vim behavior)
-        let line_text = editor.get_line(target_line).to_string();
-        let first_non_blank = line_text
-            .chars()
-            .position(|c| !c.is_whitespace())
-            .unwrap_or(0);
-        editor.set_caret_column(first_non_blank as i32);
-
-        self.sync_cursor_to_neovim();
-        crate::verbose_print!(
-            "[godot-neovim] :{}: Jumped to line {}",
-            line_num,
-            target_line + 1
-        );
+        crate::verbose_print!("[godot-neovim] :{}: Forwarded to Neovim", cmd);
     }
 
     /// :marks - Show all marks
@@ -428,31 +432,58 @@ impl GodotNeovimPlugin {
     }
 
     /// :wa/:wall - Save all open scripts
+    /// Uses Godot's built-in FILE_MENU_SAVE_ALL to properly update dirty markers
     pub(super) fn cmd_save_all(&self) {
         let editor = EditorInterface::singleton();
-        if let Some(script_editor) = editor.get_script_editor() {
-            let open_scripts = script_editor.get_open_scripts();
-            let mut saved_count = 0;
+        let Some(script_editor) = editor.get_script_editor() else {
+            crate::verbose_print!("[godot-neovim] :wa - Could not find ScriptEditor");
+            return;
+        };
 
-            for i in 0..open_scripts.len() {
-                if let Some(script_var) = open_scripts.get(i) {
-                    if let Ok(script) = script_var.try_cast::<godot::classes::Script>() {
-                        let path = script.get_path();
-                        if !path.is_empty() {
-                            let result = ResourceSaver::singleton()
-                                .save_ex(&script)
-                                .path(&path)
-                                .done();
-                            if result == godot::global::Error::OK {
-                                saved_count += 1;
+        let script_editor_node: Gd<Node> = script_editor.upcast();
+
+        // Structure: ScriptEditor -> VBoxContainer -> HBoxContainer (menu_hb) -> MenuButton (File)
+        let children = script_editor_node.get_children();
+        for i in 0..children.len() {
+            if let Some(child) = children.get(i) {
+                if child.is_class("VBoxContainer") {
+                    let vbox_children = child.get_children();
+                    for j in 0..vbox_children.len() {
+                        if let Some(vbox_child) = vbox_children.get(j) {
+                            if vbox_child.is_class("HBoxContainer") {
+                                // Found menu_hb, now find MenuButton (File)
+                                let hbox_children = vbox_child.get_children();
+                                for k in 0..hbox_children.len() {
+                                    if let Some(hbox_child) = hbox_children.get(k) {
+                                        if hbox_child.is_class("MenuButton") {
+                                            let menu_button: Gd<MenuButton> = hbox_child.cast();
+                                            if let Some(mut popup) = menu_button.get_popup() {
+                                                // FILE_MENU_SAVE_ALL = 7
+                                                const FILE_MENU_SAVE_ALL: i64 = 7;
+                                                popup.call_deferred(
+                                                    "emit_signal",
+                                                    &[
+                                                        "id_pressed".to_variant(),
+                                                        FILE_MENU_SAVE_ALL.to_variant(),
+                                                    ],
+                                                );
+                                                crate::verbose_print!(
+                                                    "[godot-neovim] :wa - emit_signal(id_pressed, {})",
+                                                    FILE_MENU_SAVE_ALL
+                                                );
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
-
-            crate::verbose_print!("[godot-neovim] :wa - Saved {} script(s)", saved_count);
         }
+
+        crate::verbose_print!("[godot-neovim] :wa - File menu not found");
     }
 
     /// :e!/:edit! - Reload current file from disk (discard changes)
@@ -483,22 +514,36 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// ZZ - Save and close (using ResourceSaver for synchronous save)
+    /// ZZ/:wq - Save and close (sync CodeEdit content to Script, then save)
     pub(super) fn cmd_save_and_close(&mut self) {
         let editor = EditorInterface::singleton();
         if let Some(mut script_editor) = editor.get_script_editor() {
-            if let Some(current_script) = script_editor.get_current_script() {
+            if let Some(mut current_script) = script_editor.get_current_script() {
                 let path = current_script.get_path();
                 if !path.is_empty() {
+                    // Sync CodeEdit content to Script resource before saving
+                    if let Some(ref code_editor) = self.current_editor {
+                        if code_editor.is_instance_valid() {
+                            let text = code_editor.get_text();
+                            current_script.set_source_code(&text);
+                        }
+                    }
+
                     // Save the script using ResourceSaver (synchronous)
                     let result = ResourceSaver::singleton()
                         .save_ex(&current_script)
                         .path(&path)
                         .done();
                     if result == godot::global::Error::OK {
-                        crate::verbose_print!("[godot-neovim] ZZ - Saved: {}", path);
+                        // Mark CodeEdit as saved to clear dirty flag
+                        if let Some(ref mut code_editor) = self.current_editor {
+                            if code_editor.is_instance_valid() {
+                                code_editor.tag_saved_version();
+                            }
+                        }
+                        crate::verbose_print!("[godot-neovim] :wq/ZZ - Saved: {}", path);
                     } else {
-                        godot_warn!("[godot-neovim] ZZ - Failed to save: {}", path);
+                        godot_warn!("[godot-neovim] :wq/ZZ - Failed to save: {}", path);
                     }
                 }
             }
@@ -510,6 +555,32 @@ impl GodotNeovimPlugin {
 
     /// :q - Close the current script tab by simulating Ctrl+W
     pub(super) fn cmd_close(&mut self) {
+        // Disconnect from signals BEFORE closing to avoid
+        // accessing freed CodeEdit instance
+        self.disconnect_caret_changed_signal();
+        self.disconnect_resized_signal();
+
+        // Sync cursor to Neovim BEFORE closing, because on_script_changed
+        // is called after the editor is freed and we can't read cursor then
+        if let Some(ref editor) = self.current_editor {
+            if editor.is_instance_valid() {
+                let line = editor.get_caret_line() as i64 + 1; // 1-indexed for Neovim
+                let col = editor.get_caret_column() as i64;
+                if let Some(ref neovim) = self.neovim {
+                    if let Ok(client) = neovim.try_lock() {
+                        let _ = client.set_cursor(line, col);
+                        // Set flag to skip cursor sync in on_script_changed
+                        self.cursor_synced_before_close = true;
+                        crate::verbose_print!(
+                            "[godot-neovim] :q - Synced cursor to Neovim before close: ({}, {})",
+                            line,
+                            col
+                        );
+                    }
+                }
+            }
+        }
+
         // Don't clear current_editor here - if user cancels the save dialog,
         // the script stays open and we need to keep the reference.
         // When the script actually closes, on_script_changed will handle cleanup.
@@ -533,6 +604,10 @@ impl GodotNeovimPlugin {
 
     /// ZQ - Close without saving (discard changes)
     pub(super) fn cmd_close_discard(&mut self) {
+        // Disconnect from signals BEFORE closing
+        self.disconnect_caret_changed_signal();
+        self.disconnect_resized_signal();
+
         let editor = EditorInterface::singleton();
         if let Some(mut script_editor) = editor.get_script_editor() {
             // Reload the script from disk and sync the CodeEdit
@@ -552,6 +627,18 @@ impl GodotNeovimPlugin {
                             "[godot-neovim] ZQ - Synced CodeEdit and tagged as saved: {}",
                             path
                         );
+                    }
+
+                    // Also reload Neovim buffer to discard changes there too
+                    if let Some(ref neovim) = self.neovim {
+                        if let Ok(client) = neovim.try_lock() {
+                            // :e! reloads the current buffer from disk
+                            let _ = client.command("e!");
+                            crate::verbose_print!(
+                                "[godot-neovim] ZQ - Reloaded Neovim buffer: {}",
+                                path
+                            );
+                        }
                     }
                 }
             }
@@ -577,32 +664,77 @@ impl GodotNeovimPlugin {
     }
 
     /// :qa/:qall - Close all script tabs
+    /// Uses the same mechanism as Godot's "Close All" menu option
+    /// Note: Neovim buffer deletion is handled by on_script_close signal
     pub(super) fn cmd_close_all(&mut self) {
-        // Don't clear references here - if user cancels save dialogs,
-        // scripts stay open and we need to keep the references.
-        // When scripts actually close, on_script_changed will handle cleanup.
+        use godot::classes::MenuButton;
 
-        // Get the number of open scripts
+        // Disconnect from signals BEFORE closing
+        self.disconnect_caret_changed_signal();
+        self.disconnect_resized_signal();
+
+        // Set flag to skip on_script_changed processing during close all
+        // Will be reset by process() when operation completes
+        self.closing_all_tabs = true;
+
+        // Clear current editor reference since it will be freed
+        self.current_editor = None;
+
         let editor = EditorInterface::singleton();
-        let script_count = if let Some(script_editor) = editor.get_script_editor() {
-            script_editor.get_open_scripts().len()
-        } else {
-            0
+        let Some(script_editor) = editor.get_script_editor() else {
+            godot_warn!("[godot-neovim] :qa - Could not find ScriptEditor");
+            self.closing_all_tabs = false;
+            return;
         };
 
-        // Close each script by simulating Ctrl+W multiple times
-        for _ in 0..script_count {
-            let mut key_event = InputEventKey::new_gd();
-            key_event.set_keycode(Key::W);
-            key_event.set_ctrl_pressed(true);
-            key_event.set_pressed(true);
-            Input::singleton().parse_input_event(&key_event);
+        let script_editor_node: Gd<Node> = script_editor.upcast();
+
+        // Structure: ScriptEditor -> VBoxContainer -> HBoxContainer (menu_hb) -> MenuButton (File)
+        let children = script_editor_node.get_children();
+        for i in 0..children.len() {
+            if let Some(child) = children.get(i) {
+                if child.is_class("VBoxContainer") {
+                    let vbox_children = child.get_children();
+                    for j in 0..vbox_children.len() {
+                        if let Some(vbox_child) = vbox_children.get(j) {
+                            if vbox_child.is_class("HBoxContainer") {
+                                // Found menu_hb, now find MenuButton (File)
+                                let hbox_children = vbox_child.get_children();
+                                for k in 0..hbox_children.len() {
+                                    if let Some(hbox_child) = hbox_children.get(k) {
+                                        if hbox_child.is_class("MenuButton") {
+                                            let menu_button: Gd<MenuButton> = hbox_child.cast();
+                                            if let Some(mut popup) = menu_button.get_popup() {
+                                                // FILE_MENU_CLOSE_ALL = 16
+                                                const FILE_MENU_CLOSE_ALL: i64 = 16;
+                                                // Use call_deferred to avoid borrow conflict:
+                                                // emit_signal triggers script_close synchronously,
+                                                // which calls on_script_close needing &mut self
+                                                popup.call_deferred(
+                                                    "emit_signal",
+                                                    &[
+                                                        "id_pressed".to_variant(),
+                                                        FILE_MENU_CLOSE_ALL.to_variant(),
+                                                    ],
+                                                );
+                                                crate::verbose_print!(
+                                                    "[godot-neovim] :qa - call_deferred emit_signal(id_pressed, {})",
+                                                    FILE_MENU_CLOSE_ALL
+                                                );
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        crate::verbose_print!(
-            "[godot-neovim] :qa - Close all triggered ({} scripts)",
-            script_count
-        );
+        godot_warn!("[godot-neovim] :qa - Could not find File menu in ScriptEditor");
+        self.closing_all_tabs = false;
     }
 
     /// :s/old/new/g or :%s/old/new/g - Substitute
@@ -1033,27 +1165,6 @@ impl GodotNeovimPlugin {
         self.update_version_display();
     }
 
-    /// :hybrid / :strict - Set input mode
-    pub(super) fn cmd_set_input_mode(&mut self, mode: settings::InputMode) {
-        // Temporarily disconnect settings signal to avoid borrow conflict
-        // (set_input_mode triggers settings_changed signal synchronously)
-        let editor = EditorInterface::singleton();
-        if let Some(mut editor_settings) = editor.get_editor_settings() {
-            let callable = self.base().callable("on_settings_changed");
-            editor_settings.disconnect("settings_changed", &callable);
-
-            // Now safe to change setting
-            settings::set_input_mode(mode);
-
-            // Reconnect signal
-            editor_settings.connect("settings_changed", &callable);
-        }
-
-        // Update display to show new mode
-        let display_cursor = (self.current_cursor.0 + 1, self.current_cursor.1);
-        self.update_mode_display_with_cursor(&self.current_mode.clone(), Some(display_cursor));
-    }
-
     /// K - Open documentation for word under cursor
     /// Uses LSP hover to get class/member information for methods, properties, and signals
     /// Note: Actual goto_help() call is deferred to process() to avoid borrow conflicts
@@ -1243,6 +1354,26 @@ impl GodotNeovimPlugin {
                     class_name,
                     member_name: Some(word.to_string()),
                     member_type: HelpMemberType::Method,
+                });
+            }
+        }
+
+        // Pattern: "signal ClassName.signal_name(" or "signal signal_name(" - signal
+        if content.contains("signal ") && content.contains('(') {
+            // Extract class name from "signal ClassName.signal_name" pattern
+            if let Some((class_name, signal_name)) = Self::match_signal_class_member(&content) {
+                return Some(HelpQuery {
+                    class_name,
+                    member_name: Some(signal_name),
+                    member_type: HelpMemberType::Signal,
+                });
+            }
+            // Fallback: try to extract class from "Defined in" link
+            if let Some(class_name) = Self::extract_class_from_defined_in(&content) {
+                return Some(HelpQuery {
+                    class_name,
+                    member_name: Some(word.to_string()),
+                    member_type: HelpMemberType::Signal,
                 });
             }
         }
@@ -1540,6 +1671,30 @@ impl GodotNeovimPlugin {
 
                     if !class_name.is_empty() && !method_name.is_empty() {
                         return Some((class_name, method_name));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Match "signal ClassName.signal_name(" pattern
+    fn match_signal_class_member(content: &str) -> Option<(String, String)> {
+        for line in content.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("signal ") {
+                if let Some((class_part, signal_part)) = rest.split_once('.') {
+                    let class_name: String = class_part
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+                    let signal_name: String = signal_part
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+
+                    if !class_name.is_empty() && !signal_name.is_empty() {
+                        return Some((class_name, signal_name));
                     }
                 }
             }

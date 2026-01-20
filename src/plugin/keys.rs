@@ -33,18 +33,8 @@ impl GodotNeovimPlugin {
             Key::END => "<End>".to_string(),
             Key::PAGEUP => "<PageUp>".to_string(),
             Key::PAGEDOWN => "<PageDown>".to_string(),
-            Key::F1 => "<F1>".to_string(),
-            Key::F2 => "<F2>".to_string(),
-            Key::F3 => "<F3>".to_string(),
-            Key::F4 => "<F4>".to_string(),
-            Key::F5 => "<F5>".to_string(),
-            Key::F6 => "<F6>".to_string(),
-            Key::F7 => "<F7>".to_string(),
-            Key::F8 => "<F8>".to_string(),
-            Key::F9 => "<F9>".to_string(),
-            Key::F10 => "<F10>".to_string(),
-            Key::F11 => "<F11>".to_string(),
-            Key::F12 => "<F12>".to_string(),
+            // Note: F1-F12 are intentionally NOT mapped - let Godot handle them
+            // F1 opens :help in Neovim which causes freezes
             Key::SPACE => " ".to_string(),
             _ => {
                 // Get unicode character
@@ -111,18 +101,7 @@ impl GodotNeovimPlugin {
             Key::DOWN => Some("<Down>"),
             Key::LEFT => Some("<Left>"),
             Key::RIGHT => Some("<Right>"),
-            Key::F1 => Some("<F1>"),
-            Key::F2 => Some("<F2>"),
-            Key::F3 => Some("<F3>"),
-            Key::F4 => Some("<F4>"),
-            Key::F5 => Some("<F5>"),
-            Key::F6 => Some("<F6>"),
-            Key::F7 => Some("<F7>"),
-            Key::F8 => Some("<F8>"),
-            Key::F9 => Some("<F9>"),
-            Key::F10 => Some("<F10>"),
-            Key::F11 => Some("<F11>"),
-            Key::F12 => Some("<F12>"),
+            // Note: F1-F12 are intentionally NOT mapped - let Godot handle them
             _ => None,
         };
 

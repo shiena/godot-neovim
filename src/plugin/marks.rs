@@ -118,16 +118,20 @@ impl GodotNeovimPlugin {
     }
 
     /// Jump back in jump list (Ctrl+O)
+    /// Note: Currently unused - Ctrl+O is sent to Neovim for jumplist support
+    #[allow(dead_code)]
     pub(super) fn jump_back(&mut self) {
         if self.jump_list.is_empty() {
             crate::verbose_print!("[godot-neovim] Ctrl+O: Jump list empty");
             return;
         }
 
-        // Save current position before jumping
+        // Save current position before jumping (so Ctrl+I can return here)
         if self.jump_list_pos == self.jump_list.len() {
             self.add_to_jump_list();
-            self.jump_list_pos = self.jump_list.len();
+            // add_to_jump_list sets pos = len, but we want to jump to position BEFORE the one just added
+            // So set pos to len - 1 (the position before current, not the current we just added)
+            self.jump_list_pos = self.jump_list.len().saturating_sub(1);
         }
 
         if self.jump_list_pos == 0 {
@@ -159,6 +163,8 @@ impl GodotNeovimPlugin {
     }
 
     /// Jump forward in jump list (Ctrl+I)
+    /// Note: Currently unused - Ctrl+I is sent to Neovim for jumplist support
+    #[allow(dead_code)]
     pub(super) fn jump_forward(&mut self) {
         if self.jump_list.is_empty() || self.jump_list_pos >= self.jump_list.len() - 1 {
             crate::verbose_print!("[godot-neovim] Ctrl+I: No newer position");

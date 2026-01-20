@@ -5,6 +5,16 @@ use super::GodotNeovimPlugin;
 impl GodotNeovimPlugin {
     /// Update visual selection in Godot editor
     pub(super) fn update_visual_selection(&mut self) {
+        // Skip if user is controlling cursor/selection (e.g., mouse drag)
+        if self.user_cursor_sync {
+            return;
+        }
+
+        // Skip if mouse selection is being synced (to preserve Godot's selection)
+        if self.mouse_selection_syncing {
+            return;
+        }
+
         let Some(ref neovim) = self.neovim else {
             return;
         };
@@ -53,6 +63,16 @@ impl GodotNeovimPlugin {
 
     /// Update visual line selection in Godot editor (V mode - selects entire lines)
     pub(super) fn update_visual_line_selection(&mut self) {
+        // Skip if user is controlling cursor/selection (e.g., mouse drag)
+        if self.user_cursor_sync {
+            return;
+        }
+
+        // Skip if mouse selection is being synced (to preserve Godot's selection)
+        if self.mouse_selection_syncing {
+            return;
+        }
+
         let Some(ref neovim) = self.neovim else {
             return;
         };

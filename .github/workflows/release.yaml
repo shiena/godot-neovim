@@ -199,19 +199,25 @@ jobs:
 
       - name: Prepare release archive
         run: |
-          # Copy all libraries to addons/godot-neovim/
-          cp artifacts/x86_64-pc-windows-gnu/* addons/godot-neovim/
-          cp artifacts/x86_64-unknown-linux-gnu/* addons/godot-neovim/
+          # Create platform-specific bin directories
+          mkdir -p addons/godot-neovim/bin/windows
+          mkdir -p addons/godot-neovim/bin/linux
+          mkdir -p addons/godot-neovim/bin/linux-arm64
+          mkdir -p addons/godot-neovim/bin/macos-x86_64
+          mkdir -p addons/godot-neovim/bin/macos-arm64
 
-          # Rename Linux ARM64 to include architecture
-          cp artifacts/aarch64-unknown-linux-gnu/libgodot_neovim.so addons/godot-neovim/libgodot_neovim.arm64.so
+          # Copy libraries to platform-specific directories
+          cp artifacts/x86_64-pc-windows-gnu/godot_neovim.dll addons/godot-neovim/bin/windows/
+          cp artifacts/x86_64-unknown-linux-gnu/libgodot_neovim.so addons/godot-neovim/bin/linux/
+          cp artifacts/aarch64-unknown-linux-gnu/libgodot_neovim.so addons/godot-neovim/bin/linux-arm64/
+          cp artifacts/x86_64-apple-darwin/libgodot_neovim.dylib addons/godot-neovim/bin/macos-x86_64/
+          cp artifacts/aarch64-apple-darwin/libgodot_neovim.dylib addons/godot-neovim/bin/macos-arm64/
 
-          # Rename macOS dylibs to include architecture
-          cp artifacts/x86_64-apple-darwin/libgodot_neovim.dylib addons/godot-neovim/libgodot_neovim.x86_64.dylib
-          cp artifacts/aarch64-apple-darwin/libgodot_neovim.dylib addons/godot-neovim/libgodot_neovim.arm64.dylib
+          # Remove .gitkeep files from platform directories
+          rm -f addons/godot-neovim/bin/*/.gitkeep
 
           # Show contents
-          ls -la addons/godot-neovim/
+          ls -laR addons/godot-neovim/bin/
 
           # Create zip archive with wrapper folder for Godot Asset Library
           # Godot auto-skips top-level folder, so we wrap addons/ in godot-neovim/

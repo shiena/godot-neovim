@@ -100,13 +100,9 @@ impl GodotNeovimPlugin {
     pub(super) fn search_word(&mut self, key: &str) {
         crate::verbose_print!("[godot-neovim] search_word: {}", key);
 
-        // Send * or # to Neovim
-        let completed = self.send_keys(key);
-
-        if completed {
-            // Sync cursor from Neovim to Godot
-            self.sync_cursor_from_nvim();
-        }
+        // Send * or # to Neovim synchronously and sync cursor
+        // Must use synchronous input to ensure search completes before getting cursor
+        self.send_search_and_sync_cursor(key);
     }
 
     /// Execute n/N search: send to Neovim and sync cursor
@@ -114,13 +110,9 @@ impl GodotNeovimPlugin {
         let key = if forward { "n" } else { "N" };
         crate::verbose_print!("[godot-neovim] search_next: {}", key);
 
-        // Send n or N to Neovim
-        let completed = self.send_keys(key);
-
-        if completed {
-            // Sync cursor from Neovim to Godot
-            self.sync_cursor_from_nvim();
-        }
+        // Send n or N to Neovim synchronously and sync cursor
+        // Must use synchronous input to ensure search completes before getting cursor
+        self.send_search_and_sync_cursor(key);
     }
 
     /// Open search mode (/ for forward, ? for backward)
@@ -176,34 +168,43 @@ impl GodotNeovimPlugin {
 
         crate::verbose_print!("[godot-neovim] Executing search: {}", search_pattern);
 
-        // Send search command to Neovim with Enter
+        // Send search command to Neovim with Enter synchronously and sync cursor
         let nvim_cmd = format!("{}\r", search_pattern);
-        let completed = self.send_keys(&nvim_cmd);
-
-        if completed {
-            // Get updated cursor position from Neovim and sync to Godot
-            self.sync_cursor_from_nvim();
-        }
+        self.send_search_and_sync_cursor(&nvim_cmd);
 
         self.close_search_mode();
     }
 
-    /// Sync cursor position from Neovim to Godot editor
-    fn sync_cursor_from_nvim(&mut self) {
+    /// Send search command to Neovim synchronously and sync cursor
+    ///
+    /// This function uses synchronous input instead of the async channel to ensure
+    /// the search command is fully processed by Neovim before getting the cursor position.
+    /// Without this, the cursor position returned would be from BEFORE the search.
+    fn send_search_and_sync_cursor(&mut self, keys: &str) {
         let Some(ref neovim) = self.neovim else {
             return;
         };
 
         let Ok(client) = neovim.try_lock() else {
-            crate::verbose_print!("[godot-neovim] Mutex busy, cannot sync cursor");
+            crate::verbose_print!("[godot-neovim] Mutex busy, cannot send search");
             return;
         };
+
+        // Send keys synchronously (waits for RPC acknowledgment)
+        if let Err(e) = client.input(keys) {
+            crate::verbose_print!("[godot-neovim] Failed to send search keys: {}", e);
+            return;
+        }
+
+        // Poll to ensure Neovim processes the input and updates cursor
+        // This gives Neovim time to execute the search and update state
+        client.poll();
 
         // Get cursor position from Neovim
         match client.get_cursor() {
             Ok((line, col)) => {
                 crate::verbose_print!(
-                    "[godot-neovim] Syncing cursor from Neovim: ({}, {})",
+                    "[godot-neovim] Search cursor from Neovim: ({}, {})",
                     line,
                     col
                 );
@@ -213,15 +214,28 @@ impl GodotNeovimPlugin {
 
                 // Update Godot editor cursor (Neovim uses 1-indexed lines)
                 if let Some(ref mut editor) = self.current_editor {
+                    // Set flag to prevent on_caret_changed from triggering sync back
+                    self.syncing_from_grid = true;
+                    self.last_synced_cursor = ((line - 1), col);
+
                     editor.set_caret_line((line - 1) as i32);
                     editor.set_caret_column(col as i32);
 
                     // Center the view on cursor
                     editor.center_viewport_to_caret();
+
+                    self.syncing_from_grid = false;
                 }
 
                 // Update internal cursor state
                 self.current_cursor = (line - 1, col);
+
+                // Update mode display with new cursor position
+                let display_cursor = (line, col);
+                self.update_mode_display_with_cursor(
+                    &self.current_mode.clone(),
+                    Some(display_cursor),
+                );
             }
             Err(e) => {
                 crate::verbose_print!("[godot-neovim] Failed to get cursor from Neovim: {}", e);
