@@ -4,16 +4,9 @@ use super::NeovimClient;
 use std::sync::atomic::Ordering;
 
 impl NeovimClient {
-    /// Check if there are pending updates from redraw events
-    #[allow(dead_code)]
-    pub fn has_pending_updates(&self) -> bool {
-        self.has_updates.load(Ordering::SeqCst)
-    }
-
     /// Take pending updates (clears the flag) and return current state
     /// Prefers actual_cursor (from CursorMoved autocmd) over grid cursor (from redraw)
     /// because actual_cursor is byte position, while grid cursor is screen position
-    #[allow(dead_code)]
     pub fn take_state(&self) -> Option<(String, (i64, i64))> {
         if !self.has_updates.swap(false, Ordering::SeqCst) {
             return None;
@@ -85,20 +78,6 @@ impl NeovimClient {
         });
     }
 
-    /// Get current state (always returns, doesn't check updates flag)
-    #[allow(dead_code)]
-    pub fn get_state(&self) -> (String, (i64, i64)) {
-        self.runtime.block_on(async {
-            let mut state = self.state.lock().await;
-            let cursor = if let Some(actual) = state.actual_cursor.take() {
-                actual
-            } else {
-                state.cursor
-            };
-            (state.mode.clone(), cursor)
-        })
-    }
-
     /// Poll the runtime to process pending async events (like redraw notifications)
     /// This must be called regularly (e.g., every frame) to receive events
     pub fn poll(&self) {
@@ -110,11 +89,5 @@ impl NeovimClient {
             // 3. IO handler to receive and process events
             tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         });
-    }
-
-    /// Check if IO handler is still running
-    #[allow(dead_code)]
-    pub fn is_io_running(&self) -> bool {
-        self.io_handle.as_ref().is_some_and(|h| !h.is_finished())
     }
 }

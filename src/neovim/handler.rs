@@ -33,15 +33,16 @@ pub struct NeovimState {
 
 /// Buffer events from nvim_buf_attach
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum BufEvent {
     /// Buffer lines changed
     Lines(BufLinesEvent),
     /// Only changedtick updated (no content change)
+    #[allow(dead_code)] // buf is deserialized from Neovim event but not currently used
     ChangedTick { buf: i64, tick: i64 },
     /// Buffer detached
     Detach { buf: i64 },
     /// Buffer modified flag changed (from BufModifiedSet autocmd)
+    #[allow(dead_code)] // buf is deserialized from Neovim event but not currently used
     ModifiedChanged { buf: i64, modified: bool },
 }
 
@@ -96,12 +97,6 @@ impl NeovimHandler {
     /// Get a clone of the has_buf_events flag
     pub fn get_buf_events_flag(&self) -> Arc<AtomicBool> {
         self.has_buf_events.clone()
-    }
-
-    /// Check and clear the updates flag
-    #[allow(dead_code)]
-    pub fn take_updates(&self) -> bool {
-        self.has_updates.swap(false, Ordering::SeqCst)
     }
 
     /// Parse nvim_buf_lines_event notification

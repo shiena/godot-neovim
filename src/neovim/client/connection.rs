@@ -40,18 +40,6 @@ impl NeovimClient {
         })
     }
 
-    /// Update the Neovim executable path
-    #[allow(dead_code)]
-    pub fn set_neovim_path(&mut self, path: String) {
-        self.nvim_path = path;
-    }
-
-    /// Get the current Neovim executable path
-    #[allow(dead_code)]
-    pub fn get_neovim_path(&self) -> &str {
-        &self.nvim_path
-    }
-
     /// Start Neovim process and establish connection
     /// If addons_path is provided, loads the Lua plugin from that directory
     pub fn start(

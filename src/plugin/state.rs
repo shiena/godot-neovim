@@ -89,25 +89,6 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// Mark input as handled on the CodeEdit's viewport
-    /// This prevents CodeEdit from processing the input event
-    #[allow(dead_code)]
-    pub(super) fn consume_input_on_editor(&self) {
-        let Some(ref editor) = self.current_editor else {
-            return;
-        };
-
-        // Use CodeEdit's viewport, not the plugin's viewport
-        if let Some(mut viewport) = editor.get_viewport() {
-            viewport.set_input_as_handled();
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(super) fn update_mode_display(&mut self, mode: &str) {
-        self.update_mode_display_with_cursor(mode, None);
-    }
-
     pub(super) fn update_mode_display_with_cursor(
         &mut self,
         mode: &str,

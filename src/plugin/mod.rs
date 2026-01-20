@@ -893,24 +893,6 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// Clear any accidental selection created by mouse operations
-    /// Called on mouse button release to ensure clean state
-    #[allow(dead_code)]
-    fn clear_accidental_selection(&mut self) {
-        // Check visual mode first to avoid borrow conflict
-        let in_visual_mode = self.is_in_visual_mode();
-
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
-        // Only clear selection if we're not in visual mode
-        if !in_visual_mode && editor.has_selection() {
-            editor.deselect();
-            crate::verbose_print!("[godot-neovim] Cleared accidental selection on mouse release");
-        }
-    }
-
     #[func]
     fn on_settings_changed(&mut self) {
         let editor = EditorInterface::singleton();

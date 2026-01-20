@@ -6,9 +6,9 @@ use std::collections::HashMap;
 
 /// Buffer change event from Neovim
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct BufLinesEvent {
-    /// Buffer ID
+    /// Buffer ID (deserialized from Neovim event, reserved for multi-buffer support)
+    #[allow(dead_code)]
     pub buf: i64,
     /// Change tick (monotonically increasing)
     pub changedtick: i64,
@@ -18,7 +18,8 @@ pub struct BufLinesEvent {
     pub last_line: i64,
     /// New line data (empty for deletion)
     pub line_data: Vec<String>,
-    /// More changes coming
+    /// More changes coming (deserialized from Neovim event, reserved for streaming)
+    #[allow(dead_code)]
     pub more: bool,
 }
 
