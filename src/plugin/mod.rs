@@ -913,6 +913,10 @@ impl GodotNeovimPlugin {
         let line = editor.get_caret_line();
         let col = editor.get_caret_column();
 
+        // Set flag to skip viewport sync from Neovim
+        // This prevents Neovim from overriding user's scroll position when clicking
+        self.user_cursor_sync = true;
+
         // Update last_synced_cursor and sync to Neovim
         self.last_synced_cursor = (line as i64, col as i64);
         self.sync_cursor_to_neovim();

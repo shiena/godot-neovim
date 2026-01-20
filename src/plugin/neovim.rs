@@ -641,13 +641,15 @@ impl GodotNeovimPlugin {
             // Also skip after buffer switch until we receive viewport change
             // Also skip in operator-pending mode (d, c, y waiting for motion)
             // Also skip when leaving operator-pending mode (e.g., after yL completes)
+            // Also skip when user_cursor_sync is set (mouse click in progress)
             let skip_grid_cursor = entering_insert
                 || leaving_insert
                 || entering_visual
                 || leaving_visual
                 || is_operator_pending
                 || was_operator_pending
-                || self.skip_grid_cursor_after_switch;
+                || self.skip_grid_cursor_after_switch
+                || self.user_cursor_sync;
             if viewport_change.is_none() && !skip_grid_cursor {
                 self.current_cursor = cursor;
 
