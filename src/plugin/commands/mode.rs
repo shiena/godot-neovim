@@ -145,14 +145,15 @@ impl GodotNeovimPlugin {
             }
             "e!" | "edit!" => self.cmd_reload(),
             _ => {
+                // Check for :{number} - jump to line (must check before has_line_range)
+                // Pure numbers like "100" should use G motion for proper jump list support
+                if let Ok(line_num) = cmd.parse::<i32>() {
+                    self.cmd_goto_line(line_num);
+                }
                 // Check for line range commands (e.g., :1,5d, :.,$s/old/new/g)
                 // Forward to Neovim for processing (Neovim Master design)
-                if Self::has_line_range(cmd) {
+                else if Self::has_line_range(cmd) {
                     self.cmd_forward_to_neovim(cmd);
-                }
-                // Check for :{number} - jump to line
-                else if let Ok(line_num) = cmd.parse::<i32>() {
-                    self.cmd_goto_line(line_num);
                 }
                 // Check for :marks - show marks
                 else if cmd == "marks" {

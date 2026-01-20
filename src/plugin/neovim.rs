@@ -453,6 +453,10 @@ impl GodotNeovimPlugin {
                 BufEvent::ModifiedChanged { .. } => {
                     // Ignore during escape - this is from our sync, not user edit
                 }
+                BufEvent::BufEnter { path, .. } => {
+                    // Neovim switched to a different buffer
+                    self.sync_godot_script_tab(&path);
+                }
             }
         }
 
@@ -597,6 +601,11 @@ impl GodotNeovimPlugin {
                             );
                         }
                     }
+                }
+                BufEvent::BufEnter { path, .. } => {
+                    // Neovim switched to a different buffer (e.g., via Ctrl+O/Ctrl+I jump)
+                    // Check if Godot needs to switch script tabs
+                    self.sync_godot_script_tab(&path);
                 }
             }
         }
@@ -837,6 +846,19 @@ impl GodotNeovimPlugin {
         let Some(ref mut editor) = self.current_editor else {
             return;
         };
+
+        // Validate topline is within editor bounds
+        // This can happen during cross-buffer jumps when BufEnter triggers tab switch
+        // but win_viewport arrives before Godot tab switch completes
+        let line_count = editor.get_line_count();
+        if topline >= line_count as i64 {
+            crate::verbose_print!(
+                "[godot-neovim] Skipping viewport sync (topline {} >= line_count {})",
+                topline,
+                line_count
+            );
+            return;
+        }
 
         crate::verbose_print!(
             "[godot-neovim] Applying viewport from Neovim: topline={}",

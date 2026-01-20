@@ -256,12 +256,65 @@ function M.setup()
         end
     })
 
+    -- Send buffer enter notification (for Ctrl+O/Ctrl+I cross-buffer jumps)
+    -- This fires when entering a buffer, allowing Godot to sync script tabs
+    vim.api.nvim_create_autocmd('BufEnter', {
+        group = augroup,
+        callback = function()
+            local bufnr = vim.api.nvim_get_current_buf()
+            local path = vim.api.nvim_buf_get_name(bufnr)
+            -- Only notify for initialized buffers (managed by godot-neovim)
+            if M._initialized_buffers[bufnr] and path ~= '' then
+                vim.rpcnotify(0, "godot_buf_enter", bufnr, path)
+            end
+        end
+    })
+
     -- Create user commands for debugging
     vim.api.nvim_create_user_command('GodotNeovimInfo', function()
         print('godot_neovim Lua plugin loaded')
         print('Buffer: ' .. vim.api.nvim_get_current_buf())
         print('Changedtick: ' .. M.get_changedtick(0))
     end, {})
+end
+
+-- Reload current buffer from disk (:e!) and re-attach for notifications
+-- Returns the new buffer content and cursor position to sync to Godot
+-- @return table: { lines = buffer lines, tick = changedtick, cursor = {row, col} }
+function M.reload_buffer()
+    local bufnr = vim.api.nvim_get_current_buf()
+
+    -- Execute :e! to reload from disk
+    vim.cmd('e!')
+
+    -- Re-attach for notifications (e! causes detach)
+    M._attached_buffers[bufnr] = nil  -- Clear old attachment flag
+    local attached = vim.api.nvim_buf_attach(bufnr, false, {
+        on_lines = function(_, buf, tick, first_line, last_line, last_line_updated, byte_count)
+            local new_lines = vim.api.nvim_buf_get_lines(buf, first_line, last_line_updated, false)
+            vim.rpcnotify(0, "godot_buf_lines", buf, tick, first_line, last_line, new_lines)
+            return false
+        end,
+        on_detach = function()
+            M._attached_buffers[bufnr] = nil
+            M._initialized_buffers[bufnr] = nil
+        end
+    })
+    if attached then
+        M._attached_buffers[bufnr] = true
+    end
+
+    -- Get current buffer content and cursor position
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+    local cursor = vim.api.nvim_win_get_cursor(0)  -- {row, col}, row is 1-indexed
+
+    return {
+        lines = lines,
+        tick = tick,
+        attached = attached,
+        cursor = cursor
+    }
 end
 
 -- Join lines without space (gJ) while preserving comment leaders

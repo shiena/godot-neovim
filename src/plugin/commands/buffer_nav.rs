@@ -8,14 +8,11 @@ use godot::prelude::*;
 impl GodotNeovimPlugin {
     /// :{number} - Jump to specific line number (Neovim Master design)
     pub(in crate::plugin) fn cmd_goto_line(&mut self, line_num: i32) {
-        // Add to jump list before jumping
-        self.add_to_jump_list();
+        // Use {number}G motion instead of :{number} ex command
+        // G motion properly adds to Neovim's jump list (Ctrl+O/Ctrl+I support)
+        self.send_keys(&format!("{}G", line_num));
 
-        // Send command to Neovim - it will process and send win_viewport event
-        // This ensures cursor sync is consistent with Neovim's state
-        self.send_keys(&format!(":{}<CR>", line_num));
-
-        crate::verbose_print!("[godot-neovim] :{}: Sent to Neovim", line_num);
+        crate::verbose_print!("[godot-neovim] :{}: Sent {}G to Neovim", line_num, line_num);
     }
 
     /// gt - Go to next script tab
@@ -105,5 +102,61 @@ impl GodotNeovimPlugin {
     /// :bp / :bprev - Go to previous buffer (script tab)
     pub(in crate::plugin) fn cmd_buffer_prev(&mut self) {
         self.prev_script_tab();
+    }
+
+    /// Sync Godot script tab to match Neovim's current buffer
+    /// Called when Neovim switches buffer (e.g., via Ctrl+O/Ctrl+I jump)
+    pub(crate) fn sync_godot_script_tab(&mut self, neovim_path: &str) {
+        let mut editor = EditorInterface::singleton();
+        let Some(mut script_editor) = editor.get_script_editor() else {
+            return;
+        };
+
+        // Check if current Godot script already matches
+        if let Some(current_script) = script_editor.get_current_script() {
+            let current_res_path = current_script.get_path().to_string();
+            // Convert res:// path to absolute path for comparison
+            let current_abs_path =
+                godot::classes::ProjectSettings::singleton().globalize_path(&current_res_path);
+            let current_abs_str = current_abs_path.to_string().replace('\\', "/");
+
+            // Normalize neovim path (ensure forward slashes)
+            let neovim_normalized = neovim_path.replace('\\', "/");
+
+            if current_abs_str == neovim_normalized {
+                // Already on the correct script
+                return;
+            }
+        }
+
+        // Find and switch to the script matching neovim_path
+        let open_scripts = script_editor.get_open_scripts();
+        let neovim_normalized = neovim_path.replace('\\', "/");
+
+        for i in 0..open_scripts.len() {
+            if let Some(script_var) = open_scripts.get(i) {
+                if let Ok(script) = script_var.try_cast::<godot::classes::Script>() {
+                    let res_path = script.get_path().to_string();
+                    let abs_path =
+                        godot::classes::ProjectSettings::singleton().globalize_path(&res_path);
+                    let abs_str = abs_path.to_string().replace('\\', "/");
+
+                    if abs_str == neovim_normalized {
+                        crate::verbose_print!(
+                            "[godot-neovim] BufEnter: Switching Godot tab to {}",
+                            res_path
+                        );
+                        // Use call_deferred to avoid issues during event processing
+                        editor.call_deferred("edit_script", &[script.to_variant()]);
+                        return;
+                    }
+                }
+            }
+        }
+
+        crate::verbose_print!(
+            "[godot-neovim] BufEnter: No matching Godot script for {}",
+            neovim_path
+        );
     }
 }
