@@ -375,9 +375,9 @@ Once the plugin is enabled:
 | `:version`, `:ver` | Show version in status label |
 | `:e` | Open quick open dialog for scripts |
 | `:e {file}` | Open specified script file |
-| `:e!` | Discard changes and reload |
+| `:e!`, `:edit!` | Discard changes and reload |
 | `:w` | Save file |
-| `:wa` | Save all open files |
+| `:wa`, `:wall` | Save all open files |
 | `:q` | Close current script tab |
 | `:qa`, `:qall` | Close all script tabs |
 | `:wq`, `:x` | Save and close |
@@ -397,7 +397,7 @@ Once the plugin is enabled:
 | `:{number}` | Jump to line number (e.g., `:123`) |
 | `:marks` | Show all marks (output to console) |
 | `:registers`, `:reg` | Show all registers (output to console) |
-| `:jumps` | Show jump list (output to console) |
+| `:jumps`, `:ju` | Show jump list (output to console) |
 | `:changes` | Show change list (output to console) |
 | `@:` | Repeat last Ex command |
 | `Ctrl+G` | Show file info |
