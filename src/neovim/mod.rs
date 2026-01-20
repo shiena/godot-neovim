@@ -5,6 +5,8 @@ mod handler;
 
 pub use client::NeovimClient;
 #[allow(unused_imports)]
+pub use client::SwitchBufferResult;
+#[allow(unused_imports)]
 pub use commands::{ParallelCommand, SerialCommand};
 #[allow(unused_imports)]
 pub use events::{ParseError, RedrawEvent};
