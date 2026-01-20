@@ -16,12 +16,11 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 ## Features
 
 - Real Neovim backend (not just keybinding emulation)
-- Mode indicator with input mode and cursor position (e.g., `NORMAL (Hybrid) 123:45`)
+- Mode indicator with cursor position (e.g., `NORMAL 123:45`)
 - Cursor synchronization between Godot and Neovim
 - Mouse drag selection syncs to Neovim visual mode
 - Support for count prefixes (e.g., `4j`, `10gg`)
 - Support for operator-pending commands (e.g., `gg`, `dd`, `yy`)
-- Configurable input mode (hybrid for Godot auto-completion, strict for full Neovim control)
 - Ctrl+[ as Escape alternative (terminal standard)
 - Full/half page scrolling (`Ctrl+F`, `Ctrl+B`, `Ctrl+D`, `Ctrl+U`)
 - Word search under cursor (`*`, `#`, `n`, `N`)
@@ -38,7 +37,7 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 |----------|---------|:------------:|:---------:|
 | **Architecture** | Backend | Neovim (RPC) | GDExtension |
 | | Language | Rust | Rust |
-| | Auto-completion | ✅ (hybrid mode) | ❌ |
+| | Auto-completion | ✅ | ❌ |
 | **Modes** | Normal, Insert, Visual, V-Line | ✅ | ✅ |
 | | Visual Block | ✅ (`Ctrl+V`, `gv`) | ✅ |
 | | Replace | ✅ (`R`) | ✅ |
@@ -79,7 +78,7 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 \* `[m`/`]m` requires Neovim's treesitter or language-specific support. GDScript is not recognized by Neovim, so these commands may not work as expected.
 
 **Summary:**
-- **godot-neovim**: Full Neovim backend with all Ex commands, named registers, Godot auto-completion support (hybrid mode). Requires Neovim 0.9+ installation.
+- **godot-neovim**: Full Neovim backend with all Ex commands, named registers, Godot auto-completion support. Requires Neovim 0.9+ installation.
 - **GodotVim**: GDExtension-based emulator with custom key mapping support. No external dependencies.
 
 ## Requirements
@@ -152,20 +151,8 @@ All settings are available in `Editor > Editor Settings > Godot Neovim`.
 | Setting | Description | Default |
 |---------|-------------|---------|
 | Neovim Executable Path | Path to Neovim executable. The plugin validates this path on startup. | `nvim.exe` (Windows) / `nvim` (macOS/Linux) |
-| Input Mode | How insert mode input is handled. `Hybrid` uses Godot's native input for auto-completion support. `Strict` sends all input to Neovim. | Hybrid |
 | Neovim Clean | Equivalent to the `--clean` startup option. When enabled, Neovim starts without loading any config files (init.lua, plugins, etc.). Recommended to keep enabled to avoid plugin compatibility issues. | true |
 | Timeoutlen *(advanced)* | Time in milliseconds to wait for a mapped key sequence to complete. This setting appears when "Advanced Settings" is enabled in Editor Settings. | 1000 |
-
-### Input Mode Details
-
-| Mode | Description | Auto-completion |
-|------|-------------|:---------------:|
-| `Hybrid` (default) | Insert mode uses Godot's native input | ✅ |
-| `Strict` | Insert mode also handled by Neovim | ❌ |
-
-**Hybrid mode** is recommended for most users as it allows using Godot's auto-completion, code hints, and other editor features directly in insert mode.
-
-**Strict mode** provides a more authentic Neovim experience where all keystrokes are processed by Neovim, but Godot's auto-completion is not available.
 
 ### Go to Definition (gd)
 
@@ -386,8 +373,6 @@ Once the plugin is enabled:
 |---------|-------------|
 | `:help`, `:h` | Open GodotNeovim help |
 | `:version`, `:ver` | Show version in status label |
-| `:hybrid` | Switch to Hybrid input mode |
-| `:strict` | Switch to Strict input mode |
 | `:e` | Open quick open dialog for scripts |
 | `:e {file}` | Open specified script file |
 | `:e!` | Discard changes and reload |
@@ -422,9 +407,9 @@ Once the plugin is enabled:
 
 This plugin has architectural limitations due to using Godot's native CodeEdit for text editing.
 
-### Insert Mode (Hybrid Mode)
+### Insert Mode
 
-In hybrid mode (default), insert mode uses Godot's native input system to support auto-completion and other editor features. As a result, Vim's insert mode commands are **not available**:
+Insert mode uses Godot's native input system to support auto-completion and other editor features. As a result, Vim's insert mode commands are **not available**:
 
 | Not Supported | Description |
 |---------------|-------------|

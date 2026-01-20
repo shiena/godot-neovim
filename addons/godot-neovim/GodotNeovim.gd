@@ -155,8 +155,6 @@
 ## [br][b]Ex Commands[/b][br]
 ## [code]:help :h[/code] - Open this help[br]
 ## [code]:version :ver[/code] - Show version in status label[br]
-## [code]:hybrid[/code] - Switch to Hybrid input mode[br]
-## [code]:strict[/code] - Switch to Strict input mode[br]
 ## [code]:w :wa[/code] - Save / Save all[br]
 ## [code]:q :qa[/code] - Close / Close all[br]
 ## [code]:wq :x[/code] - Save and close[br]
@@ -182,12 +180,11 @@
 ## Configure via [code]Editor > Editor Settings > Godot Neovim[/code].[br]
 ## [i]Note: Enable "Advanced Settings" toggle in Editor Settings to see the godot_neovim section.[/i][br]
 ## [code]neovim_executable_path[/code] - Path to Neovim executable[br]
-## [code]input_mode[/code] - Hybrid (Godot input, auto-completion) or Strict (Neovim input)[br]
 ## [code]neovim_clean[/code] - Equivalent to --clean startup option (default: true)[br]
 ## [code]timeoutlen[/code] - Time (ms) to wait for a mapped sequence to complete (advanced)[br]
 ##
 ## [br][b]Limitations[/b][br]
-## - Insert mode commands (Ctrl+O, Ctrl+W, etc.) not available in hybrid mode[br]
+## - Insert mode commands (Ctrl+O, Ctrl+W, etc.) not available[br]
 ## - Neovim config (init.lua, plugins) not loaded by default (neovim_clean=true)[br]
 ## - Uses Godot's undo system instead of Neovim's[br]
 ## - [code][m ]m[/code] method jumps require treesitter (GDScript not supported by Neovim)
