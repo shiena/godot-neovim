@@ -2442,6 +2442,8 @@ impl GodotNeovimPlugin {
         if unicode_char == Some('"') && !key_event.is_ctrl_pressed() {
             // Use '\0' as marker for "waiting for register char"
             self.clear_pending_input_states();
+            // Clear last_key to prevent timeout from clearing selected_register
+            self.clear_last_key();
             self.selected_register = Some('\0');
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
