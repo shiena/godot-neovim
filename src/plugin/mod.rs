@@ -781,6 +781,15 @@ impl GodotNeovimPlugin {
     /// If no selection (click), just sync cursor position
     #[func]
     fn sync_mouse_selection_to_neovim(&mut self) {
+        // Clear command-line/search mode on mouse click/drag
+        // This ensures the buffer is cleared when re-entering these modes
+        if self.command_mode {
+            self.close_command_line();
+        }
+        if self.search_mode {
+            self.close_search_mode();
+        }
+
         let in_visual_mode = self.is_in_visual_mode();
 
         // Get selection info from editor first to avoid borrow conflicts
