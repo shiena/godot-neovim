@@ -33,6 +33,8 @@ impl GodotNeovimPlugin {
             let display_cursor = (self.current_cursor.0 + 1, self.current_cursor.1);
             self.update_mode_display_with_cursor(&self.current_mode.clone(), Some(display_cursor));
         }
+
+        crate::verbose_print!("[godot-neovim] Command-line mode closed");
     }
 
     /// Update command display in mode label

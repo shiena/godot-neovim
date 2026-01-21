@@ -781,6 +781,15 @@ impl GodotNeovimPlugin {
     /// If no selection (click), just sync cursor position
     #[func]
     fn sync_mouse_selection_to_neovim(&mut self) {
+        // Clear command-line/search mode on mouse click/drag
+        // This ensures the buffer is cleared when re-entering these modes
+        if self.command_mode {
+            self.close_command_line();
+        }
+        if self.search_mode {
+            self.close_search_mode();
+        }
+
         let in_visual_mode = self.is_in_visual_mode();
 
         // Get selection info from editor first to avoid borrow conflicts
@@ -821,11 +830,21 @@ impl GodotNeovimPlugin {
                 to_col
             );
 
+            // Clamp line numbers to Neovim buffer bounds
+            // Godot CodeEdit may have extra empty line after last line
+            let nvim_line_count = self.sync_manager.get_line_count();
+            if nvim_line_count <= 0 {
+                return;
+            }
+            let max_line = nvim_line_count - 1;
+            let safe_from_line = from_line.min(max_line).max(0);
+            let safe_to_line = to_line.min(max_line).max(0);
+
             // Set flag to skip Neovim's visual selection update
             self.mouse_selection_syncing = true;
 
             // Update last synced cursor to selection end
-            self.last_synced_cursor = (to_line as i64, to_col as i64);
+            self.last_synced_cursor = (safe_to_line as i64, to_col as i64);
 
             // Use Lua function to atomically set visual selection
             // This ensures ordering: move to start -> enter visual mode -> move to end
@@ -833,9 +852,9 @@ impl GodotNeovimPlugin {
                 if let Ok(client) = neovim.try_lock() {
                     // Lua function expects 1-indexed line numbers
                     match client.set_visual_selection(
-                        (from_line + 1) as i64,
+                        (safe_from_line + 1) as i64,
                         from_col as i64,
-                        (to_line + 1) as i64,
+                        (safe_to_line + 1) as i64,
                         to_col as i64,
                     ) {
                         Ok(mode) => {
