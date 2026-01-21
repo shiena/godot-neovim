@@ -195,7 +195,7 @@ impl GodotNeovimPlugin {
     /// Convert character column to byte column for a given line
     /// Godot uses character positions, Neovim uses byte positions
     /// For multi-byte characters (e.g., Japanese), this conversion is essential
-    fn char_col_to_byte_col(line_text: &str, char_col: i32) -> i32 {
+    pub(super) fn char_col_to_byte_col(line_text: &str, char_col: i32) -> i32 {
         if char_col <= 0 {
             return 0;
         }
@@ -386,17 +386,24 @@ impl GodotNeovimPlugin {
             // Set Neovim cursor to Godot's cursor position before Escape
             // This ensures Neovim's '^' mark is set at the right location
             if let Some((line, col)) = saved_cursor {
-                if let Some(ref neovim) = self.neovim {
-                    if let Ok(client) = neovim.try_lock() {
-                        // nvim_win_set_cursor uses 1-indexed line, 0-indexed column
-                        let nvim_line = (line + 1) as i64;
-                        let nvim_col = col as i64;
-                        let _ = client.set_cursor(nvim_line, nvim_col);
-                        crate::verbose_print!(
-                            "[godot-neovim] Set Neovim cursor to ({}, {}) before Escape for gi",
-                            nvim_line,
-                            nvim_col
-                        );
+                if let Some(ref mut editor) = self.current_editor {
+                    let line_text = editor.get_line(line).to_string();
+                    // Convert character column to byte column for Neovim
+                    let byte_col = Self::char_col_to_byte_col(&line_text, col);
+                    if let Some(ref neovim) = self.neovim {
+                        if let Ok(client) = neovim.try_lock() {
+                            // nvim_win_set_cursor uses 1-indexed line, 0-indexed byte column
+                            let nvim_line = (line + 1) as i64;
+                            let nvim_col = byte_col as i64;
+                            let _ = client.set_cursor(nvim_line, nvim_col);
+                            crate::verbose_print!(
+                                "[godot-neovim] Set Neovim cursor to ({}, {}) before Escape for gi (char_col={}, byte_col={})",
+                                nvim_line,
+                                nvim_col,
+                                col,
+                                byte_col
+                            );
+                        }
                     }
                 }
             }

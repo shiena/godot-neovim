@@ -932,15 +932,19 @@ impl GodotNeovimPlugin {
             if let Some(ref editor) = self.current_editor {
                 if editor.is_instance_valid() {
                     let line = editor.get_caret_line() as i64 + 1; // 1-indexed for Neovim
-                    let col = editor.get_caret_column() as i64;
+                    let char_col = editor.get_caret_column();
+                    // Convert character column to byte column for Neovim
+                    let line_text = editor.get_line(editor.get_caret_line()).to_string();
+                    let byte_col = Self::char_col_to_byte_col(&line_text, char_col) as i64;
                     if let Some(ref neovim) = self.neovim {
                         if let Ok(client) = neovim.try_lock() {
-                            let _ = client.set_cursor(line, col);
+                            let _ = client.set_cursor(line, byte_col);
                             crate::verbose_print!(
-                                "[godot-neovim] Synced cursor to Neovim for {}: ({}, {})",
+                                "[godot-neovim] Synced cursor to Neovim for {}: ({}, {}) (char_col={})",
                                 self.current_script_path,
                                 line,
-                                col
+                                byte_col,
+                                char_col
                             );
                         }
                     }
@@ -1123,15 +1127,20 @@ impl GodotNeovimPlugin {
                 if let Some(ref mut editor) = self.current_editor {
                     let line_count = editor.get_line_count();
                     let safe_line = (line as i32).min(line_count - 1).max(0);
-                    let line_length = editor.get_line(safe_line).len() as i32;
-                    let safe_col = (col as i32).min(line_length).max(0);
+                    let line_text = editor.get_line(safe_line).to_string();
+                    // Convert byte column from Neovim to character column for Godot
+                    let char_col = Self::byte_col_to_char_col(&line_text, col as i32);
+                    let line_char_count = line_text.chars().count() as i32;
+                    let safe_col = char_col.min(line_char_count).max(0);
 
                     crate::verbose_print!(
-                        "[godot-neovim] Applying cursor from Neovim: ({}, {}) -> ({}, {})",
+                        "[godot-neovim] Applying cursor from Neovim: ({}, {}) -> ({}, {}) (byte_col={}, char_col={})",
                         line,
                         col,
                         safe_line,
-                        safe_col
+                        safe_col,
+                        col,
+                        char_col
                     );
 
                     // Set syncing_from_grid to prevent on_caret_changed from setting user_cursor_sync

@@ -72,7 +72,9 @@ impl GodotNeovimPlugin {
         let target_line = line.min(line_count - 1);
         editor.set_caret_line(target_line);
 
-        let line_length = editor.get_line(target_line).len() as i32;
+        // Use chars().count() for character count, not byte length
+        let line_text = editor.get_line(target_line).to_string();
+        let line_length = line_text.chars().count() as i32;
         let target_col = col.min(line_length.max(0));
         editor.set_caret_column(target_col);
 
