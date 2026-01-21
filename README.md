@@ -32,7 +32,8 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 - Configurable Neovim executable path via Editor Settings
 - Path validation on startup and settings change
 
-## Comparison with GodotVim
+<details>
+<summary><h2>Comparison with GodotVim</h2></summary>
 
 | Category | Feature | godot-neovim | GodotVim |
 |----------|---------|:------------:|:---------:|
@@ -81,6 +82,8 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 **Summary:**
 - **godot-neovim**: Full Neovim backend with all Ex commands, named registers, Godot auto-completion support. Requires Neovim 0.9+ installation.
 - **GodotVim**: GDExtension-based emulator with custom key mapping support. No external dependencies.
+
+</details>
 
 ## Requirements
 
@@ -190,7 +193,8 @@ Once the plugin is enabled:
 
 ### Supported Commands
 
-#### Navigation
+<details>
+<summary>Navigation</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -230,7 +234,10 @@ Once the plugin is enabled:
 | `[m` | Jump to previous method start |
 | `]m` | Jump to next method start |
 
-#### Search
+</details>
+
+<details>
+<summary>Search</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -251,7 +258,10 @@ Once the plugin is enabled:
 | `gx` | Open URL/path under cursor in browser |
 | `K` | Open Godot documentation (class, method, property, constant via LSP) |
 
-#### Editing
+</details>
+
+<details>
+<summary>Editing</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -283,7 +293,10 @@ Once the plugin is enabled:
 | `ga` | Display ASCII/Unicode of char under cursor |
 | `gqq` | Format current line |
 
-#### Text Objects
+</details>
+
+<details>
+<summary>Text Objects</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -296,7 +309,10 @@ Once the plugin is enabled:
 | `i<`, `a<` | Inner/around angle brackets |
 | `ie`, `ae` | Inner/around entire buffer |
 
-#### Marks
+</details>
+
+<details>
+<summary>Marks</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -304,7 +320,10 @@ Once the plugin is enabled:
 | `'{a-z}` | Jump to mark line (first non-blank) |
 | `` `{a-z} `` | Jump to exact mark position |
 
-#### Macros
+</details>
+
+<details>
+<summary>Macros</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -313,7 +332,10 @@ Once the plugin is enabled:
 | `@{a-z}` | Play macro from register |
 | `@@` | Replay last played macro |
 
-#### Named Registers
+</details>
+
+<details>
+<summary>Named Registers</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -326,21 +348,30 @@ Once the plugin is enabled:
 | `"_d` | Delete to black hole register (no save) |
 | `"0p` | Paste from yank register |
 
-#### Number Operations
+</details>
+
+<details>
+<summary>Number Operations</summary>
 
 | Command | Description |
 |---------|-------------|
 | `Ctrl+A` | Increment number under/after cursor |
 | `Ctrl+X` | Decrement number under/after cursor |
 
-#### Jump List
+</details>
+
+<details>
+<summary>Jump List</summary>
 
 | Command | Description |
 |---------|-------------|
 | `Ctrl+O` | Jump back to previous position |
 | `Ctrl+I` | Jump forward to newer position |
 
-#### Mode Switching
+</details>
+
+<details>
+<summary>Mode Switching</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -358,7 +389,10 @@ Once the plugin is enabled:
 | `Escape`, `Ctrl+[` | Return to normal mode |
 | `:` | Enter command-line mode |
 
-#### Folding
+</details>
+
+<details>
+<summary>Folding</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -368,7 +402,10 @@ Once the plugin is enabled:
 | `zM` | Close all folds |
 | `zR` | Open all folds |
 
-#### Command-Line Mode
+</details>
+
+<details>
+<summary>Command-Line Mode</summary>
 
 | Command | Description |
 |---------|-------------|
@@ -404,7 +441,10 @@ Once the plugin is enabled:
 | `Ctrl+G` | Show file info |
 | `Up`/`Down` | Browse command history |
 
-## Limitations
+</details>
+
+<details>
+<summary><h2>Limitations</h2></summary>
 
 This plugin has architectural limitations due to using Godot's native CodeEdit for text editing.
 
@@ -437,7 +477,10 @@ Insert mode uses Godot's native input system to support auto-completion and othe
 | Dirty flag not set after some operations (named register paste, macro playback) | Switch to another script tab and back (`gt` then `gT`) |
 | `(*)` marker remains after `:e!` reload | Switch tabs with `gt`/`gT` to clear the marker |
 
-## Roadmap
+</details>
+
+<details>
+<summary><h2>Roadmap</h2></summary>
 
 ### Implementation Candidates
 
@@ -462,6 +505,8 @@ These features work through the Neovim backend:
 | Motions | `(`, `)` (sentence), `[[`, `]]`, `[]`, `][` (section) |
 | Text Objects | `is`, `as` (sentence), `ip`, `ap` (paragraph), `it`, `at` (tag) |
 | Line Range | `:1,10d`, `:.,$s/old/new/g`, `:'<,'>d` |
+
+</details>
 
 ## Architecture
 
