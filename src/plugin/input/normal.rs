@@ -472,10 +472,11 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 'cc' for substitute line (same as S)
-        // Neovim Master: send to Neovim only
+        // Neovim Master: wait locally for complete command, then send to Neovim
+        // (Don't send partial 'c' to avoid Neovim pending state mismatch on Esc)
         if keycode == Key::C && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
             if self.last_key == "c" {
-                self.send_keys("c"); // Send second 'c' to complete 'cc'
+                self.send_keys("cc"); // Send complete 'cc' to Neovim
                 self.clear_last_key();
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
@@ -483,7 +484,7 @@ impl GodotNeovimPlugin {
                 return;
             } else {
                 self.set_last_key("c");
-                self.send_keys("c"); // Send first 'c' to Neovim
+                // Don't send to Neovim yet - wait for second 'c' or other motion
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
                 }
