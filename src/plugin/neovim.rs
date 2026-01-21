@@ -657,16 +657,22 @@ impl GodotNeovimPlugin {
         // Use visual_mode_type since Neovim returns "visual" for all visual modes
         let mut visual_line_mode = self.visual_mode_type == 'V';
 
+        // Track insert mode state for viewport_change processing
+        // Used to skip cursor sync while in insert mode (Godot controls cursor)
+        let mut is_insert = self.is_insert_mode() || self.is_replace_mode();
+        let mut entering_insert = false;
+
         // Process state update from redraw events
         if let Some((ref mode, cursor)) = state_from_redraw {
             let old_mode = self.current_mode.clone();
             self.current_mode = mode.clone();
 
             // Check if entering/leaving insert/replace mode
-            let is_insert = mode == "i" || mode == "insert" || mode == "R" || mode == "replace";
+            // Update outer variables for use in viewport_change processing
+            is_insert = mode == "i" || mode == "insert" || mode == "R" || mode == "replace";
             let was_insert =
                 old_mode == "i" || old_mode == "insert" || old_mode == "R" || old_mode == "replace";
-            let entering_insert = is_insert && !was_insert;
+            entering_insert = is_insert && !was_insert;
             let leaving_insert = was_insert && !is_insert;
 
             // Check if entering/leaving visual mode
@@ -769,6 +775,25 @@ impl GodotNeovimPlugin {
                 );
 
                 // Still update mode display even when skipping viewport sync
+                let display_cursor = (curline + 1, curcol);
+                if let Some((ref mode, _)) = state_from_redraw {
+                    self.update_mode_display_with_cursor(mode, Some(display_cursor));
+                }
+            } else if is_insert && !entering_insert {
+                // Skip cursor sync while in insert mode (after initial entry)
+                // Godot controls cursor during insert mode, syncing would override user's position
+                // and cause typed characters to appear in reverse order
+                // Only entering_insert allows cursor sync to position cursor on the new line (o/O commands)
+                crate::verbose_print!(
+                    "[godot-neovim] Skipping cursor sync (in insert mode): cursor=({}, {})",
+                    curline,
+                    curcol
+                );
+
+                // Still apply viewport for scroll position
+                self.apply_viewport_from_neovim(topline);
+
+                // Update mode display
                 let display_cursor = (curline + 1, curcol);
                 if let Some((ref mode, _)) = state_from_redraw {
                     self.update_mode_display_with_cursor(mode, Some(display_cursor));
