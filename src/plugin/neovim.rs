@@ -6,8 +6,8 @@ use godot::prelude::*;
 impl GodotNeovimPlugin {
     /// Switch to Neovim buffer for the current file
     /// Creates buffer if not exists, initializes content if new
-    /// Returns cursor position from Neovim (for existing buffers)
-    pub(super) fn switch_to_neovim_buffer(&mut self) -> Option<(i64, i64)> {
+    /// Returns (line, col, is_new) - cursor position and whether buffer was newly created
+    pub(super) fn switch_to_neovim_buffer(&mut self) -> Option<(i64, i64, bool)> {
         let Some(ref editor) = self.current_editor else {
             crate::verbose_print!("[godot-neovim] switch_to_neovim_buffer: No current editor");
             return None;
@@ -116,8 +116,8 @@ impl GodotNeovimPlugin {
                     }
                 }
 
-                // Return cursor position (convert to 0-indexed line)
-                Some((result.cursor.0 - 1, result.cursor.1))
+                // Return cursor position (convert to 0-indexed line) and is_new flag
+                Some((result.cursor.0 - 1, result.cursor.1, result.is_new))
             }
             Err(e) => {
                 godot_error!("[godot-neovim] Failed to switch buffer: {}", e);

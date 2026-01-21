@@ -564,8 +564,8 @@ impl IEditorPlugin for GodotNeovimPlugin {
                     if let Some(ref mut editor) = self.current_editor {
                         editor.set_selecting_enabled(true);
                     }
-                } else {
-                    // Mouse release - sync to Neovim
+                } else if self.mouse_dragging {
+                    // Mouse release after drag/click - sync to Neovim
                     self.mouse_dragging = false;
 
                     // Use deferred call to handle sync after Godot finalizes selection
@@ -1093,29 +1093,37 @@ impl GodotNeovimPlugin {
         self.reposition_mode_label();
 
         // Switch to Neovim buffer for this file (creates if not exists)
-        // Returns cursor position from Neovim for existing buffers
-        if let Some((line, col)) = self.switch_to_neovim_buffer() {
-            // Apply cursor position from Neovim to Godot editor
-            if let Some(ref mut editor) = self.current_editor {
-                let line_count = editor.get_line_count();
-                let safe_line = (line as i32).min(line_count - 1).max(0);
-                let line_length = editor.get_line(safe_line).len() as i32;
-                let safe_col = (col as i32).min(line_length).max(0);
-
+        // Returns cursor position from Neovim and whether buffer was newly created
+        if let Some((line, col, is_new)) = self.switch_to_neovim_buffer() {
+            if is_new {
+                // New buffer (Godot startup): keep Godot's cursor position
+                // Godot restores cursor from previous session, sync it to Neovim
                 crate::verbose_print!(
-                    "[godot-neovim] Applying cursor from Neovim: ({}, {}) -> ({}, {})",
-                    line,
-                    col,
-                    safe_line,
-                    safe_col
+                    "[godot-neovim] New buffer: keeping Godot cursor position"
                 );
+            } else {
+                // Existing buffer: apply Neovim's cursor position to Godot
+                if let Some(ref mut editor) = self.current_editor {
+                    let line_count = editor.get_line_count();
+                    let safe_line = (line as i32).min(line_count - 1).max(0);
+                    let line_length = editor.get_line(safe_line).len() as i32;
+                    let safe_col = (col as i32).min(line_length).max(0);
 
-                // Set syncing_from_grid to prevent on_caret_changed from setting user_cursor_sync
-                // This ensures zz/zt/zb viewport commands work after buffer switch
-                self.syncing_from_grid = true;
-                editor.set_caret_line(safe_line);
-                editor.set_caret_column(safe_col);
-                self.syncing_from_grid = false;
+                    crate::verbose_print!(
+                        "[godot-neovim] Applying cursor from Neovim: ({}, {}) -> ({}, {})",
+                        line,
+                        col,
+                        safe_line,
+                        safe_col
+                    );
+
+                    // Set syncing_from_grid to prevent on_caret_changed from setting user_cursor_sync
+                    // This ensures zz/zt/zb viewport commands work after buffer switch
+                    self.syncing_from_grid = true;
+                    editor.set_caret_line(safe_line);
+                    editor.set_caret_column(safe_col);
+                    self.syncing_from_grid = false;
+                }
             }
         }
 
@@ -1154,7 +1162,7 @@ impl GodotNeovimPlugin {
                     if let Some(ref mut editor) = self.current_editor {
                         editor.set_selecting_enabled(true);
                     }
-                } else {
+                } else if self.mouse_dragging {
                     self.mouse_dragging = false;
                     self.base_mut()
                         .call_deferred("sync_mouse_selection_to_neovim", &[]);
