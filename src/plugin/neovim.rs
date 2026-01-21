@@ -155,6 +155,9 @@ impl GodotNeovimPlugin {
 
         crate::verbose_print!("[godot-neovim] Syncing {} lines to Neovim", lines.len());
 
+        // Track line count before sending to Neovim
+        let line_count = lines.len() as i32;
+
         // ESC sync: update buffer preserving undo history
         match client.buffer_update(lines) {
             Ok(tick) => {
@@ -163,6 +166,8 @@ impl GodotNeovimPlugin {
                 // Reset sync manager and set initial sync tick to ignore echo
                 self.sync_manager.reset();
                 self.sync_manager.set_initial_sync_tick(tick);
+                // Set line count since reset() clears it and echo will be ignored
+                self.sync_manager.set_line_count(line_count);
 
                 // Re-attach to buffer for change notifications
                 match client.buf_attach_current() {
@@ -185,6 +190,27 @@ impl GodotNeovimPlugin {
                 godot_error!("[godot-neovim] Failed to update buffer: {}", e);
             }
         }
+    }
+
+    /// Convert character column to byte column for a given line
+    /// Godot uses character positions, Neovim uses byte positions
+    /// For multi-byte characters (e.g., Japanese), this conversion is essential
+    pub(super) fn char_col_to_byte_col(line_text: &str, char_col: i32) -> i32 {
+        if char_col <= 0 {
+            return 0;
+        }
+
+        let char_col = char_col as usize;
+        let mut byte_count = 0;
+
+        for (i, ch) in line_text.chars().enumerate() {
+            if i >= char_col {
+                break;
+            }
+            byte_count += ch.len_utf8();
+        }
+
+        byte_count as i32
     }
 
     /// Sync cursor position from Godot editor to Neovim
@@ -212,13 +238,17 @@ impl GodotNeovimPlugin {
             return;
         };
 
-        // Get cursor from Godot (0-indexed)
+        // Get cursor from Godot (0-indexed, character position)
         let line = editor.get_caret_line();
-        let col = editor.get_caret_column();
+        let char_col = editor.get_caret_column();
 
-        // Neovim uses 1-indexed lines, 0-indexed columns
+        // Convert character column to byte column for Neovim
+        let line_text = editor.get_line(line).to_string();
+        let byte_col = Self::char_col_to_byte_col(&line_text, char_col);
+
+        // Neovim uses 1-indexed lines, 0-indexed byte columns
         let mut nvim_line = (line + 1) as i64;
-        let nvim_col = col as i64;
+        let nvim_col = byte_col as i64;
 
         // Clamp line to Neovim buffer range (use cached line count for performance)
         let nvim_line_count = self.sync_manager.get_line_count() as i64;
@@ -229,7 +259,8 @@ impl GodotNeovimPlugin {
             // Skip if we've already synced to this clamped line (prevents loop with different columns)
             if self.last_nvim_synced_line == nvim_line {
                 // Still update last_synced_cursor to prevent on_caret_changed from calling us again
-                self.last_synced_cursor = (line as i64, col as i64);
+                // Use character column (what Godot uses) for comparison
+                self.last_synced_cursor = (line as i64, char_col as i64);
                 return;
             }
 
@@ -240,13 +271,14 @@ impl GodotNeovimPlugin {
             );
 
             // Update last_synced_cursor to prevent immediate re-trigger
-            self.last_synced_cursor = (line as i64, col as i64);
+            self.last_synced_cursor = (line as i64, char_col as i64);
         }
 
         crate::verbose_print!(
-            "[godot-neovim] Syncing cursor to Neovim: line={}, col={}",
+            "[godot-neovim] Syncing cursor to Neovim: line={}, byte_col={} (char_col={})",
             nvim_line,
-            nvim_col
+            nvim_col,
+            char_col
         );
 
         if let Err(e) = client.set_cursor(nvim_line, nvim_col) {
@@ -259,7 +291,8 @@ impl GodotNeovimPlugin {
         // Reset to -1 for normal syncs so next clamp will work
         self.last_nvim_synced_line = if clamped { nvim_line } else { -1 };
         let final_line = if clamped { nvim_line - 1 } else { line as i64 };
-        self.current_cursor = (final_line, col as i64);
+        // Store character column (what Godot uses) for cursor tracking
+        self.current_cursor = (final_line, char_col as i64);
     }
 
     /// Send keys to Neovim via unbounded channel (never blocks, never drops keys)
@@ -353,17 +386,24 @@ impl GodotNeovimPlugin {
             // Set Neovim cursor to Godot's cursor position before Escape
             // This ensures Neovim's '^' mark is set at the right location
             if let Some((line, col)) = saved_cursor {
-                if let Some(ref neovim) = self.neovim {
-                    if let Ok(client) = neovim.try_lock() {
-                        // nvim_win_set_cursor uses 1-indexed line, 0-indexed column
-                        let nvim_line = (line + 1) as i64;
-                        let nvim_col = col as i64;
-                        let _ = client.set_cursor(nvim_line, nvim_col);
-                        crate::verbose_print!(
-                            "[godot-neovim] Set Neovim cursor to ({}, {}) before Escape for gi",
-                            nvim_line,
-                            nvim_col
-                        );
+                if let Some(ref mut editor) = self.current_editor {
+                    let line_text = editor.get_line(line).to_string();
+                    // Convert character column to byte column for Neovim
+                    let byte_col = Self::char_col_to_byte_col(&line_text, col);
+                    if let Some(ref neovim) = self.neovim {
+                        if let Ok(client) = neovim.try_lock() {
+                            // nvim_win_set_cursor uses 1-indexed line, 0-indexed byte column
+                            let nvim_line = (line + 1) as i64;
+                            let nvim_col = byte_col as i64;
+                            let _ = client.set_cursor(nvim_line, nvim_col);
+                            crate::verbose_print!(
+                                "[godot-neovim] Set Neovim cursor to ({}, {}) before Escape for gi (char_col={}, byte_col={})",
+                                nvim_line,
+                                nvim_col,
+                                col,
+                                byte_col
+                            );
+                        }
                     }
                 }
             }
@@ -1042,6 +1082,29 @@ impl GodotNeovimPlugin {
         self.sync_manager.end_nvim_change();
     }
 
+    /// Convert byte column to character column for a given line
+    /// Neovim uses byte positions, Godot uses character positions
+    /// For multi-byte characters (e.g., Japanese), this conversion is essential
+    pub(super) fn byte_col_to_char_col(line_text: &str, byte_col: i32) -> i32 {
+        if byte_col <= 0 {
+            return 0;
+        }
+
+        let byte_col = byte_col as usize;
+        let mut char_count = 0;
+        let mut byte_count = 0;
+
+        for ch in line_text.chars() {
+            if byte_count >= byte_col {
+                break;
+            }
+            byte_count += ch.len_utf8();
+            char_count += 1;
+        }
+
+        char_count
+    }
+
     /// Sync cursor from Neovim grid position to Godot editor
     pub(super) fn sync_cursor_from_grid(&mut self, cursor: (i64, i64)) {
         let Some(ref mut editor) = self.current_editor else {
@@ -1052,11 +1115,15 @@ impl GodotNeovimPlugin {
 
         // Grid coordinates are 0-indexed
         let line = row as i32;
-        let column = col as i32;
+        let byte_col = col as i32;
 
         let line_count = editor.get_line_count();
         let safe_line = line.min(line_count - 1).max(0);
-        let safe_col = column.max(0);
+
+        // Convert byte column to character column for multi-byte character support
+        // Neovim reports byte positions, Godot expects character positions
+        let line_text = editor.get_line(safe_line).to_string();
+        let char_col = Self::byte_col_to_char_col(&line_text, byte_col);
 
         // Set flag to prevent on_caret_changed from triggering sync_cursor_to_neovim
         // This is needed because set_caret_line and set_caret_column are called separately,
@@ -1070,10 +1137,11 @@ impl GodotNeovimPlugin {
 
         // Update last_synced_cursor BEFORE setting caret to prevent
         // caret_changed signal from triggering sync_cursor_to_neovim
-        self.last_synced_cursor = (safe_line as i64, safe_col as i64);
+        // Store character column (what Godot uses) for comparison
+        self.last_synced_cursor = (safe_line as i64, char_col as i64);
 
         editor.set_caret_line(safe_line);
-        editor.set_caret_column(safe_col);
+        editor.set_caret_column(char_col);
 
         self.syncing_from_grid = false;
     }

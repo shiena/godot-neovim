@@ -222,6 +222,14 @@ pub struct GodotNeovimPlugin {
     /// Retry count for finding the correct CodeEdit after script change
     #[init(val = 0)]
     script_change_retry_count: u32,
+    /// Script switch ID for cancellation (incremented on each script change)
+    /// Used to detect and skip stale deferred operations when rapid switching occurs
+    #[init(val = 0)]
+    script_switch_id: u64,
+    /// Pending script switch ID (the ID when deferred call was initiated)
+    /// If this doesn't match script_switch_id, the operation is stale
+    #[init(val = 0)]
+    pending_switch_id: u64,
     /// Current script path (for LSP and buffer name)
     #[init(val = String::new())]
     current_script_path: String,
@@ -924,15 +932,19 @@ impl GodotNeovimPlugin {
             if let Some(ref editor) = self.current_editor {
                 if editor.is_instance_valid() {
                     let line = editor.get_caret_line() as i64 + 1; // 1-indexed for Neovim
-                    let col = editor.get_caret_column() as i64;
+                    let char_col = editor.get_caret_column();
+                    // Convert character column to byte column for Neovim
+                    let line_text = editor.get_line(editor.get_caret_line()).to_string();
+                    let byte_col = Self::char_col_to_byte_col(&line_text, char_col) as i64;
                     if let Some(ref neovim) = self.neovim {
                         if let Ok(client) = neovim.try_lock() {
-                            let _ = client.set_cursor(line, col);
+                            let _ = client.set_cursor(line, byte_col);
                             crate::verbose_print!(
-                                "[godot-neovim] Synced cursor to Neovim for {}: ({}, {})",
+                                "[godot-neovim] Synced cursor to Neovim for {}: ({}, {}) (char_col={})",
                                 self.current_script_path,
                                 line,
-                                col
+                                byte_col,
+                                char_col
                             );
                         }
                     }
@@ -989,6 +1001,17 @@ impl GodotNeovimPlugin {
 
     #[func]
     fn handle_script_changed_deferred(&mut self) {
+        // Check if this operation is stale (a newer switch was initiated)
+        // This prevents processing outdated switches during rapid tab changes
+        if self.pending_switch_id != self.script_switch_id {
+            crate::verbose_print!(
+                "[godot-neovim] Script change cancelled (stale: pending={}, current={})",
+                self.pending_switch_id,
+                self.script_switch_id
+            );
+            return;
+        }
+
         crate::verbose_print!("[godot-neovim] Script changed (deferred processing)");
 
         // Verify we're on the expected script before syncing
@@ -1098,23 +1121,26 @@ impl GodotNeovimPlugin {
             if is_new {
                 // New buffer (Godot startup): keep Godot's cursor position
                 // Godot restores cursor from previous session, sync it to Neovim
-                crate::verbose_print!(
-                    "[godot-neovim] New buffer: keeping Godot cursor position"
-                );
+                crate::verbose_print!("[godot-neovim] New buffer: keeping Godot cursor position");
             } else {
                 // Existing buffer: apply Neovim's cursor position to Godot
                 if let Some(ref mut editor) = self.current_editor {
                     let line_count = editor.get_line_count();
                     let safe_line = (line as i32).min(line_count - 1).max(0);
-                    let line_length = editor.get_line(safe_line).len() as i32;
-                    let safe_col = (col as i32).min(line_length).max(0);
+                    let line_text = editor.get_line(safe_line).to_string();
+                    // Convert byte column from Neovim to character column for Godot
+                    let char_col = Self::byte_col_to_char_col(&line_text, col as i32);
+                    let line_char_count = line_text.chars().count() as i32;
+                    let safe_col = char_col.min(line_char_count).max(0);
 
                     crate::verbose_print!(
-                        "[godot-neovim] Applying cursor from Neovim: ({}, {}) -> ({}, {})",
+                        "[godot-neovim] Applying cursor from Neovim: ({}, {}) -> ({}, {}) (byte_col={}, char_col={})",
                         line,
                         col,
                         safe_line,
-                        safe_col
+                        safe_col,
+                        col,
+                        char_col
                     );
 
                     // Set syncing_from_grid to prevent on_caret_changed from setting user_cursor_sync

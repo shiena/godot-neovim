@@ -98,6 +98,10 @@ M._initialized_buffers = {}
 -- Track which buffers have been attached for notifications
 M._attached_buffers = {}
 
+-- Track last cursor position and mode for throttling RPC notifications
+M._last_cursor = { 0, 0 }
+M._last_mode = ""
+
 -- Switch to buffer by path, creating and initializing if needed
 -- @param path string: Absolute file path
 -- @param lines table|nil: Lines to initialize with (only used for new buffers)
@@ -240,13 +244,19 @@ function M.setup()
 
     -- Send cursor position on cursor movement
     -- This sends actual byte position (not screen position like grid_cursor_goto)
+    -- Throttled: only send notification when cursor or mode actually changed
     vim.api.nvim_create_autocmd({'CursorMoved', 'CursorMovedI'}, {
         group = augroup,
         callback = function()
             local cursor = vim.api.nvim_win_get_cursor(0)  -- {row, col}, row is 1-indexed, col is 0-indexed byte position
             local mode = vim.api.nvim_get_mode().mode
-            -- Send notification with actual cursor position
-            vim.rpcnotify(0, "godot_cursor_moved", cursor[1], cursor[2], mode)
+
+            -- Only send notification if cursor or mode changed (throttling)
+            if cursor[1] ~= M._last_cursor[1] or cursor[2] ~= M._last_cursor[2] or mode ~= M._last_mode then
+                M._last_cursor = cursor
+                M._last_mode = mode
+                vim.rpcnotify(0, "godot_cursor_moved", cursor[1], cursor[2], mode)
+            end
         end
     })
 
@@ -409,12 +419,32 @@ function M.join_no_space()
     vim.bo.comments = saved_comments
 end
 
+-- Convert character column to byte column for a given line
+-- Godot uses character positions, Neovim uses byte positions
+-- For multi-byte characters (e.g., Japanese), this conversion is essential
+-- @param line string: The line content
+-- @param char_col number: Character column (0-indexed)
+-- @return number: Byte column (0-indexed)
+local function char_col_to_byte_col(line, char_col)
+    if not line or char_col <= 0 then
+        return 0
+    end
+    -- Use vim.fn.byteidx to convert character index to byte index
+    -- byteidx returns the byte index of the {char_col}-th character (0-indexed)
+    local byte_col = vim.fn.byteidx(line, char_col)
+    -- byteidx returns -1 if char_col is out of range
+    if byte_col < 0 then
+        return #line  -- Return end of line
+    end
+    return byte_col
+end
+
 -- Set visual selection atomically (for mouse drag selection sync)
 -- This ensures cursor movement and visual mode entry happen in correct order
 -- @param from_line number: Selection start line (1-indexed)
--- @param from_col number: Selection start column (0-indexed)
+-- @param from_col number: Selection start column (0-indexed, CHARACTER position from Godot)
 -- @param to_line number: Selection end line (1-indexed)
--- @param to_col number: Selection end column (0-indexed)
+-- @param to_col number: Selection end column (0-indexed, CHARACTER position from Godot)
 -- @return table: { mode = current mode after selection }
 function M.set_visual_selection(from_line, from_col, to_line, to_col)
     -- Exit any existing visual mode first
@@ -423,14 +453,27 @@ function M.set_visual_selection(from_line, from_col, to_line, to_col)
         vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'nx', false)
     end
 
-    -- Move cursor to selection start
-    vim.api.nvim_win_set_cursor(0, {from_line, from_col})
+    -- Get line contents for character-to-byte conversion
+    local lines = vim.api.nvim_buf_get_lines(0, from_line - 1, to_line, false)
+    local from_line_content = lines[1] or ""
+    local to_line_content = lines[#lines] or ""
+
+    -- Convert character columns to byte columns
+    -- Note: Godot selection uses half-open interval [from, to) where to is exclusive
+    -- Neovim visual mode uses closed interval [from, to] where both are inclusive
+    -- So we need to subtract 1 from to_col to get the position OF the last character
+    local from_byte_col = char_col_to_byte_col(from_line_content, from_col)
+    local to_char_col = to_col > 0 and (to_col - 1) or 0
+    local to_byte_col = char_col_to_byte_col(to_line_content, to_char_col)
+
+    -- Move cursor to selection start (byte position)
+    vim.api.nvim_win_set_cursor(0, {from_line, from_byte_col})
 
     -- Enter visual mode
     vim.cmd('normal! v')
 
-    -- Move cursor to selection end
-    vim.api.nvim_win_set_cursor(0, {to_line, to_col})
+    -- Move cursor to selection end (byte position)
+    vim.api.nvim_win_set_cursor(0, {to_line, to_byte_col})
 
     return { mode = vim.api.nvim_get_mode().mode }
 end

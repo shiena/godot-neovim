@@ -216,10 +216,16 @@ impl GodotNeovimPlugin {
                 if let Some(ref mut editor) = self.current_editor {
                     // Set flag to prevent on_caret_changed from triggering sync back
                     self.syncing_from_grid = true;
-                    self.last_synced_cursor = ((line - 1), col);
 
-                    editor.set_caret_line((line - 1) as i32);
-                    editor.set_caret_column(col as i32);
+                    let godot_line = (line - 1) as i32;
+                    // Convert byte column from Neovim to character column for Godot
+                    let line_text = editor.get_line(godot_line).to_string();
+                    let char_col = Self::byte_col_to_char_col(&line_text, col as i32);
+
+                    self.last_synced_cursor = ((line - 1), char_col as i64);
+
+                    editor.set_caret_line(godot_line);
+                    editor.set_caret_column(char_col);
 
                     // Center the view on cursor
                     editor.center_viewport_to_caret();
@@ -227,8 +233,15 @@ impl GodotNeovimPlugin {
                     self.syncing_from_grid = false;
                 }
 
-                // Update internal cursor state
-                self.current_cursor = (line - 1, col);
+                // Update internal cursor state (use character position)
+                let godot_line = line - 1;
+                let line_text = if let Some(ref editor) = self.current_editor {
+                    editor.get_line(godot_line as i32).to_string()
+                } else {
+                    String::new()
+                };
+                let char_col = Self::byte_col_to_char_col(&line_text, col as i32);
+                self.current_cursor = (godot_line, char_col as i64);
 
                 // Update mode display with new cursor position
                 let display_cursor = (line, col);

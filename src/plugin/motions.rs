@@ -308,7 +308,9 @@ impl GodotNeovimPlugin {
                 }
                 line -= 1;
                 if line >= 0 {
-                    col = editor.get_line(line).len() as i32 - 1;
+                    // Use chars().count() for character count, not byte length
+                    let line_text = editor.get_line(line).to_string();
+                    col = line_text.chars().count() as i32 - 1;
                 }
             }
         }

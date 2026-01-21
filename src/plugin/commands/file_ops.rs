@@ -280,13 +280,16 @@ impl GodotNeovimPlugin {
                         // Apply cursor position (convert from 1-indexed to 0-indexed line)
                         if let Some((row, col)) = cursor {
                             let line = (row - 1).max(0) as i32;
-                            let column = col as i32;
+                            // Convert byte column from Neovim to character column for Godot
+                            let line_text = code_edit.get_line(line).to_string();
+                            let char_col = Self::byte_col_to_char_col(&line_text, col as i32);
                             code_edit.set_caret_line(line);
-                            code_edit.set_caret_column(column);
+                            code_edit.set_caret_column(char_col);
                             crate::verbose_print!(
-                                "[godot-neovim] :e! - Set cursor to line={}, col={}",
+                                "[godot-neovim] :e! - Set cursor to line={}, col={} (byte_col={})",
                                 line,
-                                column
+                                char_col,
+                                col
                             );
                         }
 
@@ -361,16 +364,20 @@ impl GodotNeovimPlugin {
         if let Some(ref editor) = self.current_editor {
             if editor.is_instance_valid() {
                 let line = editor.get_caret_line() as i64 + 1; // 1-indexed for Neovim
-                let col = editor.get_caret_column() as i64;
+                let char_col = editor.get_caret_column();
+                // Convert character column to byte column for Neovim
+                let line_text = editor.get_line(editor.get_caret_line()).to_string();
+                let byte_col = Self::char_col_to_byte_col(&line_text, char_col) as i64;
                 if let Some(ref neovim) = self.neovim {
                     if let Ok(client) = neovim.try_lock() {
-                        let _ = client.set_cursor(line, col);
+                        let _ = client.set_cursor(line, byte_col);
                         // Set flag to skip cursor sync in on_script_changed
                         self.cursor_synced_before_close = true;
                         crate::verbose_print!(
-                            "[godot-neovim] :q - Synced cursor to Neovim before close: ({}, {})",
+                            "[godot-neovim] :q - Synced cursor to Neovim before close: ({}, {}) (char_col={})",
                             line,
-                            col
+                            byte_col,
+                            char_col
                         );
                     }
                 }
