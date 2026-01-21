@@ -98,6 +98,10 @@ M._initialized_buffers = {}
 -- Track which buffers have been attached for notifications
 M._attached_buffers = {}
 
+-- Track last cursor position and mode for throttling RPC notifications
+M._last_cursor = { 0, 0 }
+M._last_mode = ""
+
 -- Switch to buffer by path, creating and initializing if needed
 -- @param path string: Absolute file path
 -- @param lines table|nil: Lines to initialize with (only used for new buffers)
@@ -240,13 +244,19 @@ function M.setup()
 
     -- Send cursor position on cursor movement
     -- This sends actual byte position (not screen position like grid_cursor_goto)
+    -- Throttled: only send notification when cursor or mode actually changed
     vim.api.nvim_create_autocmd({'CursorMoved', 'CursorMovedI'}, {
         group = augroup,
         callback = function()
             local cursor = vim.api.nvim_win_get_cursor(0)  -- {row, col}, row is 1-indexed, col is 0-indexed byte position
             local mode = vim.api.nvim_get_mode().mode
-            -- Send notification with actual cursor position
-            vim.rpcnotify(0, "godot_cursor_moved", cursor[1], cursor[2], mode)
+
+            -- Only send notification if cursor or mode changed (throttling)
+            if cursor[1] ~= M._last_cursor[1] or cursor[2] ~= M._last_cursor[2] or mode ~= M._last_mode then
+                M._last_cursor = cursor
+                M._last_mode = mode
+                vim.rpcnotify(0, "godot_cursor_moved", cursor[1], cursor[2], mode)
+            end
         end
     })
 

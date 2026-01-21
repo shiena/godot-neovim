@@ -1098,9 +1098,7 @@ impl GodotNeovimPlugin {
             if is_new {
                 // New buffer (Godot startup): keep Godot's cursor position
                 // Godot restores cursor from previous session, sync it to Neovim
-                crate::verbose_print!(
-                    "[godot-neovim] New buffer: keeping Godot cursor position"
-                );
+                crate::verbose_print!("[godot-neovim] New buffer: keeping Godot cursor position");
             } else {
                 // Existing buffer: apply Neovim's cursor position to Godot
                 if let Some(ref mut editor) = self.current_editor {
