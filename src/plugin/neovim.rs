@@ -924,6 +924,11 @@ impl GodotNeovimPlugin {
             change.new_lines.len()
         );
 
+        // Cancel code completion popup before modifying buffer
+        // This prevents "Index p_from_column = -1 is out of bounds" error
+        // when completion is active and buffer changes invalidate cursor position
+        editor.cancel_code_completion();
+
         // Set flag to prevent echo back to Neovim
         self.sync_manager.begin_nvim_change();
 
@@ -1032,6 +1037,11 @@ impl GodotNeovimPlugin {
         // This is needed because set_caret_line and set_caret_column are called separately,
         // which can trigger on_caret_changed with intermediate cursor positions
         self.syncing_from_grid = true;
+
+        // Cancel code completion popup before modifying cursor position
+        // This prevents "Index p_from_column = -1 is out of bounds" error
+        // when completion is active and cursor position changes
+        editor.cancel_code_completion();
 
         // Update last_synced_cursor BEFORE setting caret to prevent
         // caret_changed signal from triggering sync_cursor_to_neovim
