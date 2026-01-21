@@ -37,12 +37,20 @@ impl GodotNeovimPlugin {
         };
 
         // Normalize selection direction (start should be before end)
-        let (from_line, from_col, to_line, to_col) =
+        let (from_line, from_byte_col, to_line, to_byte_col) =
             if start_line < end_line || (start_line == end_line && start_col <= end_col) {
-                (start_line, start_col, end_line, end_col + 1) // +1 to include cursor char
+                (start_line, start_col, end_line, end_col)
             } else {
-                (end_line, end_col, start_line, start_col + 1)
+                (end_line, end_col, start_line, start_col)
             };
+
+        // Convert byte columns to character columns for Godot
+        // Neovim returns byte positions, Godot expects character positions
+        let from_line_text = editor.get_line(from_line as i32).to_string();
+        let to_line_text = editor.get_line(to_line as i32).to_string();
+        let from_col = Self::byte_col_to_char_col(&from_line_text, from_byte_col as i32);
+        // +1 to include cursor char (in character position, not bytes)
+        let to_col = Self::byte_col_to_char_col(&to_line_text, to_byte_col as i32) + 1;
 
         crate::verbose_print!(
             "[godot-neovim] Visual selection: ({}, {}) -> ({}, {})",
@@ -53,12 +61,7 @@ impl GodotNeovimPlugin {
         );
 
         // Update Godot selection
-        editor.select(
-            from_line as i32,
-            from_col as i32,
-            to_line as i32,
-            to_col as i32,
-        );
+        editor.select(from_line as i32, from_col, to_line as i32, to_col);
     }
 
     /// Update visual line selection in Godot editor (V mode - selects entire lines)
@@ -101,7 +104,9 @@ impl GodotNeovimPlugin {
         };
 
         // Select entire lines
-        let to_line_length = editor.get_line(to_line as i32).len() as i64;
+        // Use chars().count() for character count, not byte length
+        let line_text = editor.get_line(to_line as i32).to_string();
+        let to_line_length = line_text.chars().count() as i64;
 
         crate::verbose_print!(
             "[godot-neovim] Visual line selection: lines {} to {}",

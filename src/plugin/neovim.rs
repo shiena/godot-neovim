@@ -1078,7 +1078,7 @@ impl GodotNeovimPlugin {
     /// Convert byte column to character column for a given line
     /// Neovim uses byte positions, Godot uses character positions
     /// For multi-byte characters (e.g., Japanese), this conversion is essential
-    fn byte_col_to_char_col(line_text: &str, byte_col: i32) -> i32 {
+    pub(super) fn byte_col_to_char_col(line_text: &str, byte_col: i32) -> i32 {
         if byte_col <= 0 {
             return 0;
         }
