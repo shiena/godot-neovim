@@ -457,6 +457,29 @@ impl GodotNeovimPlugin {
                     // Neovim switched to a different buffer
                     self.sync_godot_script_tab(&path);
                 }
+                BufEvent::SaveBuffer => {
+                    // :w command - process even during escape
+                    self.cmd_save();
+                }
+                BufEvent::CloseBuffer { bang, all } => {
+                    // :q/:qa command - process even during escape
+                    if all {
+                        self.cmd_close_all();
+                    } else if bang {
+                        self.cmd_close_discard();
+                    } else {
+                        self.cmd_close();
+                    }
+                }
+                BufEvent::SaveAndClose => {
+                    // :wq command - process even during escape
+                    self.cmd_save_and_close();
+                }
+                BufEvent::SaveAllAndClose => {
+                    // :wqa command - process even during escape
+                    self.cmd_save_all();
+                    self.cmd_close_all();
+                }
             }
         }
 
@@ -606,6 +629,29 @@ impl GodotNeovimPlugin {
                     // Neovim switched to a different buffer (e.g., via Ctrl+O/Ctrl+I jump)
                     // Check if Godot needs to switch script tabs
                     self.sync_godot_script_tab(&path);
+                }
+                BufEvent::SaveBuffer => {
+                    // :w command from Neovim - save current file
+                    self.cmd_save();
+                }
+                BufEvent::CloseBuffer { bang, all } => {
+                    // :q/:qa command from Neovim - close tab(s)
+                    if all {
+                        self.cmd_close_all();
+                    } else if bang {
+                        self.cmd_close_discard();
+                    } else {
+                        self.cmd_close();
+                    }
+                }
+                BufEvent::SaveAndClose => {
+                    // :wq command from Neovim - save and close
+                    self.cmd_save_and_close();
+                }
+                BufEvent::SaveAllAndClose => {
+                    // :wqa command from Neovim - save all and close all
+                    self.cmd_save_all();
+                    self.cmd_close_all();
                 }
             }
         }

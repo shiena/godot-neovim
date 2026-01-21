@@ -44,6 +44,14 @@ pub enum BufEvent {
     ModifiedChanged { _buf: i64, modified: bool },
     /// Buffer entered (from BufEnter autocmd - for cross-buffer jumps)
     BufEnter { _buf: i64, path: String },
+    /// Save buffer request (from BufWriteCmd - :w command)
+    SaveBuffer,
+    /// Close buffer request (from :q, :qa commands)
+    CloseBuffer { bang: bool, all: bool },
+    /// Save and close request (from :wq command)
+    SaveAndClose,
+    /// Save all and close all request (from :wqa command)
+    SaveAllAndClose,
 }
 
 /// Handler for Neovim RPC notifications and requests
@@ -353,6 +361,77 @@ impl NeovimHandler {
         self.has_buf_events.store(true, Ordering::SeqCst);
     }
 
+    /// Parse godot_save_buffer notification from Lua BufWriteCmd autocmd
+    async fn handle_godot_save_buffer(&self, _args: Vec<Value>) {
+        crate::verbose_print!("[godot-neovim] godot_save_buffer");
+
+        let mut events = self.buf_events.lock().await;
+        events.push_back(BufEvent::SaveBuffer);
+        self.has_buf_events.store(true, Ordering::SeqCst);
+    }
+
+    /// Parse godot_close_buffer notification from Lua :q/:qa commands
+    /// args: [{ bang, all }]
+    async fn handle_godot_close_buffer(&self, args: Vec<Value>) {
+        if args.is_empty() {
+            return;
+        }
+
+        let map = match &args[0] {
+            Value::Map(m) => m,
+            _ => return,
+        };
+
+        let mut bang = false;
+        let mut all = false;
+
+        for (key, value) in map {
+            if let Value::String(k) = key {
+                match k.as_str() {
+                    Some("bang") => {
+                        if let Value::Boolean(b) = value {
+                            bang = *b;
+                        }
+                    }
+                    Some("all") => {
+                        if let Value::Boolean(b) = value {
+                            all = *b;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        crate::verbose_print!(
+            "[godot-neovim] godot_close_buffer: bang={}, all={}",
+            bang,
+            all
+        );
+
+        let mut events = self.buf_events.lock().await;
+        events.push_back(BufEvent::CloseBuffer { bang, all });
+        self.has_buf_events.store(true, Ordering::SeqCst);
+    }
+
+    /// Parse godot_save_and_close notification from Lua :wq command
+    async fn handle_godot_save_and_close(&self, _args: Vec<Value>) {
+        crate::verbose_print!("[godot-neovim] godot_save_and_close");
+
+        let mut events = self.buf_events.lock().await;
+        events.push_back(BufEvent::SaveAndClose);
+        self.has_buf_events.store(true, Ordering::SeqCst);
+    }
+
+    /// Parse godot_save_all_and_close notification from Lua :wqa command
+    async fn handle_godot_save_all_and_close(&self, _args: Vec<Value>) {
+        crate::verbose_print!("[godot-neovim] godot_save_all_and_close");
+
+        let mut events = self.buf_events.lock().await;
+        events.push_back(BufEvent::SaveAllAndClose);
+        self.has_buf_events.store(true, Ordering::SeqCst);
+    }
+
     async fn handle_redraw(&self, args: Vec<Value>) {
         let mut state = self.state.lock().await;
 
@@ -448,6 +527,10 @@ impl Handler for NeovimHandler {
             "godot_cursor_moved" => self.handle_godot_cursor_moved(args).await,
             "godot_modified_changed" => self.handle_godot_modified_changed(args).await,
             "godot_buf_enter" => self.handle_godot_buf_enter(args).await,
+            "godot_save_buffer" => self.handle_godot_save_buffer(args).await,
+            "godot_close_buffer" => self.handle_godot_close_buffer(args).await,
+            "godot_save_and_close" => self.handle_godot_save_and_close(args).await,
+            "godot_save_all_and_close" => self.handle_godot_save_all_and_close(args).await,
             _ => {}
         }
     }

@@ -143,10 +143,13 @@ impl GodotNeovimPlugin {
         match cmd {
             "w" => self.cmd_save(),
             "q" => self.cmd_close(),
+            "q!" => self.cmd_close_discard(),
             "qa" | "qall" => self.cmd_close_all(),
+            "qa!" | "qall!" => self.cmd_close_all(),
             "wq" | "x" => self.cmd_save_and_close(),
+            "wq!" | "x!" => self.cmd_save_and_close(),
             "wa" | "wall" => self.cmd_save_all(),
-            "wqa" | "wqall" | "xa" | "xall" => {
+            "wqa" | "wqall" | "xa" | "xall" | "wqa!" | "wqall!" | "xa!" | "xall!" => {
                 self.cmd_save_all();
                 self.cmd_close_all();
             }

@@ -84,8 +84,9 @@ impl GodotNeovimPlugin {
         }
 
         // Handle Ctrl+A for increment number under cursor
+        // Neovim Master: send to Neovim for proper undo/redo and register integration
         if key_event.is_ctrl_pressed() && keycode == Key::A {
-            self.increment_number(1);
+            self.send_keys("<C-a>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -93,8 +94,9 @@ impl GodotNeovimPlugin {
         }
 
         // Handle Ctrl+X for decrement number under cursor
+        // Neovim Master: send to Neovim for proper undo/redo and register integration
         if key_event.is_ctrl_pressed() && keycode == Key::X {
-            self.increment_number(-1);
+            self.send_keys("<C-x>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
