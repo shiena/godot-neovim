@@ -162,32 +162,33 @@ impl GodotNeovimPlugin {
         if let Some(code_edit) = self.get_focused_code_edit_direct() {
             crate::verbose_print!("[godot-neovim] Found focused CodeEdit (direct)");
             self.current_editor = Some(code_edit);
-            self.connect_caret_changed_signal();
-            self.connect_resized_signal();
-            self.update_float_window_connection();
-            return;
-        }
-
-        if let Some(script_editor) = editor.get_script_editor() {
+        } else if let Some(script_editor) = editor.get_script_editor() {
             // Try to find the currently focused CodeEdit by traversing ScriptEditor
             if let Some(code_edit) =
                 self.find_focused_code_edit(script_editor.clone().upcast::<Control>())
             {
                 crate::verbose_print!("[godot-neovim] Found focused CodeEdit");
                 self.current_editor = Some(code_edit);
-                self.connect_caret_changed_signal();
-                self.connect_resized_signal();
-                self.update_float_window_connection();
-                return;
-            }
-            // Fallback: find visible CodeEdit
-            if let Some(code_edit) = self.find_visible_code_edit(script_editor.upcast::<Control>())
+            } else if let Some(code_edit) =
+                self.find_visible_code_edit(script_editor.upcast::<Control>())
             {
+                // Fallback: find visible CodeEdit
                 crate::verbose_print!("[godot-neovim] Found visible CodeEdit");
                 self.current_editor = Some(code_edit);
-                self.connect_caret_changed_signal();
-                self.connect_resized_signal();
-                self.update_float_window_connection();
+            }
+        }
+
+        // Connect signals and reset state if editor was found
+        if self.current_editor.is_some() {
+            self.connect_caret_changed_signal();
+            self.connect_resized_signal();
+            self.update_float_window_connection();
+
+            // Clear any restored selection and disable selecting
+            // Godot may restore previous selection state when reopening files
+            if let Some(ref mut ed) = self.current_editor {
+                ed.deselect();
+                ed.set_selecting_enabled(false);
             }
         }
     }
