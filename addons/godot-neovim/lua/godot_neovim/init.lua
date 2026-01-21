@@ -419,12 +419,32 @@ function M.join_no_space()
     vim.bo.comments = saved_comments
 end
 
+-- Convert character column to byte column for a given line
+-- Godot uses character positions, Neovim uses byte positions
+-- For multi-byte characters (e.g., Japanese), this conversion is essential
+-- @param line string: The line content
+-- @param char_col number: Character column (0-indexed)
+-- @return number: Byte column (0-indexed)
+local function char_col_to_byte_col(line, char_col)
+    if not line or char_col <= 0 then
+        return 0
+    end
+    -- Use vim.fn.byteidx to convert character index to byte index
+    -- byteidx returns the byte index of the {char_col}-th character (0-indexed)
+    local byte_col = vim.fn.byteidx(line, char_col)
+    -- byteidx returns -1 if char_col is out of range
+    if byte_col < 0 then
+        return #line  -- Return end of line
+    end
+    return byte_col
+end
+
 -- Set visual selection atomically (for mouse drag selection sync)
 -- This ensures cursor movement and visual mode entry happen in correct order
 -- @param from_line number: Selection start line (1-indexed)
--- @param from_col number: Selection start column (0-indexed)
+-- @param from_col number: Selection start column (0-indexed, CHARACTER position from Godot)
 -- @param to_line number: Selection end line (1-indexed)
--- @param to_col number: Selection end column (0-indexed)
+-- @param to_col number: Selection end column (0-indexed, CHARACTER position from Godot)
 -- @return table: { mode = current mode after selection }
 function M.set_visual_selection(from_line, from_col, to_line, to_col)
     -- Exit any existing visual mode first
@@ -433,14 +453,23 @@ function M.set_visual_selection(from_line, from_col, to_line, to_col)
         vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'nx', false)
     end
 
-    -- Move cursor to selection start
-    vim.api.nvim_win_set_cursor(0, {from_line, from_col})
+    -- Get line contents for character-to-byte conversion
+    local lines = vim.api.nvim_buf_get_lines(0, from_line - 1, to_line, false)
+    local from_line_content = lines[1] or ""
+    local to_line_content = lines[#lines] or ""
+
+    -- Convert character columns to byte columns
+    local from_byte_col = char_col_to_byte_col(from_line_content, from_col)
+    local to_byte_col = char_col_to_byte_col(to_line_content, to_col)
+
+    -- Move cursor to selection start (byte position)
+    vim.api.nvim_win_set_cursor(0, {from_line, from_byte_col})
 
     -- Enter visual mode
     vim.cmd('normal! v')
 
-    -- Move cursor to selection end
-    vim.api.nvim_win_set_cursor(0, {to_line, to_col})
+    -- Move cursor to selection end (byte position)
+    vim.api.nvim_win_set_cursor(0, {to_line, to_byte_col})
 
     return { mode = vim.api.nvim_get_mode().mode }
 end
