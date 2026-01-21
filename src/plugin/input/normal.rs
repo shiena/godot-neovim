@@ -594,6 +594,37 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        // Handle '>' operator with motion/text object (>iw, >i{, >aw, etc.)
+        // When '>' is pending and next key is not '>', send '>' + key to Neovim
+        if self.last_key == ">" {
+            if let Some(ch) = unicode_char {
+                if ch != '>' {
+                    self.send_keys(&format!(">{}", ch));
+                    self.clear_last_key();
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Handle '<' operator with motion/text object (<iw, <i{, <aw, etc.)
+        // When '<' is pending and next key is not '<', send '<LT>' + key to Neovim
+        // Use <LT> because nvim_input interprets < as special key sequence start
+        if self.last_key == "<" {
+            if let Some(ch) = unicode_char {
+                if ch != '<' {
+                    self.send_keys(&format!("<LT>{}", ch));
+                    self.clear_last_key();
+                    if let Some(mut viewport) = self.base().get_viewport() {
+                        viewport.set_input_as_handled();
+                    }
+                    return;
+                }
+            }
+        }
+
         // Handle '>>' for indent (first '>' sets pending, second '>' executes)
         // Handle '<<' for unindent (first '<' sets pending, second '<' executes)
         // Neovim Master: send to Neovim for proper undo/register integration
