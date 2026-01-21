@@ -1,4 +1,5 @@
 //! File operations: :w, :wa, :q, :qa, :e, :e!, ZZ, ZQ
+//! Also handles forwarding Ex commands to Neovim
 
 use super::super::GodotNeovimPlugin;
 use godot::classes::{EditorInterface, Input, InputEventKey, MenuButton, ResourceSaver};
@@ -6,6 +7,34 @@ use godot::global::Key;
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
+    /// Forward an Ex command to Neovim for execution
+    /// Used for commands that need Neovim's undo/redo integration:
+    /// - :s/old/new/g, :%s/old/new/g (substitute)
+    /// - :g/pattern/cmd (global)
+    /// - :sort
+    /// - :t (copy line)
+    /// - :m (move line)
+    /// - Line range commands (e.g., :1,5d)
+    pub(in crate::plugin) fn cmd_forward_to_neovim(&mut self, cmd: &str) {
+        let Some(ref neovim) = self.neovim else {
+            godot_warn!("[godot-neovim] Cannot forward command: Neovim not connected");
+            return;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            godot_warn!("[godot-neovim] Cannot forward command: Failed to lock Neovim");
+            return;
+        };
+
+        // Execute the command in Neovim
+        let full_cmd = format!(":{}", cmd);
+        crate::verbose_print!("[godot-neovim] Forwarding to Neovim: {}", full_cmd);
+
+        if let Err(e) = client.command(&full_cmd) {
+            godot_warn!("[godot-neovim] Neovim command failed: {}", e);
+        }
+    }
+
     /// :e[dit] {file} - Open a file in the script editor
     /// If no file is specified, opens the quick open dialog
     pub(in crate::plugin) fn cmd_edit(&self, file_path: &str) {

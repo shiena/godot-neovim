@@ -202,31 +202,22 @@ impl GodotNeovimPlugin {
                         self.pending_file_path = Some(file_path.to_string());
                     }
                 }
-                // Check for substitution command :%s/old/new/g
-                else if cmd.starts_with("%s/") || cmd.starts_with("s/") {
-                    self.cmd_substitute(cmd);
-                }
-                // Check for global command :g/pattern/cmd
-                else if cmd.starts_with("g/") {
-                    self.cmd_global(cmd);
-                }
-                // Check for :sort command
-                else if cmd == "sort" || cmd.starts_with("sort ") {
-                    self.cmd_sort(cmd);
-                }
-                // Check for :t (copy line) command
-                else if cmd.starts_with("t") && cmd.len() > 1 {
-                    let dest = cmd[1..].trim();
-                    if let Ok(line_num) = dest.parse::<i32>() {
-                        self.cmd_copy_line(line_num);
-                    }
-                }
-                // Check for :m (move line) command
-                else if cmd.starts_with("m") && cmd.len() > 1 {
-                    let dest = cmd[1..].trim();
-                    if let Ok(line_num) = dest.parse::<i32>() {
-                        self.cmd_move_line(line_num);
-                    }
+                // Commands forwarded to Neovim for proper undo/register integration
+                // (Neovim Master design - see DESIGN_V2.md):
+                // - :%s/old/new/g, :s/old/new/g (substitute)
+                // - :g/pattern/cmd (global)
+                // - :sort
+                // - :t{line} (copy line)
+                // - :m{line} (move line)
+                else if cmd.starts_with("%s/")
+                    || cmd.starts_with("s/")
+                    || cmd.starts_with("g/")
+                    || cmd == "sort"
+                    || cmd.starts_with("sort ")
+                    || (cmd.starts_with("t") && cmd.len() > 1)
+                    || (cmd.starts_with("m") && cmd.len() > 1)
+                {
+                    self.cmd_forward_to_neovim(cmd);
                 }
                 // Buffer navigation commands
                 else if cmd == "bn" || cmd == "bnext" {

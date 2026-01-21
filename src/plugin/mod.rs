@@ -33,32 +33,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
 
-/// Extension trait for CodeEdit to emit text_changed signal after set_text
-/// Godot's set_text() does not emit text_changed signal, causing dirty flag to not be set
-pub(crate) trait CodeEditExt {
-    fn set_text_and_notify(&mut self, text: &str);
-}
-
-impl CodeEditExt for Gd<CodeEdit> {
-    fn set_text_and_notify(&mut self, text: &str) {
-        // Godot's set_text() updates version counter internally when undo is enabled.
-        // ScriptEditor uses get_version() != get_saved_version() for dirty flag.
-        self.set_text(text);
-
-        // Emit name_changed signal on ScriptTextEditor to update script list UI.
-        // Hierarchy: CodeEdit -> CodeTextEditor -> VSplitContainer -> ScriptTextEditor
-        let mut current: Option<Gd<Node>> = self.get_parent();
-        while let Some(node) = current {
-            if node.get_class() == "ScriptTextEditor".into() {
-                let mut script_editor = node;
-                script_editor.emit_signal("name_changed", &[]);
-                break;
-            }
-            current = node.get_parent();
-        }
-    }
-}
-
 /// Help query for goto_help()
 #[derive(Debug, Clone)]
 pub struct HelpQuery {
@@ -228,9 +202,6 @@ pub struct GodotNeovimPlugin {
     /// Count prefix buffer for commands like 3dd, 5yy
     #[init(val = String::new())]
     count_buffer: String,
-    /// Last substitution: (pattern, replacement) for g& command
-    #[init(val = None)]
-    last_substitute: Option<(String, String)>,
     /// Last synced cursor position: (line, col) for detecting external cursor changes
     /// Used to prevent sync loops between Godot and Neovim
     #[init(val = (-1, -1))]

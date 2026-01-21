@@ -187,13 +187,6 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// Sync buffer from Godot editor to Neovim (initial sync for file open)
-    /// This is now a wrapper that calls switch_to_neovim_buffer
-    pub(super) fn sync_buffer_to_neovim(&mut self) {
-        // Use multi-buffer approach - switch to buffer for this file
-        let _ = self.switch_to_neovim_buffer();
-    }
-
     /// Sync cursor position from Godot editor to Neovim
     pub(super) fn sync_cursor_to_neovim(&mut self) {
         // Skip if buffer not yet initialized (e.g., during hot reload)
