@@ -222,6 +222,14 @@ pub struct GodotNeovimPlugin {
     /// Retry count for finding the correct CodeEdit after script change
     #[init(val = 0)]
     script_change_retry_count: u32,
+    /// Script switch ID for cancellation (incremented on each script change)
+    /// Used to detect and skip stale deferred operations when rapid switching occurs
+    #[init(val = 0)]
+    script_switch_id: u64,
+    /// Pending script switch ID (the ID when deferred call was initiated)
+    /// If this doesn't match script_switch_id, the operation is stale
+    #[init(val = 0)]
+    pending_switch_id: u64,
     /// Current script path (for LSP and buffer name)
     #[init(val = String::new())]
     current_script_path: String,
@@ -989,6 +997,17 @@ impl GodotNeovimPlugin {
 
     #[func]
     fn handle_script_changed_deferred(&mut self) {
+        // Check if this operation is stale (a newer switch was initiated)
+        // This prevents processing outdated switches during rapid tab changes
+        if self.pending_switch_id != self.script_switch_id {
+            crate::verbose_print!(
+                "[godot-neovim] Script change cancelled (stale: pending={}, current={})",
+                self.pending_switch_id,
+                self.script_switch_id
+            );
+            return;
+        }
+
         crate::verbose_print!("[godot-neovim] Script changed (deferred processing)");
 
         // Verify we're on the expected script before syncing

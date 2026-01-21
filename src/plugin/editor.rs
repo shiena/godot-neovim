@@ -77,6 +77,12 @@ impl GodotNeovimPlugin {
 
     /// Trigger script change handling via deferred call
     pub(super) fn handle_script_changed(&mut self) {
+        // Increment switch ID and store as pending
+        // This allows detecting and skipping stale deferred operations
+        // when rapid tab switching occurs (ref: vscode-neovim commit 0520846)
+        self.script_switch_id = self.script_switch_id.wrapping_add(1);
+        self.pending_switch_id = self.script_switch_id;
+
         // Use call_deferred to ensure Godot has fully switched to the new script
         // before we try to find the CodeEdit and sync buffer
         self.base_mut()
