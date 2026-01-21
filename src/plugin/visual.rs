@@ -60,7 +60,8 @@ impl GodotNeovimPlugin {
             to_col
         );
 
-        // Update Godot selection
+        // Enable selecting and update Godot selection
+        editor.set_selecting_enabled(true);
         editor.select(from_line as i32, from_col, to_line as i32, to_col);
     }
 
@@ -114,7 +115,8 @@ impl GodotNeovimPlugin {
             to_line + 1
         );
 
-        // Update Godot selection (from start of first line to end of last line)
+        // Enable selecting and update Godot selection (from start of first line to end of last line)
+        editor.set_selecting_enabled(true);
         editor.select(from_line as i32, 0, to_line as i32, to_line_length as i32);
     }
 
