@@ -459,8 +459,12 @@ function M.set_visual_selection(from_line, from_col, to_line, to_col)
     local to_line_content = lines[#lines] or ""
 
     -- Convert character columns to byte columns
+    -- Note: Godot selection uses half-open interval [from, to) where to is exclusive
+    -- Neovim visual mode uses closed interval [from, to] where both are inclusive
+    -- So we need to subtract 1 from to_col to get the position OF the last character
     local from_byte_col = char_col_to_byte_col(from_line_content, from_col)
-    local to_byte_col = char_col_to_byte_col(to_line_content, to_col)
+    local to_char_col = to_col > 0 and (to_col - 1) or 0
+    local to_byte_col = char_col_to_byte_col(to_line_content, to_char_col)
 
     -- Move cursor to selection start (byte position)
     vim.api.nvim_win_set_cursor(0, {from_line, from_byte_col})

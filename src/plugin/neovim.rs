@@ -155,6 +155,9 @@ impl GodotNeovimPlugin {
 
         crate::verbose_print!("[godot-neovim] Syncing {} lines to Neovim", lines.len());
 
+        // Track line count before sending to Neovim
+        let line_count = lines.len() as i32;
+
         // ESC sync: update buffer preserving undo history
         match client.buffer_update(lines) {
             Ok(tick) => {
@@ -163,6 +166,8 @@ impl GodotNeovimPlugin {
                 // Reset sync manager and set initial sync tick to ignore echo
                 self.sync_manager.reset();
                 self.sync_manager.set_initial_sync_tick(tick);
+                // Set line count since reset() clears it and echo will be ignored
+                self.sync_manager.set_line_count(line_count);
 
                 // Re-attach to buffer for change notifications
                 match client.buf_attach_current() {
