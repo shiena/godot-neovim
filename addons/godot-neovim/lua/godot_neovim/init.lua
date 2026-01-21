@@ -113,8 +113,13 @@ function M.switch_to_buffer(path, lines)
         vim.api.nvim_buf_set_name(bufnr, path)
 
         -- Set buffer options for code editing
-        vim.bo[bufnr].buftype = ''
+        -- buftype=acwrite: like nofile but triggers BufWriteCmd for :w
+        -- This allows us to intercept save commands and delegate to Godot
+        vim.bo[bufnr].buftype = 'acwrite'
         vim.bo[bufnr].swapfile = false
+
+        -- Setup BufWriteCmd autocmd for this buffer
+        M._setup_buffer_autocmds(bufnr)
     end
 
     -- Switch to the buffer
@@ -276,6 +281,84 @@ function M.setup()
         print('Buffer: ' .. vim.api.nvim_get_current_buf())
         print('Changedtick: ' .. M.get_changedtick(0))
     end, {})
+
+    -- Override :q, :qa, :wq, etc. to delegate to Godot
+    -- This ensures Godot handles the close/save dialogs instead of Neovim
+    M._setup_file_commands()
+end
+
+-- Setup file commands (:q, :wq, etc.) to delegate to Godot
+-- Similar to vscode-neovim's vscode-file-commands.vim
+function M._setup_file_commands()
+    -- :q - Close current tab
+    vim.api.nvim_create_user_command('Quit', function(opts)
+        vim.rpcnotify(0, "godot_close_buffer", {
+            bang = opts.bang,
+            all = false,
+        })
+    end, { bang = true })
+
+    -- :qa - Close all tabs
+    vim.api.nvim_create_user_command('Qall', function(opts)
+        vim.rpcnotify(0, "godot_close_buffer", {
+            bang = opts.bang,
+            all = true,
+        })
+    end, { bang = true })
+
+    -- :wq - Save and close
+    vim.api.nvim_create_user_command('Wq', function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        vim.rpcnotify(0, "godot_save_and_close")
+        vim.bo[bufnr].modified = false
+    end, { bang = true })
+
+    -- :wqa - Save all and close all
+    vim.api.nvim_create_user_command('Wqall', function()
+        vim.rpcnotify(0, "godot_save_all_and_close")
+    end, { bang = true })
+
+    -- Alias commands using cabbrev (like vscode-neovim's AlterCommand)
+    -- This allows :q to work as :Quit
+    vim.cmd([[
+        cnoreabbrev <expr> q (getcmdtype() == ':' && getcmdline() ==# 'q') ? 'Quit' : 'q'
+        cnoreabbrev <expr> q! (getcmdtype() == ':' && getcmdline() ==# 'q!') ? 'Quit!' : 'q!'
+        cnoreabbrev <expr> qa (getcmdtype() == ':' && getcmdline() ==# 'qa') ? 'Qall' : 'qa'
+        cnoreabbrev <expr> qa! (getcmdtype() == ':' && getcmdline() ==# 'qa!') ? 'Qall!' : 'qa!'
+        cnoreabbrev <expr> qall (getcmdtype() == ':' && getcmdline() ==# 'qall') ? 'Qall' : 'qall'
+        cnoreabbrev <expr> wq (getcmdtype() == ':' && getcmdline() ==# 'wq') ? 'Wq' : 'wq'
+        cnoreabbrev <expr> wq! (getcmdtype() == ':' && getcmdline() ==# 'wq!') ? 'Wq!' : 'wq!'
+        cnoreabbrev <expr> wqa (getcmdtype() == ':' && getcmdline() ==# 'wqa') ? 'Wqall' : 'wqa'
+        cnoreabbrev <expr> wqall (getcmdtype() == ':' && getcmdline() ==# 'wqall') ? 'Wqall' : 'wqall'
+        cnoreabbrev <expr> x (getcmdtype() == ':' && getcmdline() ==# 'x') ? 'Wq' : 'x'
+        cnoreabbrev <expr> xa (getcmdtype() == ':' && getcmdline() ==# 'xa') ? 'Wqall' : 'xa'
+        cnoreabbrev <expr> xall (getcmdtype() == ':' && getcmdline() ==# 'xall') ? 'Wqall' : 'xall'
+    ]])
+
+    -- ZZ and ZQ mappings
+    vim.keymap.set('n', 'ZZ', '<Cmd>Wq<CR>', { silent = true })
+    vim.keymap.set('n', 'ZQ', '<Cmd>Quit!<CR>', { silent = true })
+end
+
+-- Setup buffer-local autocmds for BufWriteCmd (vscode-neovim style)
+-- This intercepts :w and delegates to Godot
+-- @param bufnr number: Buffer number
+function M._setup_buffer_autocmds(bufnr)
+    local augroup = vim.api.nvim_create_augroup('godot_neovim_buf_' .. bufnr, { clear = true })
+
+    -- Intercept :w, :w!
+    vim.api.nvim_create_autocmd('BufWriteCmd', {
+        group = augroup,
+        buffer = bufnr,
+        callback = function(ev)
+            -- Send save request to Godot via RPC
+            vim.rpcnotify(0, "godot_save_buffer")
+
+            -- Mark buffer as not modified (Godot will handle actual save)
+            -- This prevents "No write since last change" warnings
+            vim.bo[ev.buf].modified = false
+        end,
+    })
 end
 
 -- Reload current buffer from disk (:e!) and re-attach for notifications

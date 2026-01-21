@@ -47,7 +47,7 @@ impl GodotNeovimPlugin {
                 self.pending_char_op = None;
                 // Build the key sequence for f/F/t/T
                 let keys = match op {
-                    'f' | 'F' | 't' | 'T' => Some(format!("{}{}", op, c)),
+                    'f' | 'F' | 't' | 'T' | 'r' => Some(format!("{}{}", op, c)),
                     _ => None,
                 };
 
@@ -56,7 +56,7 @@ impl GodotNeovimPlugin {
                     'F' => self.find_char_backward(c, false),
                     't' => self.find_char_forward(c, true),
                     'T' => self.find_char_backward(c, true),
-                    'r' => self.replace_char(c),
+                    // 'r' is sent to Neovim via keys above (Neovim Master design)
                     _ => {}
                 }
 

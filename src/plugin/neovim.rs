@@ -187,13 +187,6 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// Sync buffer from Godot editor to Neovim (initial sync for file open)
-    /// This is now a wrapper that calls switch_to_neovim_buffer
-    pub(super) fn sync_buffer_to_neovim(&mut self) {
-        // Use multi-buffer approach - switch to buffer for this file
-        let _ = self.switch_to_neovim_buffer();
-    }
-
     /// Sync cursor position from Godot editor to Neovim
     pub(super) fn sync_cursor_to_neovim(&mut self) {
         // Skip if buffer not yet initialized (e.g., during hot reload)
@@ -457,6 +450,29 @@ impl GodotNeovimPlugin {
                     // Neovim switched to a different buffer
                     self.sync_godot_script_tab(&path);
                 }
+                BufEvent::SaveBuffer => {
+                    // :w command - process even during escape
+                    self.cmd_save();
+                }
+                BufEvent::CloseBuffer { bang, all } => {
+                    // :q/:qa command - process even during escape
+                    if all {
+                        self.cmd_close_all();
+                    } else if bang {
+                        self.cmd_close_discard();
+                    } else {
+                        self.cmd_close();
+                    }
+                }
+                BufEvent::SaveAndClose => {
+                    // :wq command - process even during escape
+                    self.cmd_save_and_close();
+                }
+                BufEvent::SaveAllAndClose => {
+                    // :wqa command - process even during escape
+                    self.cmd_save_all();
+                    self.cmd_close_all();
+                }
             }
         }
 
@@ -606,6 +622,29 @@ impl GodotNeovimPlugin {
                     // Neovim switched to a different buffer (e.g., via Ctrl+O/Ctrl+I jump)
                     // Check if Godot needs to switch script tabs
                     self.sync_godot_script_tab(&path);
+                }
+                BufEvent::SaveBuffer => {
+                    // :w command from Neovim - save current file
+                    self.cmd_save();
+                }
+                BufEvent::CloseBuffer { bang, all } => {
+                    // :q/:qa command from Neovim - close tab(s)
+                    if all {
+                        self.cmd_close_all();
+                    } else if bang {
+                        self.cmd_close_discard();
+                    } else {
+                        self.cmd_close();
+                    }
+                }
+                BufEvent::SaveAndClose => {
+                    // :wq command from Neovim - save and close
+                    self.cmd_save_and_close();
+                }
+                BufEvent::SaveAllAndClose => {
+                    // :wqa command from Neovim - save all and close all
+                    self.cmd_save_all();
+                    self.cmd_close_all();
                 }
             }
         }
@@ -885,6 +924,11 @@ impl GodotNeovimPlugin {
             change.new_lines.len()
         );
 
+        // Cancel code completion popup before modifying buffer
+        // This prevents "Index p_from_column = -1 is out of bounds" error
+        // when completion is active and buffer changes invalidate cursor position
+        editor.cancel_code_completion();
+
         // Set flag to prevent echo back to Neovim
         self.sync_manager.begin_nvim_change();
 
@@ -993,6 +1037,11 @@ impl GodotNeovimPlugin {
         // This is needed because set_caret_line and set_caret_column are called separately,
         // which can trigger on_caret_changed with intermediate cursor positions
         self.syncing_from_grid = true;
+
+        // Cancel code completion popup before modifying cursor position
+        // This prevents "Index p_from_column = -1 is out of bounds" error
+        // when completion is active and cursor position changes
+        editor.cancel_code_completion();
 
         // Update last_synced_cursor BEFORE setting caret to prevent
         // caret_changed signal from triggering sync_cursor_to_neovim

@@ -84,8 +84,9 @@ impl GodotNeovimPlugin {
         }
 
         // Handle Ctrl+A for increment number under cursor
+        // Neovim Master: send to Neovim for proper undo/redo and register integration
         if key_event.is_ctrl_pressed() && keycode == Key::A {
-            self.increment_number(1);
+            self.send_keys("<C-a>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -93,8 +94,9 @@ impl GodotNeovimPlugin {
         }
 
         // Handle Ctrl+X for decrement number under cursor
+        // Neovim Master: send to Neovim for proper undo/redo and register integration
         if key_event.is_ctrl_pressed() && keycode == Key::X {
-            self.increment_number(-1);
+            self.send_keys("<C-x>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -470,10 +472,11 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 'cc' for substitute line (same as S)
-        // Neovim Master: send to Neovim only
+        // Neovim Master: wait locally for complete command, then send to Neovim
+        // (Don't send partial 'c' to avoid Neovim pending state mismatch on Esc)
         if keycode == Key::C && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
             if self.last_key == "c" {
-                self.send_keys("c"); // Send second 'c' to complete 'cc'
+                self.send_keys("cc"); // Send complete 'cc' to Neovim
                 self.clear_last_key();
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
@@ -481,7 +484,7 @@ impl GodotNeovimPlugin {
                 return;
             } else {
                 self.set_last_key("c");
-                self.send_keys("c"); // Send first 'c' to Neovim
+                // Don't send to Neovim yet - wait for second 'c' or other motion
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
                 }
@@ -508,9 +511,10 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle '~' for toggle case (use unicode for keyboard layout independence)
+        // Handle '~' for toggle case
+        // Neovim Master: send to Neovim for proper undo/register integration
         if unicode_char == Some('~') {
-            self.toggle_case();
+            self.send_keys("~");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
             }
@@ -592,10 +596,10 @@ impl GodotNeovimPlugin {
 
         // Handle '>>' for indent (first '>' sets pending, second '>' executes)
         // Handle '<<' for unindent (first '<' sets pending, second '<' executes)
-        // Use unicode for keyboard layout independence
+        // Neovim Master: send to Neovim for proper undo/register integration
         if unicode_char == Some('>') {
             if self.last_key == ">" {
-                self.indent_line();
+                self.send_keys(">>");
                 self.clear_last_key();
             } else {
                 self.set_last_key(">");
@@ -608,7 +612,8 @@ impl GodotNeovimPlugin {
 
         if unicode_char == Some('<') {
             if self.last_key == "<" {
-                self.unindent_line();
+                // Use <LT><LT> because nvim_input interprets < as special key sequence start
+                self.send_keys("<LT><LT>");
                 self.clear_last_key();
             } else {
                 self.set_last_key("<");
@@ -667,16 +672,17 @@ impl GodotNeovimPlugin {
         }
 
         // Handle p after [ or ]
+        // Neovim Master: send to Neovim for proper undo/register integration
         if keycode == Key::P && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
             if self.last_key == "[" {
-                self.paste_with_indent_before();
+                self.send_keys("[p");
                 self.clear_last_key();
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
                 }
                 return;
             } else if self.last_key == "]" {
-                self.paste_with_indent_after();
+                self.send_keys("]p");
                 self.clear_last_key();
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
@@ -834,8 +840,9 @@ impl GodotNeovimPlugin {
         }
 
         // Handle gqq (format current line)
+        // Neovim Master: send to Neovim for proper undo/register integration
         if self.last_key == "gq" && keycode == Key::Q && !key_event.is_shift_pressed() {
-            self.format_current_line();
+            self.send_keys("gqq");
             self.clear_last_key();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -959,6 +966,7 @@ impl GodotNeovimPlugin {
                 }
 
                 // Register is selected, check for yy
+                // Neovim Master: send to Neovim for proper undo/register integration
                 if keycode == Key::Y
                     && !key_event.is_shift_pressed()
                     && !key_event.is_ctrl_pressed()
@@ -966,7 +974,12 @@ impl GodotNeovimPlugin {
                     if self.last_key == "y" {
                         // yy - yank current line(s) to register
                         let count = self.get_and_clear_count();
-                        self.yank_lines_to_register(reg, count);
+                        let count_str = if count > 1 {
+                            count.to_string()
+                        } else {
+                            String::new()
+                        };
+                        self.send_keys(&format!("\"{}{}yy", reg, count_str));
                         self.selected_register = None;
                         self.clear_last_key();
                         if let Some(mut viewport) = self.base().get_viewport() {
@@ -984,11 +997,12 @@ impl GodotNeovimPlugin {
                 }
 
                 // Handle register-aware p (paste)
+                // Neovim Master: send to Neovim for proper undo/register integration
                 if keycode == Key::P
                     && !key_event.is_shift_pressed()
                     && !key_event.is_ctrl_pressed()
                 {
-                    self.paste_from_register(reg);
+                    self.send_keys(&format!("\"{}p", reg));
                     self.selected_register = None;
                     self.count_buffer.clear();
                     if let Some(mut viewport) = self.base().get_viewport() {
@@ -998,9 +1012,10 @@ impl GodotNeovimPlugin {
                 }
 
                 // Handle register-aware P (paste before)
+                // Neovim Master: send to Neovim for proper undo/register integration
                 if keycode == Key::P && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed()
                 {
-                    self.paste_from_register_before(reg);
+                    self.send_keys(&format!("\"{}P", reg));
                     self.selected_register = None;
                     self.count_buffer.clear();
                     if let Some(mut viewport) = self.base().get_viewport() {
@@ -1010,6 +1025,7 @@ impl GodotNeovimPlugin {
                 }
 
                 // Handle register-aware dd (delete line and yank)
+                // Neovim Master: send to Neovim for proper undo/register integration
                 if keycode == Key::D
                     && !key_event.is_shift_pressed()
                     && !key_event.is_ctrl_pressed()
@@ -1017,7 +1033,12 @@ impl GodotNeovimPlugin {
                     if self.last_key == "d" {
                         // dd - delete line(s) and store in register
                         let count = self.get_and_clear_count();
-                        self.delete_lines_to_register(reg, count);
+                        let count_str = if count > 1 {
+                            count.to_string()
+                        } else {
+                            String::new()
+                        };
+                        self.send_keys(&format!("\"{}{}dd", reg, count_str));
                         self.selected_register = None;
                         self.clear_last_key();
                         if let Some(mut viewport) = self.base().get_viewport() {
@@ -1116,8 +1137,8 @@ impl GodotNeovimPlugin {
                     }
                     "&" => {
                         // g& - repeat last substitution on entire buffer
-                        // Note: repeat_substitute() handles buffer sync internally
-                        self.repeat_substitute();
+                        // Neovim Master: send to Neovim for proper undo/register integration
+                        self.send_keys("g&");
                         true
                     }
                     "J" => {
