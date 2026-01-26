@@ -31,6 +31,7 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 - Character editing (`x`, `X`, `r`, `~`) and line operations (`J`, `>>`, `<<`)
 - Configurable Neovim executable path via Editor Settings
 - Path validation on startup and settings change
+- Automatic recovery when Neovim becomes unresponsive
 
 <details>
 <summary><h2>Comparison with GodotVim</h2></summary>

@@ -160,6 +160,17 @@ impl GodotNeovimPlugin {
                 Some((result.cursor.0 - 1, result.cursor.1, result.is_new))
             }
             Err(e) => {
+                let error_str = e.to_string();
+                // Check if this is a timeout or connection error
+                if error_str.contains("Timeout")
+                    || error_str.contains("timeout")
+                    || error_str.contains("Failed to")
+                {
+                    drop(client);
+                    if self.record_timeout_error() {
+                        self.show_recovery_dialog();
+                    }
+                }
                 godot_error!("[godot-neovim] Failed to switch buffer: {}", e);
                 None
             }
@@ -227,6 +238,17 @@ impl GodotNeovimPlugin {
                 }
             }
             Err(e) => {
+                let error_str = e.to_string();
+                // Check if this is a timeout or connection error
+                if error_str.contains("Timeout")
+                    || error_str.contains("timeout")
+                    || error_str.contains("Failed to")
+                {
+                    drop(client);
+                    if self.record_timeout_error() {
+                        self.show_recovery_dialog();
+                    }
+                }
                 godot_error!("[godot-neovim] Failed to update buffer: {}", e);
             }
         }
@@ -321,12 +343,26 @@ impl GodotNeovimPlugin {
             char_col
         );
 
-        if let Err(e) = client.set_cursor(nvim_line, nvim_col) {
+        let cursor_result = client.set_cursor(nvim_line, nvim_col);
+        // Release lock before potentially showing dialog
+        drop(client);
+
+        if let Err(e) = cursor_result {
+            let error_str = e.to_string();
+            // Check if this is a timeout or connection error
+            // "Timeout" = RPC timeout, "Failed to" = Neovim process died
+            if error_str.contains("Timeout")
+                || error_str.contains("timeout")
+                || error_str.contains("Failed to")
+            {
+                if self.record_timeout_error() {
+                    self.show_recovery_dialog();
+                }
+            }
             godot_error!("[godot-neovim] Failed to sync cursor: {}", e);
         }
 
         // Update tracking
-        drop(client);
         // Only track last_nvim_synced_line when clamping (to prevent repeated clamping)
         // Reset to -1 for normal syncs so next clamp will work
         self.last_nvim_synced_line = if clamped { nvim_line } else { -1 };
@@ -379,6 +415,10 @@ impl GodotNeovimPlugin {
             godot_error!("[godot-neovim] Failed to queue keys via channel");
             return false;
         }
+
+        // Track key send time for no-response detection
+        self.last_key_send_time = Some(std::time::Instant::now());
+        self.pending_key_count += 1;
 
         crate::verbose_print!("[godot-neovim] Key queued via channel: {}", keys);
 
@@ -670,6 +710,40 @@ impl GodotNeovimPlugin {
             (state_from_redraw, buf_events, viewport_change)
         };
         // Lock is now released
+
+        // Check for response from Neovim (any state/viewport update counts as response)
+        let got_response =
+            state_from_redraw.is_some() || viewport_change.is_some() || !buf_events.is_empty();
+
+        if got_response {
+            // Got response, reset pending key tracking
+            self.pending_key_count = 0;
+            self.last_key_send_time = None;
+        } else if let Some(send_time) = self.last_key_send_time {
+            // No response - check if we've been waiting too long
+            use crate::neovim::TIMEOUT_RECOVERY_WINDOW_SECS;
+            let elapsed = send_time.elapsed();
+            let no_response_threshold =
+                std::time::Duration::from_secs(TIMEOUT_RECOVERY_WINDOW_SECS);
+
+            // If pending keys and no response for threshold time, treat as timeout
+            // This is a clear indication that Neovim is unresponsive, so show dialog directly
+            if self.pending_key_count >= 3 && elapsed >= no_response_threshold {
+                crate::verbose_print!(
+                    "[godot-neovim] No response for {} keys over {:?} - triggering recovery",
+                    self.pending_key_count,
+                    elapsed
+                );
+                self.pending_key_count = 0;
+                self.last_key_send_time = None;
+                // Clear timeout timestamps and show dialog directly
+                // (no need for 3-strike rule when we have clear evidence of no response)
+                self.reset_timeout_counter();
+                if !self.recovery_dialog_open {
+                    self.show_recovery_dialog();
+                }
+            }
+        }
 
         // Process buffer events
         for event in buf_events {
