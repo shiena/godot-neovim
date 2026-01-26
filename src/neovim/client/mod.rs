@@ -36,6 +36,12 @@ pub(super) const RPC_TIMEOUT_MS: u64 = 100;
 /// Extended timeout for operations that may trigger dialogs (e.g., swap file)
 pub(super) const RPC_EXTENDED_TIMEOUT_MS: u64 = 500;
 
+/// Timeout recovery: Number of timeout errors to trigger recovery
+pub const TIMEOUT_RECOVERY_THRESHOLD: u32 = 3;
+
+/// Timeout recovery: Time window in seconds for counting errors
+pub const TIMEOUT_RECOVERY_WINDOW_SECS: u64 = 5;
+
 /// Fallback Lua code when external plugin is not available
 /// Prefer using the external lua/godot_neovim/init.lua file
 pub(super) const LUA_FALLBACK_CODE: &str = r#"

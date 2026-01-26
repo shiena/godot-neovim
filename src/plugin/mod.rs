@@ -12,6 +12,7 @@ mod macros;
 mod marks;
 mod motions;
 mod neovim;
+mod recovery;
 mod registers;
 mod search;
 mod state;
@@ -23,7 +24,8 @@ use crate::neovim::NeovimClient;
 use crate::settings;
 use crate::sync::SyncManager;
 use godot::classes::{
-    CodeEdit, EditorInterface, EditorPlugin, IEditorPlugin, Label, ProjectSettings,
+    CodeEdit, ConfirmationDialog, EditorInterface, EditorPlugin, IEditorPlugin, Label,
+    ProjectSettings,
 };
 use godot::global::Key;
 use godot::prelude::*;
@@ -295,6 +297,21 @@ pub struct GodotNeovimPlugin {
     /// Neovim returns "visual" for all visual modes, so we track the key pressed
     #[init(val = 'v')]
     visual_mode_type: char,
+    /// Timestamps of recent timeout errors for recovery detection
+    #[init(val = Vec::new())]
+    timeout_timestamps: Vec<Instant>,
+    /// Recovery dialog is currently shown
+    #[init(val = false)]
+    recovery_dialog_open: bool,
+    /// Recovery dialog reference
+    #[init(val = None)]
+    recovery_dialog: Option<Gd<ConfirmationDialog>>,
+    /// Timestamp of last key sent to Neovim (for detecting no-response)
+    #[init(val = None)]
+    last_key_send_time: Option<Instant>,
+    /// Number of pending keys without response
+    #[init(val = 0)]
+    pending_key_count: u32,
 }
 
 #[godot_api]
@@ -1342,6 +1359,33 @@ impl GodotNeovimPlugin {
     #[func]
     fn on_float_window_input(&mut self, _event: Gd<godot::classes::InputEvent>) {
         // Legacy handler - now using gui_input signal via on_codeedit_gui_input
+    }
+
+    /// Recovery dialog: Save all files and restart Neovim
+    #[func]
+    fn on_recovery_save_restart(&mut self) {
+        crate::verbose_print!("[godot-neovim] Recovery: Save & Restart selected");
+        self.save_all_open_scripts();
+        self.restart_neovim();
+        self.cleanup_recovery_dialog();
+    }
+
+    /// Recovery dialog: Cancel (do nothing)
+    #[func]
+    fn on_recovery_cancel(&mut self) {
+        crate::verbose_print!("[godot-neovim] Recovery: Cancel selected");
+        self.cleanup_recovery_dialog();
+    }
+
+    /// Recovery dialog: Handle custom action (Restart without Saving)
+    #[func]
+    fn on_recovery_custom_action(&mut self, action: GString) {
+        let action_str = action.to_string();
+        crate::verbose_print!("[godot-neovim] Recovery: Custom action: {}", action_str);
+        if action_str == "restart_no_save" {
+            self.restart_neovim();
+        }
+        self.cleanup_recovery_dialog();
     }
 }
 
