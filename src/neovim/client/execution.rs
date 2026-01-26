@@ -39,4 +39,29 @@ impl NeovimClient {
             }
         })
     }
+
+    /// Debug: Get current indent settings from Neovim
+    #[allow(dead_code)]
+    pub fn debug_get_indent_settings(&self) -> Result<String, String> {
+        let lua_code = r#"
+            return string.format(
+                "expandtab=%s shiftwidth=%d tabstop=%d softtabstop=%d",
+                tostring(vim.bo.expandtab),
+                vim.bo.shiftwidth,
+                vim.bo.tabstop,
+                vim.bo.softtabstop
+            )
+        "#;
+
+        match self.execute_lua_with_result(lua_code) {
+            Ok(value) => {
+                if let Some(s) = value.as_str() {
+                    Ok(s.to_string())
+                } else {
+                    Ok(format!("{:?}", value))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
 }
