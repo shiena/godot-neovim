@@ -117,6 +117,15 @@ pub struct SwitchBufferResult {
     pub cursor: (i64, i64),
 }
 
+/// Indent options for Neovim buffer
+#[derive(Debug, Clone, Copy)]
+pub struct IndentOptions {
+    /// Use spaces instead of tabs
+    pub use_spaces: bool,
+    /// Indent size (number of spaces or tab width)
+    pub indent_size: i32,
+}
+
 /// Manages connection to Neovim process
 pub struct NeovimClient {
     pub(super) runtime: Runtime,

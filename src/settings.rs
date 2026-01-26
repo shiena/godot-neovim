@@ -258,6 +258,12 @@ pub fn on_settings_changed(settings: &Gd<EditorSettings>) {
         let value = settings.get_setting(SETTING_NEOVIM_PATH);
         if let Ok(path) = value.try_to::<GString>() {
             let path_str = path.to_string();
+
+            // Skip validation if path is empty (will use PATH to find nvim)
+            if path_str.is_empty() {
+                return;
+            }
+
             let result = validate_neovim_path(&path_str);
 
             match &result {

@@ -1,6 +1,8 @@
 //! Buffer operations: buffer_update, switch_to_buffer, attach
 
-use super::{NeovimClient, SwitchBufferResult, RPC_EXTENDED_TIMEOUT_MS, RPC_TIMEOUT_MS};
+use super::{
+    IndentOptions, NeovimClient, SwitchBufferResult, RPC_EXTENDED_TIMEOUT_MS, RPC_TIMEOUT_MS,
+};
 use rmpv::Value;
 
 impl NeovimClient {
@@ -37,6 +39,7 @@ impl NeovimClient {
         &self,
         path: &str,
         lines: Option<Vec<String>>,
+        indent_opts: Option<IndentOptions>,
     ) -> Result<SwitchBufferResult, String> {
         let neovim_arc = self.neovim.clone();
         let path = path.to_string();
@@ -52,7 +55,22 @@ impl NeovimClient {
                             Some(l) => Value::Array(l.into_iter().map(Value::from).collect()),
                             None => Value::Nil,
                         };
-                        let args = vec![Value::from(path), lines_value];
+
+                        // Prepare arguments - only include indent_opts if provided
+                        // (msgpack nil may not convert to Lua nil properly)
+                        let args = match indent_opts {
+                            Some(opts) => {
+                                let map = vec![
+                                    (Value::from("use_spaces"), Value::from(opts.use_spaces)),
+                                    (
+                                        Value::from("indent_size"),
+                                        Value::from(opts.indent_size as i64),
+                                    ),
+                                ];
+                                vec![Value::from(path), lines_value, Value::Map(map)]
+                            }
+                            None => vec![Value::from(path), lines_value],
+                        };
 
                         let result = neovim
                             .exec_lua("return _G.godot_neovim.switch_to_buffer(...)", args)
@@ -71,6 +89,31 @@ impl NeovimClient {
             match result {
                 Ok(inner) => inner,
                 Err(_) => Err("Timeout switching buffer".to_string()),
+            }
+        })
+    }
+
+    /// Set indent options for the current buffer
+    pub fn set_indent_options(&self, use_spaces: bool, indent_size: i32) -> Result<(), String> {
+        let neovim_arc = self.neovim.clone();
+
+        self.runtime.block_on(async {
+            let nvim_lock = neovim_arc.lock().await;
+            if let Some(neovim) = nvim_lock.as_ref() {
+                let args = vec![
+                    Value::from(0i64), // current buffer
+                    Value::from(use_spaces),
+                    Value::from(indent_size as i64),
+                ];
+
+                neovim
+                    .exec_lua("_G.godot_neovim.set_indent_options(...)", args)
+                    .await
+                    .map_err(|e| format!("Failed to set indent options: {}", e))?;
+
+                Ok(())
+            } else {
+                Err("Neovim not connected".to_string())
             }
         })
     }

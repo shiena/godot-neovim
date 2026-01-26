@@ -908,6 +908,49 @@ impl GodotNeovimPlugin {
         if let Some(editor_settings) = editor.get_editor_settings() {
             settings::on_settings_changed(&editor_settings);
         }
+
+        // Sync indent settings to Neovim when editor settings change
+        self.sync_indent_settings_to_neovim();
+    }
+
+    /// Sync current editor's indent settings to Neovim
+    /// Reads directly from EditorSettings to ensure we get the latest values
+    /// (CodeEdit may not have applied the new settings yet when settings_changed fires)
+    fn sync_indent_settings_to_neovim(&mut self) {
+        let Some(ref neovim) = self.neovim else {
+            return;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            return;
+        };
+
+        // Read directly from EditorSettings instead of CodeEdit
+        // CodeEdit may have stale values when settings_changed signal fires
+        let editor_interface = EditorInterface::singleton();
+        let Some(editor_settings) = editor_interface.get_editor_settings() else {
+            return;
+        };
+
+        // text_editor/behavior/indent/type: 0 = tabs, 1 = spaces
+        let indent_type = editor_settings
+            .get_setting("text_editor/behavior/indent/type")
+            .to::<i32>();
+        let use_spaces = indent_type == 1;
+
+        let indent_size = editor_settings
+            .get_setting("text_editor/behavior/indent/size")
+            .to::<i32>();
+
+        crate::verbose_print!(
+            "[godot-neovim] Syncing indent settings: spaces={}, size={}",
+            use_spaces,
+            indent_size
+        );
+
+        if let Err(e) = client.set_indent_options(use_spaces, indent_size) {
+            crate::verbose_print!("[godot-neovim] Failed to sync indent settings: {}", e);
+        }
     }
 
     #[func]

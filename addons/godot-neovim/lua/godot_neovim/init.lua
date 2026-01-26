@@ -102,11 +102,27 @@ M._attached_buffers = {}
 M._last_cursor = { 0, 0 }
 M._last_mode = ""
 
+-- Set indent options for a buffer
+-- @param bufnr number: Buffer number (0 for current buffer)
+-- @param use_spaces boolean: Use spaces instead of tabs
+-- @param indent_size number: Indent size (number of spaces or tab width)
+function M.set_indent_options(bufnr, use_spaces, indent_size)
+    if bufnr == 0 then
+        bufnr = vim.api.nvim_get_current_buf()
+    end
+
+    vim.bo[bufnr].expandtab = use_spaces
+    vim.bo[bufnr].shiftwidth = indent_size
+    vim.bo[bufnr].tabstop = indent_size
+    vim.bo[bufnr].softtabstop = indent_size
+end
+
 -- Switch to buffer by path, creating and initializing if needed
 -- @param path string: Absolute file path
 -- @param lines table|nil: Lines to initialize with (only used for new buffers)
+-- @param indent_opts table|nil: { use_spaces = bool, indent_size = number }
 -- @return table: { bufnr, tick, is_new, cursor }
-function M.switch_to_buffer(path, lines)
+function M.switch_to_buffer(path, lines, indent_opts)
     -- Find existing buffer by path
     local bufnr = vim.fn.bufnr(path)
     local is_new = (bufnr == -1)
@@ -182,6 +198,12 @@ function M.switch_to_buffer(path, lines)
         end
     else
         attached = true
+    end
+
+    -- Apply indent options if provided
+    -- This ensures Neovim uses the same indent settings as Godot
+    if indent_opts then
+        M.set_indent_options(bufnr, indent_opts.use_spaces, indent_opts.indent_size)
     end
 
     -- Get current state

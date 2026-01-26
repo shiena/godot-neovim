@@ -51,16 +51,23 @@ impl GodotNeovimPlugin {
                 .collect()
         };
         let godot_line_count = editor.get_line_count();
+        // Get indent settings from CodeEdit
+        let use_spaces = editor.is_indent_using_spaces();
+        let indent_size = editor.get_indent_size();
+
         crate::verbose_print!(
-            "[godot-neovim] Switching to buffer: {} (text {} lines, Godot {} lines)",
+            "[godot-neovim] Switching to buffer: {} (text {} lines, Godot {} lines, spaces={}, indent={})",
             abs_path,
             lines.len(),
-            godot_line_count
+            godot_line_count,
+            use_spaces,
+            indent_size
         );
 
         // Switch to buffer (creates if not exists)
+        // Note: Don't pass indent_opts here - they must be set AFTER filetype
         let nvim_line_count = lines.len() as i32;
-        match client.switch_to_buffer(&abs_path, Some(lines)) {
+        match client.switch_to_buffer(&abs_path, Some(lines), None) {
             Ok(result) => {
                 crate::verbose_print!(
                     "[godot-neovim] Buffer switched: bufnr={}, tick={}, is_new={}, cursor=({}, {})",
@@ -78,7 +85,40 @@ impl GodotNeovimPlugin {
                 self.sync_manager.set_line_count(nvim_line_count);
 
                 // Set filetype for syntax highlighting
+                // This must be done BEFORE setting indent options, because filetype plugins
+                // may override buffer-local indent settings
                 let _ = client.command("set filetype=gdscript");
+
+                // Set indent options AFTER filetype to prevent filetype plugins from overriding them
+                crate::verbose_print!(
+                    "[godot-neovim] Setting indent options: spaces={}, size={}",
+                    use_spaces,
+                    indent_size
+                );
+                match client.set_indent_options(use_spaces, indent_size) {
+                    Ok(()) => {
+                        crate::verbose_print!("[godot-neovim] Indent options set successfully");
+                    }
+                    Err(e) => {
+                        crate::verbose_print!("[godot-neovim] Failed to set indent options: {}", e);
+                    }
+                }
+
+                // Debug: verify indent settings were applied
+                match client.debug_get_indent_settings() {
+                    Ok(settings) => {
+                        crate::verbose_print!(
+                            "[godot-neovim] Neovim indent settings: {}",
+                            settings
+                        );
+                    }
+                    Err(e) => {
+                        crate::verbose_print!(
+                            "[godot-neovim] Failed to get indent settings: {}",
+                            e
+                        );
+                    }
+                }
 
                 // Resize Neovim UI to match Godot editor's visible area
                 // This is important for viewport commands (zz, zt, zb) to work correctly
