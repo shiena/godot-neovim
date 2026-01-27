@@ -666,7 +666,7 @@ impl GodotNeovimPlugin {
         }
 
         // Collect data from Neovim while holding lock, then release and process
-        let (state_from_redraw, buf_events, viewport_change) = {
+        let (state_from_redraw, buf_events, viewport_change, debug_messages) = {
             let Some(ref neovim) = self.neovim else {
                 return;
             };
@@ -707,9 +707,22 @@ impl GodotNeovimPlugin {
             // Get viewport changes (win_viewport events)
             let viewport_change = client.take_viewport();
 
-            (state_from_redraw, buf_events, viewport_change)
+            // Get debug messages from Lua
+            let debug_messages = client.take_debug_messages();
+
+            (
+                state_from_redraw,
+                buf_events,
+                viewport_change,
+                debug_messages,
+            )
         };
         // Lock is now released
+
+        // Print debug messages to Godot Output panel
+        for msg in debug_messages {
+            godot_print!("[godot-neovim] {}", msg);
+        }
 
         // Check for response from Neovim (any state/viewport update counts as response)
         let got_response =

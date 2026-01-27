@@ -90,4 +90,13 @@ impl NeovimClient {
             tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         });
     }
+
+    /// Take pending debug messages from Lua
+    /// Returns empty Vec if no messages
+    pub fn take_debug_messages(&self) -> Vec<String> {
+        self.runtime.block_on(async {
+            let mut state = self.state.lock().await;
+            std::mem::take(&mut state.debug_messages)
+        })
+    }
 }

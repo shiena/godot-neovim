@@ -1,8 +1,8 @@
 //! Neovim timeout recovery: automatic recovery when Neovim becomes unresponsive
 
 use super::GodotNeovimPlugin;
-use crate::neovim::{TIMEOUT_RECOVERY_THRESHOLD, TIMEOUT_RECOVERY_WINDOW_SECS};
 use crate::neovim::NeovimClient;
+use crate::neovim::{TIMEOUT_RECOVERY_THRESHOLD, TIMEOUT_RECOVERY_WINDOW_SECS};
 use godot::classes::{ConfirmationDialog, EditorInterface, ProjectSettings, ResourceSaver};
 use godot::prelude::*;
 use std::sync::Mutex;
@@ -47,7 +47,8 @@ impl GodotNeovimPlugin {
         dialog.set_cancel_button_text("Cancel");
 
         // Add custom button for restart without saving
-        dialog.add_button_ex("Restart without Saving")
+        dialog
+            .add_button_ex("Restart without Saving")
             .right(false)
             .action("restart_no_save")
             .done();
@@ -165,7 +166,10 @@ impl GodotNeovimPlugin {
                 self.script_changed_pending.set(true);
             }
             Err(e) => {
-                godot_error!("[godot-neovim] Recovery: Failed to create Neovim client: {}", e);
+                godot_error!(
+                    "[godot-neovim] Recovery: Failed to create Neovim client: {}",
+                    e
+                );
             }
         }
     }
