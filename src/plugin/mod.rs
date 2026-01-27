@@ -250,6 +250,9 @@ pub struct GodotNeovimPlugin {
     /// Flag to skip cursor sync in on_script_changed (set by cmd_close)
     #[init(val = false)]
     cursor_synced_before_close: bool,
+    /// Flag to grab focus after script change (set by on_script_close)
+    #[init(val = false)]
+    focus_after_script_change: bool,
     /// Flag to skip on_script_changed processing during :qa (Close All)
     /// Reset when operation completes (detected in process())
     #[init(val = false)]
@@ -1057,6 +1060,10 @@ impl GodotNeovimPlugin {
 
         // Delete the buffer from Neovim immediately
         self.delete_neovim_buffer(&path);
+
+        // Set flag to grab focus after script change processing completes
+        // This ensures focus is set after the new CodeEdit is visible
+        self.focus_after_script_change = true;
     }
 
     #[func]
@@ -1215,6 +1222,17 @@ impl GodotNeovimPlugin {
 
         self.update_cursor_from_editor();
         self.sync_cursor_to_neovim();
+
+        // If script was closed, grab focus on the new CodeEdit
+        if self.focus_after_script_change {
+            self.focus_after_script_change = false;
+            if let Some(ref mut editor) = self.current_editor {
+                if editor.is_instance_valid() {
+                    editor.grab_focus();
+                    crate::verbose_print!("[godot-neovim] Focused CodeEdit after script close");
+                }
+            }
+        }
     }
 
     /// Handle input from CodeEdit's gui_input signal
