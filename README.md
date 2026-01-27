@@ -552,6 +552,13 @@ These features work through the Neovim backend:
 - [vscode-neovim](https://github.com/vscode-neovim/vscode-neovim) - VSCode extension with Neovim backend
 - [neovide](https://github.com/neovide/neovide) - Neovim GUI client in Rust (architecture reference)
 
+## Disclaimer
+
+This project is not affiliated with, endorsed by, or sponsored by the [Godot Foundation](https://godot.foundation/) or the [Neovim](https://neovim.io/) project.
+
+- "Godot" and the Godot logo are registered trademarks of the Godot Foundation.
+- "Neovim" and the Neovim logo are trademarks of their respective owners. The Neovim logo is licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) by Jason Long.
+
 ## License
 
 Licensed under either of
