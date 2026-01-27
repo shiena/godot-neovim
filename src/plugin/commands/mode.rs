@@ -238,6 +238,10 @@ impl GodotNeovimPlugin {
                 // :version - show version in status label
                 else if cmd == "version" || cmd == "ver" {
                     self.cmd_version();
+                }
+                // User-defined commands (start with uppercase) are handled by Neovim
+                else if cmd.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                    self.cmd_forward_to_neovim(cmd);
                 } else {
                     godot_warn!("[godot-neovim] Unknown command: {}", cmd);
                 }

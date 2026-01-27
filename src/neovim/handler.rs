@@ -29,6 +29,8 @@ pub struct NeovimState {
     pub viewport_curcol: i64,
     /// Flag indicating viewport has changed since last read
     pub viewport_changed: bool,
+    /// Debug messages from Lua (printed on Godot main thread)
+    pub debug_messages: Vec<String>,
 }
 
 /// Buffer events from nvim_buf_attach
@@ -80,6 +82,7 @@ impl NeovimHandler {
                 viewport_curline: 0,
                 viewport_curcol: 0,
                 viewport_changed: false,
+                debug_messages: Vec::new(),
             })),
             has_updates: Arc::new(AtomicBool::new(false)),
             buf_events: Arc::new(Mutex::new(VecDeque::new())),
@@ -432,6 +435,20 @@ impl NeovimHandler {
         self.has_buf_events.store(true, Ordering::SeqCst);
     }
 
+    async fn handle_godot_debug_print(&self, args: Vec<Value>) {
+        if args.is_empty() {
+            return;
+        }
+
+        let message = match &args[0] {
+            Value::String(s) => s.as_str().unwrap_or("").to_string(),
+            _ => return,
+        };
+
+        let mut state = self.state.lock().await;
+        state.debug_messages.push(message);
+    }
+
     async fn handle_redraw(&self, args: Vec<Value>) {
         let mut state = self.state.lock().await;
 
@@ -531,6 +548,7 @@ impl Handler for NeovimHandler {
             "godot_close_buffer" => self.handle_godot_close_buffer(args).await,
             "godot_save_and_close" => self.handle_godot_save_and_close(args).await,
             "godot_save_all_and_close" => self.handle_godot_save_all_and_close(args).await,
+            "godot_debug_print" => self.handle_godot_debug_print(args).await,
             _ => {}
         }
     }
