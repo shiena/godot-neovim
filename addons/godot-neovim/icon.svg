@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <!-- Neovim gradients (from official logo) -->
+    <linearGradient id="nvBlue" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#16B0ED" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#0F59B2" stop-opacity="0.84"/>
+    </linearGradient>
+    <linearGradient id="nvGreen" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#7DB643"/>
+      <stop offset="100%" stop-color="#367533"/>
+    </linearGradient>
+    <linearGradient id="nvGreenCross" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#88C649" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#439240" stop-opacity="0.84"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Godot robot: original size 1024x1024 -> 256x256 (scale 0.25) -->
+  <g transform="scale(0.25)">
+    <!-- White parts -->
+    <g fill="#fff">
+      <path d="M105 673v33q407 354 814 0v-33z"/>
+      <path fill="none" stroke="#fff" stroke-linejoin="round" stroke-width="64" d="M105 745c0 276 813 276 814 0V427q30-39 56-81-35-59-83-108-43 20-82 47-40-37-88-64 7-51 8-102-59-28-123-42-26 43-46 89-49-7-98 0-20-46-46-89-64 14-123 42 1 51 8 102-48 27-88 64-39-27-82-47-48 49-83 108 26 42 56 81v318z"/>
+      <!-- Main blue body -->
+      <path fill="#478cbf" d="m105 673 152 14q12 1 15 14l4 67 132 10 8-61q2-11 15-15h162q13 4 15 15l8 61 132-10 4-67q3-13 15-14l152-14V427q30-39 56-81-35-59-83-108-43 20-82 47-40-37-88-64 7-51 8-102-59-28-123-42-26 43-46 89-49-7-98 0-20-46-46-89-64 14-123 42 1 51 8 102-48 27-88 64-39-27-82-47-48 49-83 108 26 42 56 81zm0 33v39c0 276 813 276 814 0v-39l-134 12-5 69q-2 10-14 13l-162 11q-12 0-16-11l-10-65H446l-10 65q-4 11-16 11l-162-11q-12-3-14-13l-5-69z"/>
+      <!-- Nose -->
+      <path d="M483 600c0 34 58 34 58 0v-86c0-34-58-34-58 0z"/>
+      <!-- Eye whites -->
+      <circle cx="725" cy="526" r="90"/>
+      <circle cx="299" cy="526" r="90"/>
+    </g>
+    <!-- Pupils -->
+    <g fill="#414042">
+      <circle cx="307" cy="532" r="60"/>
+      <circle cx="717" cy="532" r="60"/>
+    </g>
+  </g>
+  
+  <!-- Neovim N mark as masquerade mask - Y moved down by 3 (53 -> 56) -->
+  <g transform="translate(59, 56) scale(0.23)">
+    <!-- White outlines (drawn first, behind the fills) -->
+    <path d="M0,155.5704 L155,-1 L154.999997,727 L0,572.237919 L0,155.5704 Z" fill="none" stroke="#fff" stroke-width="40" stroke-linejoin="round"/>
+    <path d="M443.060403,156.982405 L600,-1 L596.818792,727 L442,572.219941 L443.060403,156.982405 Z" fill="none" stroke="#fff" stroke-width="40" stroke-linejoin="round" transform="translate(521.000000, 363.500000) scale(-1, 1) translate(-521.000000, -363.500000)"/>
+    <path d="M154.986294,0 L558,615.189696 L445.224605,728 L42,114.172017 L154.986294,0 Z" fill="none" stroke="#fff" stroke-width="40" stroke-linejoin="round"/>
+    
+    <!-- Colored fills -->
+    <!-- Left bar (blue) -->
+    <path d="M0,155.5704 L155,-1 L154.999997,727 L0,572.237919 L0,155.5704 Z" fill="url(#nvBlue)"/>
+    <!-- Right bar (green) -->
+    <path d="M443.060403,156.982405 L600,-1 L596.818792,727 L442,572.219941 L443.060403,156.982405 Z" fill="url(#nvGreen)" transform="translate(521.000000, 363.500000) scale(-1, 1) translate(-521.000000, -363.500000)"/>
+    <!-- Diagonal (green) -->
+    <path d="M154.986294,0 L558,615.189696 L445.224605,728 L42,114.172017 L154.986294,0 Z" fill="url(#nvGreenCross)"/>
+    <!-- Shadow -->
+    <path d="M155,283.83232 L154.786754,308 L31,124.710606 L42.4619486,113 L155,283.83232 Z" fill-opacity="0.13" fill="#000"/>
+  </g>
+</svg>

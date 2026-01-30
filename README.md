@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="addons/godot-neovim/icon.png" alt="godot-neovim logo" width="128" height="128">
+  <img src="addons/godot-neovim/icon.svg" alt="godot-neovim logo" width="128" height="128">
 </p>
 
 <h1 align="center">godot-neovim</h1>
