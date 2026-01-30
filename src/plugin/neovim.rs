@@ -351,13 +351,12 @@ impl GodotNeovimPlugin {
             let error_str = e.to_string();
             // Check if this is a timeout or connection error
             // "Timeout" = RPC timeout, "Failed to" = Neovim process died
-            if error_str.contains("Timeout")
+            if (error_str.contains("Timeout")
                 || error_str.contains("timeout")
-                || error_str.contains("Failed to")
+                || error_str.contains("Failed to"))
+                && self.record_timeout_error()
             {
-                if self.record_timeout_error() {
-                    self.show_recovery_dialog();
-                }
+                self.show_recovery_dialog();
             }
             godot_error!("[godot-neovim] Failed to sync cursor: {}", e);
         }
@@ -426,8 +425,9 @@ impl GodotNeovimPlugin {
 
         crate::verbose_print!("[godot-neovim] Key queued via channel: {}", keys);
 
-        // Update key sequence display (verbose mode only)
-        self.update_key_sequence_display(keys);
+        // Emit signal for GDScript key sequence display
+        self.base_mut()
+            .emit_signal("key_sent", &[keys.to_variant()]);
 
         // Note: Modified flag sync is now event-driven via BufModifiedSet autocmd
         // No need to set pending_modified_sync here

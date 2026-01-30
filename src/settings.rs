@@ -1,4 +1,4 @@
-use godot::classes::{EditorInterface, EditorSettings, Os};
+use godot::classes::{EditorInterface, EditorSettings};
 use godot::prelude::*;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -6,7 +6,6 @@ use std::process::{Command, Output};
 const SETTING_NEOVIM_PATH: &str = "godot_neovim/neovim_executable_path";
 const SETTING_NEOVIM_CLEAN: &str = "godot_neovim/neovim_clean";
 const SETTING_TIMEOUTLEN: &str = "godot_neovim/timeoutlen";
-const SETTING_SHOW_KEY_SEQUENCE: &str = "godot_neovim/show_key_sequence";
 
 /// Default timeout for multi-key sequences (matches Neovim's default)
 pub const DEFAULT_TIMEOUTLEN_MS: i64 = 1000;
@@ -93,25 +92,6 @@ pub fn initialize_settings() {
 
     settings.add_property_info(&timeoutlen_info);
 
-    // Add show_key_sequence setting only in verbose mode
-    // This setting is for demo/debug purposes and should not clutter normal UI
-    if Os::singleton().is_stdout_verbose() {
-        if !settings.has_setting(SETTING_SHOW_KEY_SEQUENCE) {
-            settings.set_setting(SETTING_SHOW_KEY_SEQUENCE, &Variant::from(false));
-        }
-
-        // Set initial value for Revert button
-        settings.set_initial_value(SETTING_SHOW_KEY_SEQUENCE, &Variant::from(false), false);
-
-        // Add property info for show_key_sequence (checkbox, advanced)
-        #[allow(deprecated)]
-        let mut show_key_seq_info = Dictionary::new();
-        show_key_seq_info.set("name", SETTING_SHOW_KEY_SEQUENCE);
-        show_key_seq_info.set("type", VariantType::BOOL.ord());
-
-        settings.add_property_info(&show_key_seq_info);
-    }
-
     crate::verbose_print!(
         "[godot-neovim] Settings initialized. Neovim path: {}, Clean: {}, Timeoutlen: {}ms",
         get_neovim_path(),
@@ -180,29 +160,6 @@ pub fn get_neovim_clean() -> bool {
     }
 
     true // Default to clean mode
-}
-
-/// Check if key sequence display is enabled (verbose mode only)
-/// Returns true only when both verbose mode is active AND show_key_sequence setting is true
-pub fn get_show_key_sequence() -> bool {
-    // Must be in verbose mode
-    if !Os::singleton().is_stdout_verbose() {
-        return false;
-    }
-
-    let editor = EditorInterface::singleton();
-    let Some(settings) = editor.get_editor_settings() else {
-        return false;
-    };
-
-    if settings.has_setting(SETTING_SHOW_KEY_SEQUENCE) {
-        let value = settings.get_setting(SETTING_SHOW_KEY_SEQUENCE);
-        if let Ok(show) = value.try_to::<bool>() {
-            return show;
-        }
-    }
-
-    false
 }
 
 /// Get the configured timeoutlen (multi-key sequence timeout in milliseconds)

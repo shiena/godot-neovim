@@ -235,8 +235,9 @@ jobs:
 
           # Create zip archive with wrapper folder for Godot Asset Library
           # Godot auto-skips top-level folder, so we wrap addons/ in godot-neovim/
-          mkdir godot-neovim
-          cp -r addons godot-neovim/
+          # Only include godot-neovim addon (exclude optional addons like godot-neovim-key-display)
+          mkdir -p godot-neovim/addons
+          cp -r addons/godot-neovim godot-neovim/addons/
           zip -r godot-neovim-${{ inputs.version }}.zip godot-neovim
 
       - name: Generate changelog
