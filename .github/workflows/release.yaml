@@ -29,6 +29,12 @@ jobs:
           # Strip leading 'v' for comparison
           INPUT_VERSION="${INPUT_VERSION#v}"
 
+          # Check if tag already exists (prevents duplicate release)
+          if git rev-parse "refs/tags/${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ inputs.version }} already exists. Delete it first to re-release."
+            exit 1
+          fi
+
           # Get latest tag (sorted by version)
           LATEST_TAG=$(git tag -l 'v*' | sort -V | tail -n1)
           if [ -z "$LATEST_TAG" ]; then
@@ -40,14 +46,14 @@ jobs:
           echo "Input version: $INPUT_VERSION"
           echo "Latest version: $LATEST_VERSION"
 
-          # Compare versions using sort -V
+          # Compare versions using sort -V (allow >= for re-release after tag deletion)
           HIGHER=$(printf '%s\n%s' "$LATEST_VERSION" "$INPUT_VERSION" | sort -V | tail -n1)
-          if [ "$HIGHER" = "$LATEST_VERSION" ]; then
-            echo "::error::Input version ($INPUT_VERSION) must be greater than latest version ($LATEST_VERSION)"
+          if [ "$HIGHER" != "$INPUT_VERSION" ]; then
+            echo "::error::Input version ($INPUT_VERSION) must be greater than or equal to latest version ($LATEST_VERSION)"
             exit 1
           fi
 
-          echo "Version check passed: $INPUT_VERSION > $LATEST_VERSION"
+          echo "Version check passed: $INPUT_VERSION >= $LATEST_VERSION"
 
       - name: Update versions
         run: |
@@ -71,7 +77,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add addons/godot-neovim/plugin.cfg Cargo.toml
-          git commit -m "chore: bump version to ${{ inputs.version }}"
+          if git diff --cached --quiet; then
+            echo "No version changes needed (version already set)"
+          else
+            git commit -m "chore: bump version to ${{ inputs.version }}"
+          fi
           echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
       - name: Upload commit as artifact
@@ -186,12 +196,16 @@ jobs:
           cp artifacts/version-commit/Cargo.toml Cargo.toml
           cp artifacts/version-commit/addons/godot-neovim/plugin.cfg addons/godot-neovim/plugin.cfg
 
-          # Commit and push
+          # Commit and push (skip if version already set)
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add addons/godot-neovim/plugin.cfg Cargo.toml
-          git commit -m "chore: bump version to ${{ inputs.version }}"
-          git push origin main
+          if git diff --cached --quiet; then
+            echo "No version changes needed (version already set)"
+          else
+            git commit -m "chore: bump version to ${{ inputs.version }}"
+            git push origin main
+          fi
 
           # Create and push tag for git-cliff
           git tag ${{ inputs.version }}
