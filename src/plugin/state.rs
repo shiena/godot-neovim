@@ -60,6 +60,8 @@ impl GodotNeovimPlugin {
     pub(super) fn clear_last_key(&mut self) {
         self.last_key.clear();
         self.last_key_time = None;
+        // Also clear key sequence display when command completes
+        self.clear_key_sequence_display();
     }
 
     /// Cancel any pending operator in Neovim and clear local state

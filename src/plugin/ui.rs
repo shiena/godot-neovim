@@ -1,7 +1,8 @@
-//! UI-related operations: mode label, status bar, signal connections
+//! UI-related operations: mode label, status bar, signal connections, key sequence display
 
 use super::GodotNeovimPlugin;
-use godot::classes::{Control, EditorInterface, Label};
+use crate::settings;
+use godot::classes::{Control, EditorInterface, Label, StyleBoxFlat};
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
@@ -180,5 +181,159 @@ impl GodotNeovimPlugin {
             editor.disconnect("gui_input", &callable);
             crate::verbose_print!("[godot-neovim] Disconnected from gui_input signal");
         }
+    }
+
+    /// Create and add the key sequence label overlay (verbose mode only)
+    pub(super) fn create_key_sequence_label(&mut self) {
+        // Only create if show_key_sequence is enabled (requires verbose mode)
+        if !settings::get_show_key_sequence() {
+            return;
+        }
+
+        let Some(ref code_edit) = self.current_editor else {
+            return;
+        };
+
+        // Create label as child of CodeEdit for overlay positioning
+        let mut label = Label::new_alloc();
+        label.set_name("NeovimKeySequenceLabel");
+        label.set_text("");
+
+        // Style: white background, white text with black outline
+        let mut style_box = StyleBoxFlat::new_gd();
+        style_box.set_bg_color(Color::from_rgba(1.0, 1.0, 1.0, 0.9));
+        style_box.set_corner_radius_all(4);
+        style_box.set_content_margin_all(8.0);
+        label.add_theme_stylebox_override("normal", &style_box);
+
+        label.add_theme_font_size_override("font_size", 24);
+        label.add_theme_color_override("font_color", Color::from_rgba(1.0, 1.0, 1.0, 1.0));
+        label.add_theme_constant_override("outline_size", 4);
+        label.add_theme_color_override("font_outline_color", Color::from_rgba(0.0, 0.0, 0.0, 1.0));
+
+        // Set anchors to bottom-right
+        label.set_anchors_preset(godot::classes::control::LayoutPreset::BOTTOM_RIGHT);
+        label.set_h_grow_direction(godot::classes::control::GrowDirection::BEGIN);
+        label.set_v_grow_direction(godot::classes::control::GrowDirection::BEGIN);
+
+        // Add offset from corner (adjusted for larger font)
+        label.set_position(Vector2::new(-10.0, -40.0));
+
+        // Start hidden (alpha = 0)
+        label.set_modulate(Color::from_rgba(1.0, 1.0, 1.0, 0.0));
+
+        // Add to CodeEdit
+        code_edit.clone().add_child(&label);
+
+        self.key_sequence_label = Some(label);
+        crate::verbose_print!("[godot-neovim] Key sequence label created");
+    }
+
+    /// Helper to format key sequence with spacing
+    fn format_key_sequence(seq: &str) -> String {
+        seq.chars()
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Update key sequence display with new input
+    pub(super) fn update_key_sequence_display(&mut self, key: &str) {
+        // Only update if show_key_sequence is enabled
+        if !settings::get_show_key_sequence() {
+            return;
+        }
+
+        // Skip in Insert/Replace modes
+        if self.is_insert_mode() || self.is_replace_mode() {
+            return;
+        }
+
+        // Append key to display
+        self.key_sequence_display.push_str(key);
+
+        // Update label with 2-line display (previous + current)
+        if let Some(ref mut label) = self.key_sequence_label {
+            if label.is_instance_valid() {
+                let current_spaced = Self::format_key_sequence(&self.key_sequence_display);
+                let text = if self.key_sequence_previous.is_empty() {
+                    format!(" {} ", current_spaced)
+                } else {
+                    let prev_spaced = Self::format_key_sequence(&self.key_sequence_previous);
+                    format!(" {} \n {} ", prev_spaced, current_spaced)
+                };
+                label.set_text(&text);
+                // Reset to fully visible
+                label.set_modulate(Color::from_rgba(1.0, 1.0, 1.0, 1.0));
+            }
+        }
+
+        // Reset fade timer
+        self.key_sequence_fade_start = None;
+    }
+
+    /// Clear key sequence display and start fade out
+    pub(super) fn clear_key_sequence_display(&mut self) {
+        if self.key_sequence_display.is_empty() {
+            return;
+        }
+
+        // Move current to previous for history display
+        self.key_sequence_previous = std::mem::take(&mut self.key_sequence_display);
+
+        // Update label to show only previous (current is now empty)
+        if let Some(ref mut label) = self.key_sequence_label {
+            if label.is_instance_valid() {
+                let prev_spaced = Self::format_key_sequence(&self.key_sequence_previous);
+                label.set_text(&format!(" {} ", prev_spaced));
+            }
+        }
+
+        // Start fade out
+        self.key_sequence_fade_start = Some(std::time::Instant::now());
+    }
+
+    /// Process key sequence fade animation (call from process())
+    pub(super) fn process_key_sequence_fade(&mut self) {
+        let Some(fade_start) = self.key_sequence_fade_start else {
+            return;
+        };
+
+        let Some(ref mut label) = self.key_sequence_label else {
+            return;
+        };
+
+        if !label.is_instance_valid() {
+            self.key_sequence_label = None;
+            return;
+        }
+
+        // Fade duration: 1000ms (doubled for better visibility)
+        let elapsed = fade_start.elapsed().as_millis() as f32;
+        let fade_duration = 1000.0;
+
+        if elapsed >= fade_duration {
+            // Fade complete - hide label and clear history
+            label.set_modulate(Color::from_rgba(1.0, 1.0, 1.0, 0.0));
+            label.set_text("");
+            self.key_sequence_fade_start = None;
+            self.key_sequence_previous.clear();
+        } else {
+            // Interpolate alpha from 1.0 to 0.0
+            let alpha = 1.0 - (elapsed / fade_duration);
+            label.set_modulate(Color::from_rgba(1.0, 1.0, 1.0, alpha));
+        }
+    }
+
+    /// Cleanup key sequence label
+    pub(super) fn cleanup_key_sequence_label(&mut self) {
+        if let Some(mut label) = self.key_sequence_label.take() {
+            if label.is_instance_valid() {
+                label.queue_free();
+            }
+        }
+        self.key_sequence_display.clear();
+        self.key_sequence_previous.clear();
+        self.key_sequence_fade_start = None;
     }
 }
