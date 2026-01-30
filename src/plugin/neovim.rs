@@ -397,30 +397,37 @@ impl GodotNeovimPlugin {
             return true;
         }
 
-        let Some(ref neovim) = self.neovim else {
-            crate::verbose_print!("[godot-neovim] No neovim");
-            return false;
-        };
+        // Send keys via channel (lock scope limited to channel send only)
+        {
+            let Some(ref neovim) = self.neovim else {
+                crate::verbose_print!("[godot-neovim] No neovim");
+                return false;
+            };
 
-        // Try to get lock - channel send is instant so lock contention is minimal
-        let Ok(client) = neovim.try_lock() else {
-            // Even if lock fails, we can't queue without access to the channel
-            // This should be rare since channel send is non-blocking
-            crate::verbose_print!("[godot-neovim] Mutex busy, key may be lost: {}", keys);
-            return false;
-        };
+            // Try to get lock - channel send is instant so lock contention is minimal
+            let Ok(client) = neovim.try_lock() else {
+                // Even if lock fails, we can't queue without access to the channel
+                // This should be rare since channel send is non-blocking
+                crate::verbose_print!("[godot-neovim] Mutex busy, key may be lost: {}", keys);
+                return false;
+            };
 
-        // Send keys via unbounded channel (never blocks, never drops)
-        if !client.send_key_via_channel(keys) {
-            godot_error!("[godot-neovim] Failed to queue keys via channel");
-            return false;
+            // Send keys via unbounded channel (never blocks, never drops)
+            if !client.send_key_via_channel(keys) {
+                godot_error!("[godot-neovim] Failed to queue keys via channel");
+                return false;
+            }
         }
+        // Lock released here
 
         // Track key send time for no-response detection
         self.last_key_send_time = Some(std::time::Instant::now());
         self.pending_key_count += 1;
 
         crate::verbose_print!("[godot-neovim] Key queued via channel: {}", keys);
+
+        // Update key sequence display (verbose mode only)
+        self.update_key_sequence_display(keys);
 
         // Note: Modified flag sync is now event-driven via BufModifiedSet autocmd
         // No need to set pending_modified_sync here

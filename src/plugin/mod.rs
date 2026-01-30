@@ -315,6 +315,18 @@ pub struct GodotNeovimPlugin {
     /// Number of pending keys without response
     #[init(val = 0)]
     pending_key_count: u32,
+    /// Key sequence display label (verbose mode only, for demo/debug)
+    #[init(val = None)]
+    key_sequence_label: Option<Gd<Label>>,
+    /// Time when key sequence fade started (for alpha animation)
+    #[init(val = None)]
+    key_sequence_fade_start: Option<Instant>,
+    /// Current key sequence string being displayed
+    #[init(val = String::new())]
+    key_sequence_display: String,
+    /// Previous key sequence (shown above current)
+    #[init(val = String::new())]
+    key_sequence_previous: String,
 }
 
 #[godot_api]
@@ -410,6 +422,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
                 label.queue_free();
             }
         }
+
+        // Cleanup key sequence label
+        self.cleanup_key_sequence_label();
 
         // Disconnect from gui_input signal
         self.disconnect_gui_input_signal();
@@ -529,6 +544,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
         // Check for pending updates from Neovim redraw events
         self.process_neovim_updates();
 
+        // Process key sequence fade animation
+        self.process_key_sequence_fade();
+
         // Check for key sequence timeout (like Neovim's timeoutlen)
         // Only applies in Normal mode - Insert/Replace/Visual modes don't use operator-pending
         // If last_key has been pending too long, cancel it
@@ -556,6 +574,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
                     // Also clear related pending states on timeout
                     self.selected_register = None;
                     self.count_buffer.clear();
+
+                    // Clear key sequence display on timeout
+                    self.clear_key_sequence_display();
                 }
             }
         }
@@ -1181,6 +1202,11 @@ impl GodotNeovimPlugin {
         self.current_script_path = current_script_path.clone();
 
         self.reposition_mode_label();
+
+        // Create key sequence label if enabled (verbose mode only)
+        // Cleanup existing label first in case of script switch
+        self.cleanup_key_sequence_label();
+        self.create_key_sequence_label();
 
         // Switch to Neovim buffer for this file (creates if not exists)
         // Returns cursor position from Neovim and whether buffer was newly created

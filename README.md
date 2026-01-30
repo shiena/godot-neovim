@@ -153,6 +153,10 @@ All settings are available in `Editor > Editor Settings > Godot Neovim`.
 
 > **Note**: You need to enable **"Advanced Settings"** toggle in the Editor Settings to see the `godot_neovim` section.
 
+<p align="center">
+  <img src=".github/media/godot-neovim-settings.png" alt="godot-neovim settings" width="800">
+</p>
+
 | Setting | Description | Default |
 |---------|-------------|---------|
 | Neovim Executable Path | Path to Neovim executable. The plugin validates this path on startup. | `nvim.exe` (Windows) / `nvim` (macOS/Linux) |
