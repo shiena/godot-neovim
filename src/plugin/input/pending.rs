@@ -259,12 +259,16 @@ impl GodotNeovimPlugin {
         }
 
         // Get the character
-        // Valid registers: a-z (named), + and * (clipboard), _ (black hole), 0 (yank)
+        // Valid registers: a-z (named), " (unnamed), + and * (clipboard), _ (black hole), 0 (yank)
         let unicode = key_event.get_unicode();
         if unicode > 0 {
             if let Some(c) = char::from_u32(unicode) {
-                let is_valid_register =
-                    c.is_ascii_lowercase() || c == '+' || c == '*' || c == '_' || c == '0';
+                let is_valid_register = c.is_ascii_lowercase()
+                    || c == '"'
+                    || c == '+'
+                    || c == '*'
+                    || c == '_'
+                    || c == '0';
                 if is_valid_register {
                     self.selected_register = Some(c);
                     crate::verbose_print!("[godot-neovim] \"{}: Register selected", c);
