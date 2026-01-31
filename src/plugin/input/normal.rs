@@ -471,26 +471,9 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Handle 'cc' for substitute line (same as S)
-        // Neovim Master: wait locally for complete command, then send to Neovim
-        // (Don't send partial 'c' to avoid Neovim pending state mismatch on Esc)
-        if keycode == Key::C && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
-            if self.last_key == "c" {
-                self.send_keys("cc"); // Send complete 'cc' to Neovim
-                self.clear_last_key();
-                if let Some(mut viewport) = self.base().get_viewport() {
-                    viewport.set_input_as_handled();
-                }
-                return;
-            } else {
-                self.set_last_key("c");
-                // Don't send to Neovim yet - wait for second 'c' or other motion
-                if let Some(mut viewport) = self.base().get_viewport() {
-                    viewport.set_input_as_handled();
-                }
-                return;
-            }
-        }
+        // 'c' operator: send directly to Neovim for proper operator-pending mode
+        // This allows 'ci(', 'cw', 'cc', etc. to work correctly
+        // Neovim handles operator-pending mode and text objects natively
 
         // Handle 'r' for replace char
         if keycode == Key::R && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
@@ -532,7 +515,13 @@ impl GodotNeovimPlugin {
         }
 
         // Handle '\'' (single quote) for jump to mark line
-        if unicode_char == Some('\'') && !key_event.is_ctrl_pressed() {
+        // Skip if in operator-pending mode (e.g., ci' should send ' to Neovim as text object)
+        // Skip if in visual mode (e.g., vi' should select inside quotes)
+        if unicode_char == Some('\'')
+            && !key_event.is_ctrl_pressed()
+            && self.current_mode != "operator"
+            && !Self::is_visual_mode(&self.current_mode)
+        {
             self.clear_pending_input_states();
             self.pending_mark_op = Some('\'');
             if let Some(mut viewport) = self.base().get_viewport() {
@@ -542,7 +531,13 @@ impl GodotNeovimPlugin {
         }
 
         // Handle '`' (backtick) for jump to mark position
-        if unicode_char == Some('`') && !key_event.is_ctrl_pressed() {
+        // Skip if in operator-pending mode (e.g., ci` should send ` to Neovim as text object)
+        // Skip if in visual mode (e.g., vi` should select inside backticks)
+        if unicode_char == Some('`')
+            && !key_event.is_ctrl_pressed()
+            && self.current_mode != "operator"
+            && !Self::is_visual_mode(&self.current_mode)
+        {
             self.clear_pending_input_states();
             self.pending_mark_op = Some('`');
             if let Some(mut viewport) = self.base().get_viewport() {
@@ -582,7 +577,13 @@ impl GodotNeovimPlugin {
         }
 
         // Handle '"' for register selection
-        if unicode_char == Some('"') && !key_event.is_ctrl_pressed() {
+        // Skip if in operator-pending mode (e.g., ci" should send " to Neovim as text object)
+        // Skip if in visual mode (e.g., vi" should select inside quotes)
+        if unicode_char == Some('"')
+            && !key_event.is_ctrl_pressed()
+            && self.current_mode != "operator"
+            && !Self::is_visual_mode(&self.current_mode)
+        {
             // Use '\0' as marker for "waiting for register char"
             self.clear_pending_input_states();
             // Clear last_key to prevent timeout from clearing selected_register
@@ -1077,7 +1078,7 @@ impl GodotNeovimPlugin {
                         }
                         return;
                     } else {
-                        // First d - wait for second
+                        // First d - wait for second or motion
                         self.set_last_key("d");
                         if let Some(mut viewport) = self.base().get_viewport() {
                             viewport.set_input_as_handled();
@@ -1086,8 +1087,93 @@ impl GodotNeovimPlugin {
                     }
                 }
 
+                // Handle register-aware cc (change line)
+                // Neovim Master: send to Neovim for proper undo/register integration
+                if keycode == Key::C
+                    && !key_event.is_shift_pressed()
+                    && !key_event.is_ctrl_pressed()
+                {
+                    if self.last_key == "c" {
+                        // cc - change line(s) and store in register
+                        let count = self.get_and_clear_count();
+                        let count_str = if count > 1 {
+                            count.to_string()
+                        } else {
+                            String::new()
+                        };
+                        self.send_keys(&format!("\"{}{}cc", reg, count_str));
+                        self.selected_register = None;
+                        self.clear_last_key();
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    } else {
+                        // First c - wait for second or motion
+                        self.set_last_key("c");
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    }
+                }
+
+                // Handle operator + motion/text object with register (e.g., "adi(, "ayi(, "aci()
+                // When last_key is an operator (y/d) and current key is a motion/text object,
+                // send the full command to Neovim
+                if let Some(keys) = self.key_event_to_nvim_string(key_event) {
+                    if self.last_key == "y" && keycode != Key::Y {
+                        // y + motion (e.g., yi(, yw, y$)
+                        let count = self.get_and_clear_count();
+                        let count_str = if count > 1 {
+                            count.to_string()
+                        } else {
+                            String::new()
+                        };
+                        self.send_keys(&format!("\"{}{}y{}", reg, count_str, keys));
+                        self.selected_register = None;
+                        self.clear_last_key();
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    }
+                    if self.last_key == "d" && keycode != Key::D {
+                        // d + motion (e.g., di(, dw, d$)
+                        let count = self.get_and_clear_count();
+                        let count_str = if count > 1 {
+                            count.to_string()
+                        } else {
+                            String::new()
+                        };
+                        self.send_keys(&format!("\"{}{}d{}", reg, count_str, keys));
+                        self.selected_register = None;
+                        self.clear_last_key();
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    }
+                    if self.last_key == "c" && keycode != Key::C {
+                        // c + motion (e.g., ci(, cw, c$)
+                        let count = self.get_and_clear_count();
+                        let count_str = if count > 1 {
+                            count.to_string()
+                        } else {
+                            String::new()
+                        };
+                        self.send_keys(&format!("\"{}{}c{}", reg, count_str, keys));
+                        self.selected_register = None;
+                        self.clear_last_key();
+                        if let Some(mut viewport) = self.base().get_viewport() {
+                            viewport.set_input_as_handled();
+                        }
+                        return;
+                    }
+                }
+
                 // Other keys cancel register selection
-                if keycode != Key::Y && keycode != Key::D {
+                if keycode != Key::Y && keycode != Key::D && keycode != Key::C {
                     self.selected_register = None;
                     self.count_buffer.clear();
                 }
