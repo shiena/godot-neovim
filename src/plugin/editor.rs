@@ -176,7 +176,10 @@ impl GodotNeovimPlugin {
                 );
                 self.current_editor_type = EditorType::Shader;
                 // Don't set current_editor for ShaderEditor to prevent Neovim sync
-                // In the future, we may support shader editing
+                // Update display to show SHADER mode
+                self.update_shader_mode_display();
+                // Note: In the future, we may support shader editing with proper
+                // buffer management. For now, let Godot handle shader editing natively.
             } else {
                 crate::verbose_print!("[godot-neovim] Found focused CodeEdit (direct)");
                 self.current_editor = Some(code_edit);
@@ -459,6 +462,7 @@ impl GodotNeovimPlugin {
             if self.is_code_edit_in_shader_editor(&focused_code_edit) {
                 // ShaderEditor has focus - update type but don't activate for Neovim
                 self.current_editor_type = EditorType::Shader;
+                self.update_shader_mode_display();
                 crate::verbose_print!(
                     "[godot-neovim] ShaderEditor has focus - not intercepting input"
                 );

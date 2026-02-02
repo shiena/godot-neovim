@@ -179,4 +179,23 @@ impl GodotNeovimPlugin {
         // White color for version display
         label.add_theme_color_override("font_color", Color::from_rgb(1.0, 1.0, 1.0));
     }
+
+    /// Update status label to show "SHADER" mode (when ShaderEditor is focused)
+    /// This indicates that the plugin is not intercepting input and Godot is handling editing
+    pub(super) fn update_shader_mode_display(&mut self) {
+        let Some(ref mut label) = self.mode_label else {
+            return;
+        };
+
+        // Check if label is still valid
+        if !label.is_instance_valid() {
+            self.mode_label = None;
+            return;
+        }
+
+        let display_text = " SHADER (native) ";
+        label.set_text(display_text);
+        // Gray color to indicate passive mode
+        label.add_theme_color_override("font_color", Color::from_rgb(0.6, 0.6, 0.6));
+    }
 }
