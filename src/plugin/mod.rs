@@ -6,6 +6,7 @@ const VERSION: &str = env!("BUILD_VERSION");
 mod commands;
 mod editing;
 mod editor;
+pub(crate) mod filetype;
 mod input;
 mod keys;
 mod macros;
@@ -43,6 +44,8 @@ pub enum EditorType {
     Script,
     /// ShaderEditor (gdshader)
     Shader,
+    /// TextFile editor (txt, md, json, etc.)
+    TextFile,
     /// Unknown or no editor
     Unknown,
 }

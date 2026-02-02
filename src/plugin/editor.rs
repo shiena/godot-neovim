@@ -1,7 +1,7 @@
 //! Editor management: finding CodeEdit, script change handling
 
 use super::{EditorType, GodotNeovimPlugin};
-use godot::classes::{CodeEdit, Control, EditorInterface, Window};
+use godot::classes::{CodeEdit, Control, EditorInterface, Resource, Window};
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
@@ -169,17 +169,18 @@ impl GodotNeovimPlugin {
         if let Some(code_edit) = self.get_focused_code_edit_direct() {
             // Check if this CodeEdit is in ShaderEditor
             if self.is_code_edit_in_shader_editor(&code_edit) {
-                // ShaderEditor detected - record the type but don't sync with Neovim yet
-                // This allows us to track editor focus correctly without corrupting buffers
+                // ShaderEditor detected - enable Neovim integration for shaders
                 crate::verbose_print!(
-                    "[godot-neovim] Found focused CodeEdit in ShaderEditor - tracking but not syncing"
+                    "[godot-neovim] Found focused CodeEdit in ShaderEditor - enabling Neovim integration"
                 );
+                self.current_editor = Some(code_edit.clone());
                 self.current_editor_type = EditorType::Shader;
-                // Don't set current_editor for ShaderEditor to prevent Neovim sync
-                // Update display to show SHADER mode
-                self.update_shader_mode_display();
-                // Note: In the future, we may support shader editing with proper
-                // buffer management. For now, let Godot handle shader editing natively.
+
+                // Try to get shader path from the editor hierarchy
+                if let Some(path) = self.get_shader_path_from_code_edit(&code_edit) {
+                    crate::verbose_print!("[godot-neovim] Shader path: {}", path);
+                    self.current_script_path = path;
+                }
             } else {
                 crate::verbose_print!("[godot-neovim] Found focused CodeEdit (direct)");
                 self.current_editor = Some(code_edit);
@@ -434,6 +435,41 @@ impl GodotNeovimPlugin {
         false
     }
 
+    /// Get shader resource path from CodeEdit by traversing parent hierarchy
+    /// Returns the shader file path (res://...) if found
+    fn get_shader_path_from_code_edit(&self, code_edit: &Gd<CodeEdit>) -> Option<String> {
+        let mut current: Option<Gd<godot::classes::Node>> = code_edit.get_parent();
+
+        while let Some(mut node) = current {
+            let class_name = node.get_class().to_string();
+
+            // TextShaderEditor has get_edited_shader() method
+            if class_name == "TextShaderEditor" {
+                // Try to call get_edited_shader() via Godot's call mechanism
+                // This returns a Shader resource which has get_path()
+                let result = node.call("get_edited_shader", &[]);
+                if let Ok(shader) = result.try_to::<Gd<Resource>>() {
+                    let path = shader.get_path().to_string();
+                    if !path.is_empty() {
+                        return Some(path);
+                    }
+                }
+
+                // Try get_edited_shader_include() for .gdshaderinc files
+                let result_inc = node.call("get_edited_shader_include", &[]);
+                if let Ok(shader_inc) = result_inc.try_to::<Gd<Resource>>() {
+                    let path = shader_inc.get_path().to_string();
+                    if !path.is_empty() {
+                        return Some(path);
+                    }
+                }
+            }
+
+            current = node.get_parent();
+        }
+        None
+    }
+
     /// Check if editor has focus, updating current_editor if a different CodeEdit has focus
     pub(super) fn editor_has_focus(&mut self) -> bool {
         // First check if current_editor has focus
@@ -460,13 +496,20 @@ impl GodotNeovimPlugin {
         if let Some(focused_code_edit) = self.get_focused_code_edit_direct() {
             // Check if this CodeEdit is in ShaderEditor
             if self.is_code_edit_in_shader_editor(&focused_code_edit) {
-                // ShaderEditor has focus - update type but don't activate for Neovim
+                // ShaderEditor has focus - enable Neovim integration for shaders
+                self.current_editor = Some(focused_code_edit.clone());
                 self.current_editor_type = EditorType::Shader;
-                self.update_shader_mode_display();
-                crate::verbose_print!(
-                    "[godot-neovim] ShaderEditor has focus - not intercepting input"
-                );
-                return false;
+
+                // Try to get shader path
+                if let Some(path) = self.get_shader_path_from_code_edit(&focused_code_edit) {
+                    crate::verbose_print!("[godot-neovim] ShaderEditor has focus, path: {}", path);
+                    self.current_script_path = path;
+                }
+
+                self.connect_caret_changed_signal();
+                self.connect_resized_signal();
+                self.update_float_window_connection();
+                return true;
             }
 
             // Check if this is a different CodeEdit

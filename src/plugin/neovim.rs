@@ -84,10 +84,13 @@ impl GodotNeovimPlugin {
                 self.sync_manager.set_attached(result.attached);
                 self.sync_manager.set_line_count(nvim_line_count);
 
-                // Set filetype for syntax highlighting
+                // Set filetype for syntax highlighting based on file extension
                 // This must be done BEFORE setting indent options, because filetype plugins
                 // may override buffer-local indent settings
-                let _ = client.command("set filetype=gdscript");
+                let filetype = super::filetype::detect_filetype(&abs_path);
+                let filetype_cmd = format!("set filetype={}", filetype);
+                let _ = client.command(&filetype_cmd);
+                crate::verbose_print!("[godot-neovim] Set filetype={}", filetype);
 
                 // Set indent options AFTER filetype to prevent filetype plugins from overriding them
                 crate::verbose_print!(
