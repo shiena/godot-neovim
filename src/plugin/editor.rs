@@ -1,6 +1,6 @@
 //! Editor management: finding CodeEdit, script change handling
 
-use super::GodotNeovimPlugin;
+use super::{EditorType, GodotNeovimPlugin};
 use godot::classes::{CodeEdit, Control, EditorInterface, Window};
 use godot::prelude::*;
 
@@ -160,26 +160,32 @@ impl GodotNeovimPlugin {
     pub(super) fn find_current_code_edit(&mut self) {
         // Clear the reference first to avoid use-after-free when script is closed
         self.current_editor = None;
+        self.current_editor_type = EditorType::Unknown;
 
         let editor = EditorInterface::singleton();
 
         // First, try to get the focused CodeEdit directly via gui_get_focus_owner
         // This works for both docked and floating windows
         if let Some(code_edit) = self.get_focused_code_edit_direct() {
-            // Check if this CodeEdit is in ShaderEditor - if so, skip it for now
-            // ShaderEditor is not yet fully supported (issue #40)
+            // Check if this CodeEdit is in ShaderEditor
             if self.is_code_edit_in_shader_editor(&code_edit) {
+                // ShaderEditor detected - record the type but don't sync with Neovim yet
+                // This allows us to track editor focus correctly without corrupting buffers
                 crate::verbose_print!(
-                    "[godot-neovim] Found focused CodeEdit in ShaderEditor - skipping (not yet supported)"
+                    "[godot-neovim] Found focused CodeEdit in ShaderEditor - tracking but not syncing"
                 );
+                self.current_editor_type = EditorType::Shader;
+                // Don't set current_editor for ShaderEditor to prevent Neovim sync
+                // In the future, we may support shader editing
             } else {
                 crate::verbose_print!("[godot-neovim] Found focused CodeEdit (direct)");
                 self.current_editor = Some(code_edit);
+                self.current_editor_type = EditorType::Script;
             }
         }
 
         // If not found via direct focus, try ScriptEditor
-        if self.current_editor.is_none() {
+        if self.current_editor.is_none() && self.current_editor_type != EditorType::Shader {
             if let Some(script_editor) = editor.get_script_editor() {
                 // Try to find the currently focused CodeEdit by traversing ScriptEditor
                 if let Some(code_edit) =
@@ -187,6 +193,7 @@ impl GodotNeovimPlugin {
                 {
                     crate::verbose_print!("[godot-neovim] Found focused CodeEdit in ScriptEditor");
                     self.current_editor = Some(code_edit);
+                    self.current_editor_type = EditorType::Script;
                 } else if let Some(code_edit) =
                     self.find_visible_code_edit_safe(script_editor.upcast::<Control>())
                 {
@@ -195,6 +202,7 @@ impl GodotNeovimPlugin {
                         "[godot-neovim] Found visible CodeEdit in ScriptEditor (safe fallback)"
                     );
                     self.current_editor = Some(code_edit);
+                    self.current_editor_type = EditorType::Script;
                 }
             }
         }
@@ -212,6 +220,11 @@ impl GodotNeovimPlugin {
                 ed.set_selecting_enabled(false);
             }
         }
+    }
+
+    /// Check if a ShaderEditor is currently focused (even if not syncing)
+    pub(super) fn is_shader_editor_focused(&self) -> bool {
+        self.current_editor_type == EditorType::Shader
     }
 
     /// Try to get focused CodeEdit directly from any window's viewport
@@ -442,6 +455,16 @@ impl GodotNeovimPlugin {
         // This handles the case when the editor is floated to a different window
         crate::verbose_print!("[godot-neovim] Searching for focused CodeEdit in all windows...");
         if let Some(focused_code_edit) = self.get_focused_code_edit_direct() {
+            // Check if this CodeEdit is in ShaderEditor
+            if self.is_code_edit_in_shader_editor(&focused_code_edit) {
+                // ShaderEditor has focus - update type but don't activate for Neovim
+                self.current_editor_type = EditorType::Shader;
+                crate::verbose_print!(
+                    "[godot-neovim] ShaderEditor has focus - not intercepting input"
+                );
+                return false;
+            }
+
             // Check if this is a different CodeEdit
             let is_different = match &self.current_editor {
                 Some(current) => current.instance_id() != focused_code_edit.instance_id(),
@@ -453,6 +476,7 @@ impl GodotNeovimPlugin {
                     "[godot-neovim] Switching to focused CodeEdit (float/dock change)"
                 );
                 self.current_editor = Some(focused_code_edit);
+                self.current_editor_type = EditorType::Script;
                 self.connect_caret_changed_signal();
                 self.connect_resized_signal();
                 self.reposition_mode_label();

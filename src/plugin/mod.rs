@@ -35,6 +35,18 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
 
+/// Type of editor currently active
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum EditorType {
+    /// ScriptEditor (GDScript, C#, etc.)
+    #[default]
+    Script,
+    /// ShaderEditor (gdshader)
+    Shader,
+    /// Unknown or no editor
+    Unknown,
+}
+
 /// Help query for goto_help()
 #[derive(Debug, Clone)]
 pub struct HelpQuery {
@@ -109,6 +121,9 @@ pub struct GodotNeovimPlugin {
     mode_label: Option<Gd<Label>>,
     #[init(val = None)]
     current_editor: Option<Gd<CodeEdit>>,
+    /// Type of the current editor (Script, Shader, Unknown)
+    #[init(val = EditorType::Unknown)]
+    current_editor_type: EditorType,
     /// Current mode cached from last update
     #[init(val = String::from("n"))]
     current_mode: String,
