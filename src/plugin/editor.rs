@@ -166,21 +166,36 @@ impl GodotNeovimPlugin {
         // First, try to get the focused CodeEdit directly via gui_get_focus_owner
         // This works for both docked and floating windows
         if let Some(code_edit) = self.get_focused_code_edit_direct() {
-            crate::verbose_print!("[godot-neovim] Found focused CodeEdit (direct)");
-            self.current_editor = Some(code_edit);
-        } else if let Some(script_editor) = editor.get_script_editor() {
-            // Try to find the currently focused CodeEdit by traversing ScriptEditor
-            if let Some(code_edit) =
-                self.find_focused_code_edit(script_editor.clone().upcast::<Control>())
-            {
-                crate::verbose_print!("[godot-neovim] Found focused CodeEdit");
+            // Check if this CodeEdit is in ShaderEditor - if so, skip it for now
+            // ShaderEditor is not yet fully supported (issue #40)
+            if self.is_code_edit_in_shader_editor(&code_edit) {
+                crate::verbose_print!(
+                    "[godot-neovim] Found focused CodeEdit in ShaderEditor - skipping (not yet supported)"
+                );
+            } else {
+                crate::verbose_print!("[godot-neovim] Found focused CodeEdit (direct)");
                 self.current_editor = Some(code_edit);
-            } else if let Some(code_edit) =
-                self.find_visible_code_edit(script_editor.upcast::<Control>())
-            {
-                // Fallback: find visible CodeEdit
-                crate::verbose_print!("[godot-neovim] Found visible CodeEdit");
-                self.current_editor = Some(code_edit);
+            }
+        }
+
+        // If not found via direct focus, try ScriptEditor
+        if self.current_editor.is_none() {
+            if let Some(script_editor) = editor.get_script_editor() {
+                // Try to find the currently focused CodeEdit by traversing ScriptEditor
+                if let Some(code_edit) =
+                    self.find_focused_code_edit(script_editor.clone().upcast::<Control>())
+                {
+                    crate::verbose_print!("[godot-neovim] Found focused CodeEdit in ScriptEditor");
+                    self.current_editor = Some(code_edit);
+                } else if let Some(code_edit) =
+                    self.find_visible_code_edit_safe(script_editor.upcast::<Control>())
+                {
+                    // Fallback: find visible CodeEdit, but verify it's the active one
+                    crate::verbose_print!(
+                        "[godot-neovim] Found visible CodeEdit in ScriptEditor (safe fallback)"
+                    );
+                    self.current_editor = Some(code_edit);
+                }
             }
         }
 
@@ -316,7 +331,7 @@ impl GodotNeovimPlugin {
         None
     }
 
-    /// Recursively find visible CodeEdit
+    /// Recursively find visible CodeEdit (legacy - use find_visible_code_edit_safe instead)
     pub(super) fn find_visible_code_edit(&self, node: Gd<Control>) -> Option<Gd<CodeEdit>> {
         // Check if this node is a visible CodeEdit
         if let Ok(code_edit) = node.clone().try_cast::<CodeEdit>() {
@@ -338,6 +353,69 @@ impl GodotNeovimPlugin {
         }
 
         None
+    }
+
+    /// Safely find visible CodeEdit within ScriptEditor only
+    /// This version verifies the CodeEdit matches the current script to avoid
+    /// returning the wrong editor when multiple editors are open (issue #40)
+    pub(super) fn find_visible_code_edit_safe(&self, node: Gd<Control>) -> Option<Gd<CodeEdit>> {
+        let editor = EditorInterface::singleton();
+        let mut script_editor = editor.get_script_editor()?;
+        let current_script = script_editor.get_current_script()?;
+        let expected_path = current_script.get_path().to_string();
+
+        if expected_path.is_empty() {
+            return None;
+        }
+
+        // Find the CodeEdit
+        let code_edit = self.find_visible_code_edit(node)?;
+
+        // Verify: the CodeEdit should be in a visible tab that corresponds to current script
+        // Get the first line and compare with script content
+        let editor_first_line = if code_edit.get_line_count() > 0 {
+            code_edit.get_line(0).to_string()
+        } else {
+            String::new()
+        };
+
+        let script_source = current_script.get_source_code().to_string();
+        let script_first_line = script_source.lines().next().unwrap_or("");
+
+        // If content matches, this is likely the correct CodeEdit
+        if editor_first_line.trim() == script_first_line.trim() {
+            crate::verbose_print!(
+                "[godot-neovim] find_visible_code_edit_safe: content matches for '{}'",
+                expected_path
+            );
+            Some(code_edit)
+        } else {
+            crate::verbose_print!(
+                "[godot-neovim] find_visible_code_edit_safe: content mismatch, skipping"
+            );
+            None
+        }
+    }
+
+    /// Check if a CodeEdit is inside ShaderEditor hierarchy
+    /// Returns true if the CodeEdit's ancestor contains "ShaderEditor" or "TextShaderEditor"
+    fn is_code_edit_in_shader_editor(&self, code_edit: &Gd<CodeEdit>) -> bool {
+        let mut current: Option<Gd<godot::classes::Node>> = code_edit.get_parent();
+
+        while let Some(node) = current {
+            let class_name = node.get_class().to_string();
+            // Check for shader-related class names
+            // TextShaderEditor, ShaderTextEditor, ShaderEditor
+            if class_name.contains("Shader") {
+                crate::verbose_print!(
+                    "[godot-neovim] CodeEdit is in shader hierarchy: {}",
+                    class_name
+                );
+                return true;
+            }
+            current = node.get_parent();
+        }
+        false
     }
 
     /// Check if editor has focus, updating current_editor if a different CodeEdit has focus
