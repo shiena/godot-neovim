@@ -1,7 +1,7 @@
 //! Buffer/tab navigation: :bn, :bp, gt, gT, :{n}
 
-use super::super::GodotNeovimPlugin;
-use godot::classes::{EditorInterface, Input, InputEventKey};
+use super::super::{EditorType, GodotNeovimPlugin};
+use godot::classes::{CodeEdit, EditorInterface, Input, InputEventKey, TabBar};
 use godot::global::Key;
 use godot::prelude::*;
 
@@ -27,6 +27,12 @@ impl GodotNeovimPlugin {
 
     /// Switch script tab by offset (1 = next, -1 = previous)
     fn switch_script_tab(&mut self, offset: i32) {
+        // Check if we're in ShaderEditor - if so, switch shader tabs instead
+        if self.current_editor_type == EditorType::Shader {
+            self.switch_shader_tab(offset);
+            return;
+        }
+
         let mut editor = EditorInterface::singleton();
         let Some(mut script_editor) = editor.get_script_editor() else {
             return;
@@ -51,12 +57,10 @@ impl GodotNeovimPlugin {
 
         let mut current_idx: i32 = 0;
         for i in 0..count {
-            if let Some(script_var) = open_scripts.get(i as usize) {
-                if let Ok(script) = script_var.try_cast::<godot::classes::Script>() {
-                    if script.get_path().to_string() == current_path {
-                        current_idx = i;
-                        break;
-                    }
+            if let Some(script) = open_scripts.get(i as usize) {
+                if script.get_path().to_string() == current_path {
+                    current_idx = i;
+                    break;
                 }
             }
         }
@@ -65,19 +69,120 @@ impl GodotNeovimPlugin {
         let new_idx = ((current_idx + offset) % count + count) % count;
 
         // Get the target script and switch using call_deferred
-        if let Some(script_var) = open_scripts.get(new_idx as usize) {
-            if let Ok(script) = script_var.try_cast::<godot::classes::Script>() {
-                let new_path = script.get_path().to_string();
-                crate::verbose_print!(
-                    "[godot-neovim] Tab switch: {} -> {} ({})",
-                    current_idx,
-                    new_idx,
-                    new_path
-                );
-                // Use call_deferred to avoid blocking during input handling
-                editor.call_deferred("edit_script", &[script.to_variant()]);
-            }
+        if let Some(script) = open_scripts.get(new_idx as usize) {
+            let new_path = script.get_path().to_string();
+            crate::verbose_print!(
+                "[godot-neovim] Tab switch: {} -> {} ({})",
+                current_idx,
+                new_idx,
+                new_path
+            );
+            // Use call_deferred to avoid blocking during input handling
+            editor.call_deferred("edit_script", &[script.to_variant()]);
         }
+    }
+
+    /// Switch shader tab by offset (1 = next, -1 = previous)
+    /// Finds TabBar in ShaderEditor hierarchy and switches tabs
+    fn switch_shader_tab(&mut self, offset: i32) {
+        let Some(ref code_edit) = self.current_editor else {
+            crate::verbose_print!("[godot-neovim] switch_shader_tab: no current editor");
+            return;
+        };
+
+        // Find TabBar by traversing up from CodeEdit
+        let mut current: Option<Gd<godot::classes::Node>> = code_edit.get_parent();
+        let mut tab_bar: Option<Gd<TabBar>> = None;
+
+        while let Some(mut node) = current {
+            // Look for TabBar as a sibling or child in the hierarchy
+            // ShaderEditor structure: ShaderEditorPlugin > HSplitContainer > TabContainer > TextShaderEditor
+            // TabBar is usually a child of TabContainer
+            let class_name = node.get_class().to_string();
+
+            if class_name == "TabContainer" {
+                // TabContainer has a TabBar as its first child typically
+                // We can use TabContainer's methods directly
+                let tab_count = node.call("get_tab_count", &[]);
+                let current_tab = node.call("get_current_tab", &[]);
+
+                if let (Ok(count), Ok(current_idx)) =
+                    (tab_count.try_to::<i32>(), current_tab.try_to::<i32>())
+                {
+                    if count <= 1 {
+                        crate::verbose_print!(
+                            "[godot-neovim] switch_shader_tab: only {} tab(s) open",
+                            count
+                        );
+                        return;
+                    }
+
+                    // Calculate new index with wrapping
+                    let new_idx = ((current_idx + offset) % count + count) % count;
+
+                    crate::verbose_print!(
+                        "[godot-neovim] Shader tab switch: {} -> {} (of {})",
+                        current_idx,
+                        new_idx,
+                        count
+                    );
+
+                    // Switch tabs
+                    node.call("set_current_tab", &[new_idx.to_variant()]);
+
+                    // Get the new tab's content and find CodeEdit to grab focus
+                    let tab_control = node.call("get_tab_control", &[new_idx.to_variant()]);
+                    if let Ok(control) = tab_control.try_to::<Gd<godot::classes::Control>>() {
+                        // Find CodeEdit in the new tab and grab focus
+                        if let Some(code_edit) =
+                            self.find_code_edit_in_control(control.clone().upcast())
+                        {
+                            crate::verbose_print!(
+                                "[godot-neovim] Grabbing focus on new shader tab's CodeEdit"
+                            );
+                            let mut ce = code_edit;
+                            ce.call_deferred("grab_focus", &[]);
+                        }
+                    }
+                    return;
+                }
+            }
+
+            // Also check for TabBar directly
+            if let Ok(tb) = node.clone().try_cast::<TabBar>() {
+                tab_bar = Some(tb);
+                break;
+            }
+
+            current = node.get_parent();
+        }
+
+        // If we found a TabBar directly, use it
+        if let Some(mut tb) = tab_bar {
+            let count = tb.get_tab_count();
+            if count <= 1 {
+                crate::verbose_print!(
+                    "[godot-neovim] switch_shader_tab: only {} tab(s) open",
+                    count
+                );
+                return;
+            }
+
+            let current_idx = tb.get_current_tab();
+            let new_idx = ((current_idx + offset) % count + count) % count;
+
+            crate::verbose_print!(
+                "[godot-neovim] Shader tab switch (TabBar): {} -> {} (of {})",
+                current_idx,
+                new_idx,
+                count
+            );
+
+            tb.call_deferred("set_current_tab", &[new_idx.to_variant()]);
+            return;
+        }
+
+        crate::verbose_print!("[godot-neovim] switch_shader_tab: TabBar/TabContainer not found");
     }
 
     /// Start backward search (? command) - opens Godot's search dialog
@@ -134,22 +239,20 @@ impl GodotNeovimPlugin {
         let neovim_normalized = neovim_path.replace('\\', "/");
 
         for i in 0..open_scripts.len() {
-            if let Some(script_var) = open_scripts.get(i) {
-                if let Ok(script) = script_var.try_cast::<godot::classes::Script>() {
-                    let res_path = script.get_path().to_string();
-                    let abs_path =
-                        godot::classes::ProjectSettings::singleton().globalize_path(&res_path);
-                    let abs_str = abs_path.to_string().replace('\\', "/");
+            if let Some(script) = open_scripts.get(i) {
+                let res_path = script.get_path().to_string();
+                let abs_path =
+                    godot::classes::ProjectSettings::singleton().globalize_path(&res_path);
+                let abs_str = abs_path.to_string().replace('\\', "/");
 
-                    if abs_str == neovim_normalized {
-                        crate::verbose_print!(
-                            "[godot-neovim] BufEnter: Switching Godot tab to {}",
-                            res_path
-                        );
-                        // Use call_deferred to avoid issues during event processing
-                        editor.call_deferred("edit_script", &[script.to_variant()]);
-                        return;
-                    }
+                if abs_str == neovim_normalized {
+                    crate::verbose_print!(
+                        "[godot-neovim] BufEnter: Switching Godot tab to {}",
+                        res_path
+                    );
+                    // Use call_deferred to avoid issues during event processing
+                    editor.call_deferred("edit_script", &[script.to_variant()]);
+                    return;
                 }
             }
         }
@@ -158,5 +261,24 @@ impl GodotNeovimPlugin {
             "[godot-neovim] BufEnter: No matching Godot script for {}",
             neovim_path
         );
+    }
+
+    /// Find CodeEdit recursively within a control hierarchy
+    fn find_code_edit_in_control(&self, control: Gd<godot::classes::Node>) -> Option<Gd<CodeEdit>> {
+        // Check if this node is a CodeEdit
+        if let Ok(code_edit) = control.clone().try_cast::<CodeEdit>() {
+            return Some(code_edit);
+        }
+
+        // Recursively search children
+        for i in 0..control.get_child_count() {
+            if let Some(child) = control.get_child(i) {
+                if let Some(code_edit) = self.find_code_edit_in_control(child) {
+                    return Some(code_edit);
+                }
+            }
+        }
+
+        None
     }
 }

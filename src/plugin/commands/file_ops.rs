@@ -1,7 +1,7 @@
 //! File operations: :w, :wa, :q, :qa, :e, :e!, ZZ, ZQ
 //! Also handles forwarding Ex commands to Neovim
 
-use super::super::GodotNeovimPlugin;
+use super::super::{EditorType, GodotNeovimPlugin};
 use godot::classes::{EditorInterface, Input, InputEventKey, MenuButton, ResourceSaver};
 use godot::global::Key;
 use godot::prelude::*;
@@ -384,6 +384,12 @@ impl GodotNeovimPlugin {
             }
         }
 
+        // Handle ShaderEditor differently - close via TabContainer
+        if self.current_editor_type == EditorType::Shader {
+            self.close_shader_tab();
+            return;
+        }
+
         // Don't clear current_editor here - if user cancels the save dialog,
         // the script stays open and we need to keep the reference.
         // When the script actually closes, on_script_changed will handle cleanup.
@@ -403,6 +409,29 @@ impl GodotNeovimPlugin {
         Input::singleton().parse_input_event(&key_release);
 
         crate::verbose_print!("[godot-neovim] :q - Close triggered (Ctrl+W)");
+    }
+
+    /// Close the current shader tab using Ctrl+W (same as ScriptEditor)
+    /// ShaderEditor also responds to Ctrl+W when it has focus
+    fn close_shader_tab(&mut self) {
+        // Clear current editor before closing
+        self.current_editor = None;
+        self.current_editor_type = EditorType::Unknown;
+
+        // Use Ctrl+W to close the shader tab - Godot's ShaderEditor handles this
+        let mut key_press = InputEventKey::new_gd();
+        key_press.set_keycode(Key::W);
+        key_press.set_ctrl_pressed(true);
+        key_press.set_pressed(true);
+        Input::singleton().parse_input_event(&key_press);
+
+        let mut key_release = InputEventKey::new_gd();
+        key_release.set_keycode(Key::W);
+        key_release.set_ctrl_pressed(true);
+        key_release.set_pressed(false);
+        Input::singleton().parse_input_event(&key_release);
+
+        crate::verbose_print!("[godot-neovim] :q - Shader tab close triggered (Ctrl+W)");
     }
 
     /// ZQ - Close without saving (discard changes)

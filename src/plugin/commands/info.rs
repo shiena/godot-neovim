@@ -83,12 +83,10 @@ impl GodotNeovimPlugin {
 
             godot_print!("[godot-neovim] :ls - Open buffers:");
             for i in 0..open_scripts.len() {
-                if let Some(script_var) = open_scripts.get(i) {
-                    if let Ok(script) = script_var.try_cast::<godot::classes::Script>() {
-                        let path = script.get_path().to_string();
-                        let name = path.split('/').next_back().unwrap_or(&path);
-                        godot_print!("  {}: {}", i + 1, name);
-                    }
+                if let Some(script) = open_scripts.get(i) {
+                    let path = script.get_path().to_string();
+                    let name = path.split('/').next_back().unwrap_or(&path);
+                    godot_print!("  {}: {}", i + 1, name);
                 }
             }
         }

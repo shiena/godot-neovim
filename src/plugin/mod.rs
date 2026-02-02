@@ -1107,104 +1107,115 @@ impl GodotNeovimPlugin {
 
         crate::verbose_print!("[godot-neovim] Script changed (deferred processing)");
 
-        // Verify we're on the expected script before syncing
-        let editor = EditorInterface::singleton();
-        let Some(mut script_editor) = editor.get_script_editor() else {
-            crate::verbose_print!("[godot-neovim] No script editor found");
-            return;
-        };
-
-        // Get the current script path from ScriptEditor (source of truth)
-        let current_script_path = script_editor
-            .get_current_script()
-            .map(|s| s.get_path().to_string())
-            .unwrap_or_default();
-
-        crate::verbose_print!(
-            "[godot-neovim] Current script: '{}', Expected: '{}'",
-            current_script_path,
-            self.expected_script_path.as_deref().unwrap_or("(none)")
-        );
-
-        // If we have an expected path and it doesn't match, retry up to 3 times
-        if let Some(ref expected_path) = self.expected_script_path {
-            if !current_script_path.is_empty()
-                && !expected_path.is_empty()
-                && current_script_path != *expected_path
-            {
-                self.script_change_retry_count += 1;
-                if self.script_change_retry_count < 3 {
-                    crate::verbose_print!(
-                        "[godot-neovim] Script mismatch, retrying ({}/3)...",
-                        self.script_change_retry_count
-                    );
-                    // Retry in the next deferred call
-                    self.base_mut()
-                        .call_deferred("handle_script_changed_deferred", &[]);
-                    return;
-                }
-                crate::verbose_print!(
-                    "[godot-neovim] Script mismatch after retries, proceeding anyway"
-                );
-            }
-        }
-
         self.find_current_code_edit();
 
-        // Verify CodeEdit content matches current script
-        // If mismatch, retry instead of syncing wrong buffer
-        if let Some(ref editor) = self.current_editor {
-            let editor_lines = editor.get_line_count();
-            let editor_first_line = if editor_lines > 0 {
-                editor.get_line(0).to_string()
-            } else {
-                String::new()
+        // For ShaderEditor, skip ScriptEditor-based verification since it doesn't apply
+        // ShaderEditor doesn't use on_script_changed signal, so path is already set in find_current_code_edit
+        if self.current_editor_type == EditorType::Shader {
+            crate::verbose_print!(
+                "[godot-neovim] ShaderEditor detected, using path: '{}'",
+                self.current_script_path
+            );
+            // Clear expected path and proceed to buffer sync
+            self.expected_script_path = None;
+        } else {
+            // Verify we're on the expected script before syncing (ScriptEditor only)
+            let editor = EditorInterface::singleton();
+            let Some(mut script_editor) = editor.get_script_editor() else {
+                crate::verbose_print!("[godot-neovim] No script editor found");
+                return;
             };
 
-            // Get current script's source for comparison
-            if let Some(current_script) = script_editor.get_current_script() {
-                let script_source = current_script.get_source_code().to_string();
-                let script_first_line = script_source.lines().next().unwrap_or("");
-                let script_lines = script_source.lines().count();
+            // Get the current script path from ScriptEditor (source of truth)
+            let current_script_path = script_editor
+                .get_current_script()
+                .map(|s| s.get_path().to_string())
+                .unwrap_or_default();
 
-                crate::verbose_print!(
-                    "[godot-neovim] Verification - CodeEdit: {} lines, first='{}'; Script: {} lines, first='{}'",
-                    editor_lines,
-                    editor_first_line.chars().take(30).collect::<String>(),
-                    script_lines,
-                    script_first_line.chars().take(30).collect::<String>()
-                );
+            crate::verbose_print!(
+                "[godot-neovim] Current script: '{}', Expected: '{}'",
+                current_script_path,
+                self.expected_script_path.as_deref().unwrap_or("(none)")
+            );
 
-                // If content doesn't match, the CodeEdit is stale - retry
-                let content_matches = editor_first_line.trim() == script_first_line.trim()
-                    || editor_lines as usize == script_lines.max(1);
-
-                if !content_matches {
+            // If we have an expected path and it doesn't match, retry up to 3 times
+            if let Some(ref expected_path) = self.expected_script_path {
+                if !current_script_path.is_empty()
+                    && !expected_path.is_empty()
+                    && current_script_path != *expected_path
+                {
                     self.script_change_retry_count += 1;
-                    if self.script_change_retry_count < 5 {
+                    if self.script_change_retry_count < 3 {
                         crate::verbose_print!(
-                            "[godot-neovim] Content mismatch, retrying ({}/5)...",
+                            "[godot-neovim] Script mismatch, retrying ({}/3)...",
                             self.script_change_retry_count
                         );
-                        // Clear expected path to prevent path-based retry
-                        self.expected_script_path = None;
-                        // Retry
+                        // Retry in the next deferred call
                         self.base_mut()
                             .call_deferred("handle_script_changed_deferred", &[]);
                         return;
                     }
                     crate::verbose_print!(
-                        "[godot-neovim] Content mismatch after retries, proceeding anyway"
+                        "[godot-neovim] Script mismatch after retries, proceeding anyway"
                     );
+                }
+            }
+
+            // Update current script path for LSP (ScriptEditor only)
+            self.current_script_path = current_script_path.clone();
+
+            // Verify CodeEdit content matches current script (ScriptEditor only)
+            // If mismatch, retry instead of syncing wrong buffer
+            if let Some(ref editor) = self.current_editor {
+                let editor_lines = editor.get_line_count();
+                let editor_first_line = if editor_lines > 0 {
+                    editor.get_line(0).to_string()
+                } else {
+                    String::new()
+                };
+
+                // Get current script's source for comparison
+                if let Some(current_script) = script_editor.get_current_script() {
+                    let script_source = current_script.get_source_code().to_string();
+                    let script_first_line = script_source.lines().next().unwrap_or("");
+                    let script_lines = script_source.lines().count();
+
+                    crate::verbose_print!(
+                        "[godot-neovim] Verification - CodeEdit: {} lines, first='{}'; Script: {} lines, first='{}'",
+                        editor_lines,
+                        editor_first_line.chars().take(30).collect::<String>(),
+                        script_lines,
+                        script_first_line.chars().take(30).collect::<String>()
+                    );
+
+                    // If content doesn't match, the CodeEdit is stale - retry
+                    let content_matches = editor_first_line.trim() == script_first_line.trim()
+                        || editor_lines as usize == script_lines.max(1);
+
+                    if !content_matches {
+                        self.script_change_retry_count += 1;
+                        if self.script_change_retry_count < 5 {
+                            crate::verbose_print!(
+                                "[godot-neovim] Content mismatch, retrying ({}/5)...",
+                                self.script_change_retry_count
+                            );
+                            // Clear expected path to prevent path-based retry
+                            self.expected_script_path = None;
+                            // Retry
+                            self.base_mut()
+                                .call_deferred("handle_script_changed_deferred", &[]);
+                            return;
+                        }
+                        crate::verbose_print!(
+                            "[godot-neovim] Content mismatch after retries, proceeding anyway"
+                        );
+                    }
                 }
             }
         }
 
         // Clear the expected path
         self.expected_script_path = None;
-
-        // Update current script path for LSP
-        self.current_script_path = current_script_path.clone();
 
         self.reposition_mode_label();
 
