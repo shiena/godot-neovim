@@ -510,9 +510,10 @@ impl IEditorPlugin for GodotNeovimPlugin {
                     self.closing_all_tabs = false;
 
                     // Delete pending buffers from Neovim (deferred from on_script_close)
+                    // These are always from ScriptEditor since on_script_close is ScriptEditor-only
                     let pending = std::mem::take(&mut self.pending_buffer_deletions);
                     for path in pending {
-                        self.delete_neovim_buffer(&path);
+                        self.delete_neovim_buffer(&path, EditorType::Script);
                     }
                 }
             }
@@ -771,6 +772,15 @@ impl GodotNeovimPlugin {
         let Some(ref editor) = self.current_editor else {
             return;
         };
+
+        // Safety check: editor might be freed during close operations
+        // even though the signal is connected (timing issue with call_deferred)
+        if !editor.is_instance_valid() {
+            crate::verbose_print!(
+                "[godot-neovim] on_editor_resized: editor is no longer valid, skipping"
+            );
+            return;
+        }
 
         let visible_lines = editor.get_visible_line_count();
         if visible_lines != self.last_visible_lines && visible_lines > 0 {
@@ -1102,21 +1112,31 @@ impl GodotNeovimPlugin {
             }
         }
 
-        // Handle null script (e.g., when all scripts are closed)
-        let Some(script) = script else {
-            crate::verbose_print!(
-                "[godot-neovim] on_script_changed: null script, clearing references"
-            );
-            self.current_editor = None;
-            self.mode_label = None;
-            self.current_script_path.clear();
-            return;
+        // Handle null script (e.g., when all scripts are closed or TextFile is opened)
+        // TextFile resources are not Script, so they appear as null here
+        let script_path = match script {
+            Some(s) => {
+                let path = s.get_path().to_string();
+                crate::verbose_print!("[godot-neovim] on_script_changed: {}", path);
+                if path.is_empty() {
+                    None
+                } else {
+                    Some(path)
+                }
+            }
+            None => {
+                crate::verbose_print!(
+                    "[godot-neovim] on_script_changed: null script (possibly TextFile or all closed)"
+                );
+                // Don't clear references immediately - might be TextFile
+                // The deferred handler will try to get path from ItemList
+                None
+            }
         };
 
         // Store the expected script path for verification in deferred handler
-        let script_path = script.get_path().to_string();
-        crate::verbose_print!("[godot-neovim] on_script_changed: {}", script_path);
-        self.expected_script_path = Some(script_path);
+        // For TextFile resources, this will be None and we'll use ItemList fallback
+        self.expected_script_path = script_path;
         self.script_change_retry_count = 0;
 
         // Only set flag - actual handling deferred to process() to avoid borrow conflicts
@@ -1146,7 +1166,8 @@ impl GodotNeovimPlugin {
         }
 
         // Delete the buffer from Neovim immediately
-        self.delete_neovim_buffer(&path);
+        // on_script_close is only connected to ScriptEditor
+        self.delete_neovim_buffer(&path, EditorType::Script);
 
         // Set flag to grab focus after script change processing completes
         // This ensures focus is set after the new CodeEdit is visible
@@ -1188,9 +1209,23 @@ impl GodotNeovimPlugin {
             };
 
             // Get the current script path from ScriptEditor (source of truth)
+            // Try multiple methods:
+            // 1. get_current_script() - works for Script resources
+            // 2. expected_script_path from on_script_changed signal
+            // 3. Tab tooltip fallback for TextFile resources
             let current_script_path = script_editor
                 .get_current_script()
                 .map(|s| s.get_path().to_string())
+                .filter(|p| !p.is_empty())
+                .or_else(|| {
+                    // Fallback 1: use expected_script_path from signal
+                    // This is useful when get_current_script() returns null
+                    self.expected_script_path.clone()
+                })
+                .or_else(|| {
+                    // Fallback 2: try to get path from ScriptEditor's tab
+                    self.get_script_editor_current_tab_path(&script_editor)
+                })
                 .unwrap_or_default();
 
             crate::verbose_print!(
@@ -1198,6 +1233,18 @@ impl GodotNeovimPlugin {
                 current_script_path,
                 self.expected_script_path.as_deref().unwrap_or("(none)")
             );
+
+            // If no path found from any source, all scripts are closed
+            if current_script_path.is_empty() {
+                crate::verbose_print!(
+                    "[godot-neovim] No script path found (all scripts closed), clearing references"
+                );
+                self.current_editor = None;
+                self.mode_label = None;
+                self.current_script_path.clear();
+                self.expected_script_path = None;
+                return;
+            }
 
             // If we have an expected path and it doesn't match, retry up to 3 times
             if let Some(ref expected_path) = self.expected_script_path {

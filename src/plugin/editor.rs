@@ -56,10 +56,14 @@ impl GodotNeovimPlugin {
     }
 
     /// Delete a buffer from Neovim by path
-    pub(super) fn delete_neovim_buffer(&self, path: &str) {
-        // Use script_neovim for ScriptEditor paths (on_script_close callback)
-        // TODO: Consider using path extension to determine which Neovim instance
-        let Some(neovim) = self.script_neovim.as_ref() else {
+    /// Routes to the correct Neovim instance based on editor_type
+    pub(super) fn delete_neovim_buffer(&self, path: &str, editor_type: EditorType) {
+        let neovim = match editor_type {
+            EditorType::Shader => self.shader_neovim.as_ref(),
+            _ => self.script_neovim.as_ref(),
+        };
+
+        let Some(neovim) = neovim else {
             return;
         };
 
@@ -73,7 +77,11 @@ impl GodotNeovimPlugin {
         if let Err(e) = client.command(&cmd) {
             crate::verbose_print!("[godot-neovim] Failed to delete buffer {}: {}", path, e);
         } else {
-            crate::verbose_print!("[godot-neovim] Deleted buffer from Neovim: {}", path);
+            crate::verbose_print!(
+                "[godot-neovim] Deleted buffer from {:?} Neovim: {}",
+                editor_type,
+                path
+            );
         }
     }
 
@@ -200,8 +208,19 @@ impl GodotNeovimPlugin {
                 self.current_editor_type = EditorType::Shader;
 
                 // Try to get shader path from the editor hierarchy
+                // If path differs from current, trigger buffer sync
                 if let Some(path) = self.get_shader_path_from_code_edit(&code_edit) {
-                    crate::verbose_print!("[godot-neovim] Shader path: {}", path);
+                    if path != self.current_script_path {
+                        crate::verbose_print!(
+                            "[godot-neovim] Shader path mismatch detected: actual='{}', current='{}'",
+                            path,
+                            self.current_script_path
+                        );
+                        // Trigger buffer sync for ShaderEditor
+                        self.expected_script_path = Some(path.clone());
+                        self.script_change_retry_count = 0;
+                        self.script_changed_pending.set(true);
+                    }
                     self.current_script_path = path;
                 }
             } else {
@@ -230,6 +249,42 @@ impl GodotNeovimPlugin {
                     );
                     self.current_editor = Some(code_edit);
                     self.current_editor_type = EditorType::Script;
+                }
+            }
+        }
+
+        // For ScriptEditor, verify current script path matches Neovim buffer
+        // This handles the case where the editor is focused but buffer wasn't synced
+        // (e.g., on startup when multiple on_script_changed signals fire)
+        if self.current_editor.is_some() && self.current_editor_type == EditorType::Script {
+            if let Some(mut script_editor) = editor.get_script_editor() {
+                // Get actual current script path from ScriptEditor
+                // Also track whether it's a TextFile (get_current_script returns None)
+                let current_script = script_editor.get_current_script();
+                let is_text_file = current_script.is_none();
+                let actual_path = current_script
+                    .map(|s| s.get_path().to_string())
+                    .filter(|p| !p.is_empty())
+                    .or_else(|| self.get_script_editor_current_tab_path(&script_editor))
+                    .unwrap_or_default();
+
+                // If path differs from current_script_path, trigger buffer sync
+                if !actual_path.is_empty() && actual_path != self.current_script_path {
+                    crate::verbose_print!(
+                        "[godot-neovim] Script path mismatch detected: actual='{}', current='{}', is_text_file={}",
+                        actual_path,
+                        self.current_script_path,
+                        is_text_file
+                    );
+                    // For TextFile, set expected_script_path to None so handler uses ItemList fallback
+                    // For Script resources, set the path directly
+                    self.expected_script_path = if is_text_file {
+                        None
+                    } else {
+                        Some(actual_path)
+                    };
+                    self.script_change_retry_count = 0;
+                    self.script_changed_pending.set(true);
                 }
             }
         }
@@ -665,15 +720,28 @@ impl GodotNeovimPlugin {
                 None => true,
             };
 
+            // Save previous type before changing (for buffer sync decision)
+            let previous_type = self.current_editor_type;
+
             if is_different {
                 crate::verbose_print!(
                     "[godot-neovim] Switching to focused CodeEdit (float/dock change)"
                 );
+                let type_changed = previous_type != EditorType::Script;
                 self.current_editor = Some(focused_code_edit);
                 self.current_editor_type = EditorType::Script;
                 self.connect_caret_changed_signal();
                 self.connect_resized_signal();
                 self.reposition_mode_label();
+
+                // Trigger buffer sync if switching from ShaderEditor
+                if type_changed {
+                    crate::verbose_print!(
+                        "[godot-neovim] ScriptEditor: triggering buffer sync (from {:?})",
+                        previous_type
+                    );
+                    self.handle_script_changed();
+                }
             } else {
                 crate::verbose_print!("[godot-neovim] Same CodeEdit found in focused window");
             }
@@ -746,6 +814,57 @@ impl GodotNeovimPlugin {
                 }
                 if let Some(code_edit) = self.find_shader_editor_code_edit(child) {
                     return Some(code_edit);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Get the current tab's resource path from ScriptEditor
+    /// This is used as a fallback when get_current_script() returns null (e.g., for TextFile)
+    pub(super) fn get_script_editor_current_tab_path(
+        &self,
+        script_editor: &Gd<godot::classes::ScriptEditor>,
+    ) -> Option<String> {
+        use godot::classes::ItemList;
+
+        // Find the ItemList in ScriptEditor (the file list on the left side)
+        // Each item has a tooltip with the full resource path
+        let node: Gd<godot::classes::Node> = script_editor.clone().upcast();
+
+        fn find_item_list(node: &Gd<godot::classes::Node>) -> Option<Gd<ItemList>> {
+            let class_name = node.get_class().to_string();
+
+            if class_name == "ItemList" {
+                if let Ok(item_list) = node.clone().try_cast::<ItemList>() {
+                    return Some(item_list);
+                }
+            }
+
+            for i in 0..node.get_child_count() {
+                if let Some(child) = node.get_child(i) {
+                    if let Some(found) = find_item_list(&child) {
+                        return Some(found);
+                    }
+                }
+            }
+            None
+        }
+
+        if let Some(mut item_list) = find_item_list(&node) {
+            // Get selected items (should be the current script/file)
+            let selected = item_list.get_selected_items();
+            if !selected.is_empty() {
+                if let Some(idx) = selected.get(0) {
+                    let tooltip = item_list.get_item_tooltip(idx).to_string();
+                    crate::verbose_print!(
+                        "[godot-neovim] Got path from ItemList tooltip: {}",
+                        tooltip
+                    );
+                    if !tooltip.is_empty() {
+                        return Some(tooltip);
+                    }
                 }
             }
         }
