@@ -15,7 +15,7 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        let Some(ref neovim) = self.neovim else {
+        let Some(neovim) = self.get_current_neovim() else {
             return;
         };
 
@@ -77,7 +77,7 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        let Some(ref neovim) = self.neovim else {
+        let Some(neovim) = self.get_current_neovim() else {
             return;
         };
 

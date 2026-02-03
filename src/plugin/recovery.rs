@@ -130,17 +130,24 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// Restart the Neovim client
+    /// Restart the Neovim clients
     pub(super) fn restart_neovim(&mut self) {
         crate::verbose_print!("[godot-neovim] Recovery: Restarting Neovim...");
 
-        // Stop existing Neovim client
-        if let Some(ref neovim) = self.neovim {
+        // Stop existing Neovim clients
+        if let Some(ref neovim) = self.script_neovim {
             if let Ok(mut client) = neovim.lock() {
                 client.stop();
             }
         }
-        self.neovim = None;
+        self.script_neovim = None;
+
+        if let Some(ref neovim) = self.shader_neovim {
+            if let Ok(mut client) = neovim.lock() {
+                client.stop();
+            }
+        }
+        self.shader_neovim = None;
 
         // Reset sync state
         self.sync_manager.reset();
@@ -151,27 +158,58 @@ impl GodotNeovimPlugin {
             .globalize_path("res://addons/godot-neovim")
             .to_string();
 
-        // Create new Neovim client
+        // Create new Neovim client for ScriptEditor
         match NeovimClient::new() {
             Ok(mut client) => {
                 if let Err(e) = client.start(Some(&addons_path)) {
-                    godot_error!("[godot-neovim] Recovery: Failed to start Neovim: {}", e);
+                    godot_error!(
+                        "[godot-neovim] Recovery: Failed to start Neovim for ScriptEditor: {}",
+                        e
+                    );
                     return;
                 }
 
-                self.neovim = Some(Mutex::new(client));
-                crate::verbose_print!("[godot-neovim] Recovery: Neovim restarted successfully");
-
-                // Reinitialize current buffer
-                self.script_changed_pending.set(true);
+                self.script_neovim = Some(Mutex::new(client));
+                crate::verbose_print!(
+                    "[godot-neovim] Recovery: ScriptEditor Neovim restarted successfully"
+                );
             }
             Err(e) => {
                 godot_error!(
-                    "[godot-neovim] Recovery: Failed to create Neovim client: {}",
+                    "[godot-neovim] Recovery: Failed to create Neovim client for ScriptEditor: {}",
                     e
                 );
+                return;
             }
         }
+
+        // Create new Neovim client for ShaderEditor
+        match NeovimClient::new() {
+            Ok(mut client) => {
+                if let Err(e) = client.start(Some(&addons_path)) {
+                    godot_error!(
+                        "[godot-neovim] Recovery: Failed to start Neovim for ShaderEditor: {}",
+                        e
+                    );
+                    // Continue with ScriptEditor only
+                } else {
+                    self.shader_neovim = Some(Mutex::new(client));
+                    crate::verbose_print!(
+                        "[godot-neovim] Recovery: ShaderEditor Neovim restarted successfully"
+                    );
+                }
+            }
+            Err(e) => {
+                godot_warn!(
+                    "[godot-neovim] Recovery: Failed to create Neovim client for ShaderEditor: {}",
+                    e
+                );
+                // Continue with ScriptEditor only
+            }
+        }
+
+        // Reinitialize current buffer
+        self.script_changed_pending.set(true);
     }
 
     /// Clean up the recovery dialog

@@ -130,6 +130,27 @@ impl GodotNeovimPlugin {
                     // Switch tabs
                     node.call("set_current_tab", &[new_idx.to_variant()]);
 
+                    // Also update the ItemList selection (shader_list)
+                    // ItemList is a sibling of TabContainer in HSplitContainer
+                    if let Some(parent) = node.get_parent() {
+                        if parent.get_class().to_string() == "HSplitContainer" {
+                            let child_count = parent.get_child_count();
+                            for i in 0..child_count {
+                                if let Some(mut child) = parent.get_child(i) {
+                                    if child.get_class().to_string() == "ItemList" {
+                                        // Update ItemList selection to match the new tab
+                                        child.call("select", &[new_idx.to_variant()]);
+                                        crate::verbose_print!(
+                                            "[godot-neovim] Updated ItemList selection to {}",
+                                            new_idx
+                                        );
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Get the new tab's content and find CodeEdit to grab focus
                     let tab_control = node.call("get_tab_control", &[new_idx.to_variant()]);
                     if let Ok(control) = tab_control.try_to::<Gd<godot::classes::Control>>() {

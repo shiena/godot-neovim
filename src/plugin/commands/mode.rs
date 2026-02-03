@@ -1,6 +1,6 @@
 //! Command-line mode management: open/close, history, execute
 
-use super::super::GodotNeovimPlugin;
+use super::super::{EditorType, GodotNeovimPlugin};
 use godot::classes::Label;
 use godot::prelude::*;
 
@@ -12,7 +12,11 @@ impl GodotNeovimPlugin {
         self.command_buffer = ":".to_string();
 
         // Show command in mode label with yellow color
-        if let Some(ref mut label) = self.mode_label {
+        let label = match self.current_editor_type {
+            EditorType::Shader => self.shader_mode_label.as_mut(),
+            _ => self.mode_label.as_mut(),
+        };
+        if let Some(label) = label {
             label.set_text(":");
             Self::set_command_mode_color(label);
         }
@@ -39,7 +43,11 @@ impl GodotNeovimPlugin {
 
     /// Update command display in mode label
     pub(in crate::plugin) fn update_command_display(&mut self) {
-        if let Some(ref mut label) = self.mode_label {
+        let label = match self.current_editor_type {
+            EditorType::Shader => self.shader_mode_label.as_mut(),
+            _ => self.mode_label.as_mut(),
+        };
+        if let Some(label) = label {
             label.set_text(&self.command_buffer);
         }
     }

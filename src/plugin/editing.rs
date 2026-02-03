@@ -250,7 +250,13 @@ impl GodotNeovimPlugin {
 
     /// Show a temporary message in the status line
     pub(super) fn show_status_message(&mut self, msg: &str) {
-        let Some(ref mut label) = self.mode_label else {
+        // Get the appropriate label based on current editor type
+        let label = match self.current_editor_type {
+            super::EditorType::Shader => self.shader_mode_label.as_mut(),
+            _ => self.mode_label.as_mut(),
+        };
+
+        let Some(label) = label else {
             return;
         };
 

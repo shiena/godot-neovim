@@ -71,7 +71,7 @@ impl GodotNeovimPlugin {
                 self.last_key
             );
             // Send Escape to cancel Neovim's pending operator via channel
-            if let Some(ref neovim) = self.neovim {
+            if let Some(neovim) = self.get_current_neovim() {
                 if let Ok(client) = neovim.try_lock() {
                     if !client.send_key_via_channel("<Esc>") {
                         crate::verbose_print!(
@@ -97,13 +97,22 @@ impl GodotNeovimPlugin {
         // Clear version display flag (any operation returns to normal display)
         self.show_version = false;
 
-        let Some(ref mut label) = self.mode_label else {
+        // Get the appropriate label based on current editor type
+        let label = match self.current_editor_type {
+            super::EditorType::Shader => self.shader_mode_label.as_mut(),
+            _ => self.mode_label.as_mut(),
+        };
+
+        let Some(label) = label else {
             return;
         };
 
         // Check if label is still valid (may have been freed when script was closed)
         if !label.is_instance_valid() {
-            self.mode_label = None;
+            match self.current_editor_type {
+                super::EditorType::Shader => self.shader_mode_label = None,
+                _ => self.mode_label = None,
+            }
             return;
         }
 
@@ -164,13 +173,22 @@ impl GodotNeovimPlugin {
 
     /// Update status label to show version
     pub(crate) fn update_version_display(&mut self) {
-        let Some(ref mut label) = self.mode_label else {
+        // Get the appropriate label based on current editor type
+        let label = match self.current_editor_type {
+            super::EditorType::Shader => self.shader_mode_label.as_mut(),
+            _ => self.mode_label.as_mut(),
+        };
+
+        let Some(label) = label else {
             return;
         };
 
         // Check if label is still valid (may have been freed when script was closed)
         if !label.is_instance_valid() {
-            self.mode_label = None;
+            match self.current_editor_type {
+                super::EditorType::Shader => self.shader_mode_label = None,
+                _ => self.mode_label = None,
+            }
             return;
         }
 

@@ -16,7 +16,11 @@ impl GodotNeovimPlugin {
     /// - :m (move line)
     /// - Line range commands (e.g., :1,5d)
     pub(in crate::plugin) fn cmd_forward_to_neovim(&mut self, cmd: &str) {
-        let Some(ref neovim) = self.neovim else {
+        let neovim_ref = match self.current_editor_type {
+            EditorType::Shader => self.shader_neovim.as_ref(),
+            _ => self.script_neovim.as_ref(),
+        };
+        let Some(neovim) = neovim_ref else {
             godot_warn!("[godot-neovim] Cannot forward command: Neovim not connected");
             return;
         };
@@ -98,9 +102,15 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// :w - Save the current file using ScriptEditor's File menu
+    /// :w - Save the current file using ScriptEditor's or ShaderEditor's File menu
     /// Uses FILE_MENU_SAVE to ensure cross-platform compatibility (macOS Cmd+S, Windows Ctrl+S)
     pub(in crate::plugin) fn cmd_save(&self) {
+        // Handle ShaderEditor separately
+        if self.current_editor_type == EditorType::Shader {
+            self.cmd_save_shader();
+            return;
+        }
+
         let editor = EditorInterface::singleton();
         let Some(script_editor) = editor.get_script_editor() else {
             crate::verbose_print!("[godot-neovim] :w - Could not find ScriptEditor");
@@ -151,6 +161,31 @@ impl GodotNeovimPlugin {
         }
 
         crate::verbose_print!("[godot-neovim] :w - File menu not found");
+    }
+
+    /// :w for ShaderEditor - Save the current shader using Ctrl+S
+    /// In Godot 4.6, ShaderEditor uses "script_editor/save" shortcut (Ctrl+S)
+    fn cmd_save_shader(&self) {
+        let Some(ref _editor) = self.current_editor else {
+            crate::verbose_print!("[godot-neovim] :w (shader) - No current editor");
+            return;
+        };
+
+        // Simulate Ctrl+S key press - ShaderEditor uses script_editor/save shortcut
+        let mut key_press = InputEventKey::new_gd();
+        key_press.set_keycode(Key::S);
+        key_press.set_ctrl_pressed(true);
+        key_press.set_pressed(true);
+        Input::singleton().parse_input_event(&key_press);
+
+        // Release the key
+        let mut key_release = InputEventKey::new_gd();
+        key_release.set_keycode(Key::S);
+        key_release.set_ctrl_pressed(true);
+        key_release.set_pressed(false);
+        Input::singleton().parse_input_event(&key_release);
+
+        crate::verbose_print!("[godot-neovim] :w (shader) - Ctrl+S simulated");
     }
 
     /// :wa/:wall - Save all open scripts
@@ -211,7 +246,11 @@ impl GodotNeovimPlugin {
     /// :e!/:edit! - Reload current file from disk (discard changes)
     /// Uses Neovim Master design: call Lua reload_buffer to reload and re-attach
     pub(in crate::plugin) fn cmd_reload(&mut self) {
-        let Some(ref neovim) = self.neovim else {
+        let neovim_ref = match self.current_editor_type {
+            EditorType::Shader => self.shader_neovim.as_ref(),
+            _ => self.script_neovim.as_ref(),
+        };
+        let Some(neovim) = neovim_ref else {
             godot_warn!("[godot-neovim] :e! - Neovim not connected");
             return;
         };
@@ -361,25 +400,38 @@ impl GodotNeovimPlugin {
 
         // Sync cursor to Neovim BEFORE closing, because on_script_changed
         // is called after the editor is freed and we can't read cursor then
-        if let Some(ref editor) = self.current_editor {
+        // First gather cursor data from editor
+        let cursor_data = if let Some(ref editor) = self.current_editor {
             if editor.is_instance_valid() {
                 let line = editor.get_caret_line() as i64 + 1; // 1-indexed for Neovim
                 let char_col = editor.get_caret_column();
-                // Convert character column to byte column for Neovim
                 let line_text = editor.get_line(editor.get_caret_line()).to_string();
                 let byte_col = Self::char_col_to_byte_col(&line_text, char_col) as i64;
-                if let Some(ref neovim) = self.neovim {
-                    if let Ok(client) = neovim.try_lock() {
-                        let _ = client.set_cursor(line, byte_col);
-                        // Set flag to skip cursor sync in on_script_changed
-                        self.cursor_synced_before_close = true;
-                        crate::verbose_print!(
-                            "[godot-neovim] :q - Synced cursor to Neovim before close: ({}, {}) (char_col={})",
-                            line,
-                            byte_col,
-                            char_col
-                        );
-                    }
+                Some((line, byte_col, char_col))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Now sync to Neovim
+        if let Some((line, byte_col, char_col)) = cursor_data {
+            let neovim_ref = match self.current_editor_type {
+                EditorType::Shader => self.shader_neovim.as_ref(),
+                _ => self.script_neovim.as_ref(),
+            };
+            if let Some(neovim) = neovim_ref {
+                if let Ok(client) = neovim.try_lock() {
+                    let _ = client.set_cursor(line, byte_col);
+                    // Set flag to skip cursor sync in on_script_changed
+                    self.cursor_synced_before_close = true;
+                    crate::verbose_print!(
+                        "[godot-neovim] :q - Synced cursor to Neovim before close: ({}, {}) (char_col={})",
+                        line,
+                        byte_col,
+                        char_col
+                    );
                 }
             }
         }
@@ -442,62 +494,79 @@ impl GodotNeovimPlugin {
 
         // Reload from disk using Lua function (same as :e!)
         // This ensures we get the actual disk content, not stale Script data
-        if let Some(ref neovim) = self.neovim {
-            if let Ok(client) = neovim.try_lock() {
-                match client.execute_lua_with_result("return _G.godot_neovim.reload_buffer()") {
-                    Ok(result) => {
-                        if let rmpv::Value::Map(map) = result {
-                            let mut lines: Vec<String> = Vec::new();
+        // First get the text from Neovim, then release lock before modifying editor
+        let restored_text: Option<String> = {
+            let neovim_ref = match self.current_editor_type {
+                EditorType::Shader => self.shader_neovim.as_ref(),
+                _ => self.script_neovim.as_ref(),
+            };
+            if let Some(neovim) = neovim_ref {
+                if let Ok(client) = neovim.try_lock() {
+                    match client.execute_lua_with_result("return _G.godot_neovim.reload_buffer()") {
+                        Ok(result) => {
+                            if let rmpv::Value::Map(map) = result {
+                                let mut lines: Vec<String> = Vec::new();
 
-                            for (key, value) in map {
-                                if let rmpv::Value::String(k) = key {
-                                    if k.as_str() == Some("lines") {
-                                        if let rmpv::Value::Array(arr) = value {
-                                            lines = arr
-                                                .into_iter()
-                                                .filter_map(|v| {
-                                                    if let rmpv::Value::String(s) = v {
-                                                        s.into_str()
-                                                    } else {
-                                                        None
-                                                    }
-                                                })
-                                                .collect();
+                                for (key, value) in map {
+                                    if let rmpv::Value::String(k) = key {
+                                        if k.as_str() == Some("lines") {
+                                            if let rmpv::Value::Array(arr) = value {
+                                                lines = arr
+                                                    .into_iter()
+                                                    .filter_map(|v| {
+                                                        if let rmpv::Value::String(s) = v {
+                                                            s.into_str()
+                                                        } else {
+                                                            None
+                                                        }
+                                                    })
+                                                    .collect();
+                                            }
                                         }
                                     }
                                 }
-                            }
-
-                            let text = lines.join("\n");
-
-                            // Apply disk content to CodeEdit before closing
-                            if let Some(ref mut code_edit) = self.current_editor {
-                                code_edit.set_text(&text);
-                                code_edit.tag_saved_version();
-                                crate::verbose_print!(
-                                    "[godot-neovim] ZQ - Restored {} lines to CodeEdit",
-                                    lines.len()
-                                );
-                            }
-
-                            // Also update the Script resource to prevent Godot from
-                            // caching the modified content when reopening
-                            let editor = EditorInterface::singleton();
-                            if let Some(mut script_editor) = editor.get_script_editor() {
-                                if let Some(mut current_script) = script_editor.get_current_script()
-                                {
-                                    current_script.set_source_code(&text);
-                                    crate::verbose_print!(
-                                        "[godot-neovim] ZQ - Restored {} lines to Script",
-                                        lines.len()
-                                    );
-                                }
+                                Some(lines.join("\n"))
+                            } else {
+                                None
                             }
                         }
+                        Err(e) => {
+                            godot_warn!("[godot-neovim] ZQ - Failed to reload from disk: {}", e);
+                            None
+                        }
                     }
-                    Err(e) => {
-                        godot_warn!("[godot-neovim] ZQ - Failed to reload from disk: {}", e);
-                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        // Now apply restored text to editor (lock is released)
+        if let Some(text) = restored_text {
+            let line_count = text.lines().count();
+
+            // Apply disk content to CodeEdit before closing
+            if let Some(ref mut code_edit) = self.current_editor {
+                code_edit.set_text(&text);
+                code_edit.tag_saved_version();
+                crate::verbose_print!(
+                    "[godot-neovim] ZQ - Restored {} lines to CodeEdit",
+                    line_count
+                );
+            }
+
+            // Also update the Script resource to prevent Godot from
+            // caching the modified content when reopening
+            let editor = EditorInterface::singleton();
+            if let Some(mut script_editor) = editor.get_script_editor() {
+                if let Some(mut current_script) = script_editor.get_current_script() {
+                    current_script.set_source_code(&text);
+                    crate::verbose_print!(
+                        "[godot-neovim] ZQ - Restored {} lines to Script",
+                        line_count
+                    );
                 }
             }
         }

@@ -57,7 +57,9 @@ impl GodotNeovimPlugin {
 
     /// Delete a buffer from Neovim by path
     pub(super) fn delete_neovim_buffer(&self, path: &str) {
-        let Some(ref neovim) = self.neovim else {
+        // Use script_neovim for ScriptEditor paths (on_script_close callback)
+        // TODO: Consider using path extension to determine which Neovim instance
+        let Some(neovim) = self.script_neovim.as_ref() else {
             return;
         };
 
@@ -90,21 +92,38 @@ impl GodotNeovimPlugin {
     }
 
     /// Reposition mode label to current editor's status bar
+    /// Each editor type (Script, Shader) has its own independent label
     pub(super) fn reposition_mode_label(&mut self) {
+        // Get the appropriate label based on current editor type
+        let (label_ref, label_field_is_shader) = match self.current_editor_type {
+            EditorType::Shader => (&self.shader_mode_label, true),
+            _ => (&self.mode_label, false),
+        };
+
         // Check if label is still valid (may have been freed with previous status bar)
-        let label_valid = self
-            .mode_label
+        let label_valid = label_ref
             .as_ref()
             .is_some_and(|label| label.is_instance_valid());
 
         if !label_valid {
-            // Label was freed, create a new one
-            self.mode_label = None;
+            // Label was freed, clear and create a new one
+            if label_field_is_shader {
+                self.shader_mode_label = None;
+            } else {
+                self.mode_label = None;
+            }
             self.create_mode_label();
             return;
         }
 
-        let Some(ref label) = self.mode_label else {
+        // Get the label again after potential creation
+        let label = if label_field_is_shader {
+            self.shader_mode_label.as_ref()
+        } else {
+            self.mode_label.as_ref()
+        };
+
+        let Some(label) = label else {
             return;
         };
 
@@ -137,7 +156,11 @@ impl GodotNeovimPlugin {
                         crate::verbose_print!(
                             "[godot-neovim] Mode label in different window, recreating"
                         );
-                        if let Some(mut old_label) = self.mode_label.take() {
+                        if label_field_is_shader {
+                            if let Some(mut old_label) = self.shader_mode_label.take() {
+                                old_label.queue_free();
+                            }
+                        } else if let Some(mut old_label) = self.mode_label.take() {
                             old_label.queue_free();
                         }
                         self.create_mode_label();
@@ -439,40 +462,140 @@ impl GodotNeovimPlugin {
     /// Returns the shader file path (res://...) if found
     fn get_shader_path_from_code_edit(&self, code_edit: &Gd<CodeEdit>) -> Option<String> {
         let mut current: Option<Gd<godot::classes::Node>> = code_edit.get_parent();
+        let mut depth = 0;
 
         while let Some(mut node) = current {
             let class_name = node.get_class().to_string();
+            let node_name = node.get_name().to_string();
+            crate::verbose_print!(
+                "[godot-neovim] Shader path search depth {}: {} ({})",
+                depth,
+                node_name,
+                class_name
+            );
 
-            // TextShaderEditor has get_edited_shader() method
-            // Also check for classes containing "TextShaderEditor" for compatibility
-            if class_name == "TextShaderEditor" || class_name.contains("TextShaderEditor") {
-                // Check if method exists before calling to avoid panic
-                if node.has_method("get_edited_shader") {
-                    // Try to call get_edited_shader() via Godot's call mechanism
-                    // This returns a Shader resource which has get_path()
-                    let result = node.call("get_edited_shader", &[]);
-                    if let Ok(shader) = result.try_to::<Gd<Resource>>() {
-                        let path = shader.get_path().to_string();
-                        if !path.is_empty() {
-                            return Some(path);
+            // Check for HSplitContainer - this contains both shader_list (ItemList) and shader_tabs
+            // The shader path is stored in the ItemList's tooltip
+            if class_name == "HSplitContainer" {
+                use godot::classes::ItemList;
+
+                let child_count = node.get_child_count();
+                for i in 0..child_count {
+                    if let Some(child) = node.get_child(i) {
+                        let child_class = child.get_class().to_string();
+                        crate::verbose_print!(
+                            "[godot-neovim]   HSplitContainer child {}: {} ({})",
+                            i,
+                            child.get_name(),
+                            child_class
+                        );
+
+                        // Look for ItemList (shader_list)
+                        if child_class == "ItemList" {
+                            if let Ok(mut item_list) = child.try_cast::<ItemList>() {
+                                // Get the selected item index
+                                let selected_items = item_list.get_selected_items();
+                                crate::verbose_print!(
+                                    "[godot-neovim]   ItemList selected items: {:?}",
+                                    selected_items.to_vec()
+                                );
+
+                                if !selected_items.is_empty() {
+                                    if let Some(selected_idx) = selected_items.get(0) {
+                                        // The tooltip contains the full shader path
+                                        let tooltip =
+                                            item_list.get_item_tooltip(selected_idx).to_string();
+                                        crate::verbose_print!(
+                                            "[godot-neovim]   ItemList item {} tooltip: '{}'",
+                                            selected_idx,
+                                            tooltip
+                                        );
+
+                                        if !tooltip.is_empty()
+                                            && (tooltip.ends_with(".gdshader")
+                                                || tooltip.ends_with(".shader")
+                                                || tooltip.ends_with(".gdshaderinc"))
+                                        {
+                                            crate::verbose_print!(
+                                                "[godot-neovim] Found shader path from ItemList: {}",
+                                                tooltip
+                                            );
+                                            return Some(tooltip);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check for shader-related classes that might have get_shader() or similar method
+            // TextShaderEditor, ShaderTextEditor, or any class containing "Shader"
+            if class_name.contains("Shader") {
+                // Try multiple method names (Godot versions may differ)
+                let method_names = ["get_shader", "get_edited_shader", "get_current_shader"];
+
+                for method_name in method_names {
+                    if node.has_method(method_name) {
+                        crate::verbose_print!(
+                            "[godot-neovim]   {} has method '{}'",
+                            class_name,
+                            method_name
+                        );
+                        let result = node.call(method_name, &[]);
+                        crate::verbose_print!(
+                            "[godot-neovim]   {}() result type: {:?}",
+                            method_name,
+                            result.get_type()
+                        );
+                        if let Ok(shader) = result.try_to::<Gd<Resource>>() {
+                            let path = shader.get_path().to_string();
+                            crate::verbose_print!(
+                                "[godot-neovim]   shader.get_path() = '{}'",
+                                path
+                            );
+                            if !path.is_empty() {
+                                crate::verbose_print!(
+                                    "[godot-neovim] Found shader path via {}.{}(): {}",
+                                    class_name,
+                                    method_name,
+                                    path
+                                );
+                                return Some(path);
+                            }
                         }
                     }
                 }
 
-                // Try get_edited_shader_include() for .gdshaderinc files
-                if node.has_method("get_edited_shader_include") {
-                    let result_inc = node.call("get_edited_shader_include", &[]);
-                    if let Ok(shader_inc) = result_inc.try_to::<Gd<Resource>>() {
-                        let path = shader_inc.get_path().to_string();
-                        if !path.is_empty() {
-                            return Some(path);
+                // Try get_shader_include() / get_edited_shader_include() for .gdshaderinc files
+                let include_methods = ["get_shader_include", "get_edited_shader_include"];
+                for method_name in include_methods {
+                    if node.has_method(method_name) {
+                        let result_inc = node.call(method_name, &[]);
+                        if let Ok(shader_inc) = result_inc.try_to::<Gd<Resource>>() {
+                            let path = shader_inc.get_path().to_string();
+                            if !path.is_empty() {
+                                crate::verbose_print!(
+                                    "[godot-neovim] Found shader include path via {}.{}(): {}",
+                                    class_name,
+                                    method_name,
+                                    path
+                                );
+                                return Some(path);
+                            }
                         }
                     }
                 }
             }
 
             current = node.get_parent();
+            depth += 1;
         }
+        crate::verbose_print!(
+            "[godot-neovim] Shader path not found in hierarchy (searched {} levels)",
+            depth
+        );
         None
     }
 
@@ -504,21 +627,30 @@ impl GodotNeovimPlugin {
             if self.is_code_edit_in_shader_editor(&focused_code_edit) {
                 // ShaderEditor has focus - enable Neovim integration for shaders
                 let previous_path = self.current_script_path.clone();
+                let previous_type = self.current_editor_type;
                 self.current_editor = Some(focused_code_edit.clone());
                 self.current_editor_type = EditorType::Shader;
 
                 // Try to get shader path
+                let mut needs_buffer_sync = previous_type != EditorType::Shader;
                 if let Some(path) = self.get_shader_path_from_code_edit(&focused_code_edit) {
                     crate::verbose_print!("[godot-neovim] ShaderEditor has focus, path: {}", path);
-                    self.current_script_path = path.clone();
-
-                    // If path changed, trigger buffer sync (ShaderEditor doesn't have on_script_changed signal)
                     if previous_path != path {
-                        crate::verbose_print!(
-                            "[godot-neovim] ShaderEditor path changed, triggering buffer sync"
-                        );
-                        self.handle_script_changed();
+                        needs_buffer_sync = true;
                     }
+                    self.current_script_path = path;
+                } else {
+                    crate::verbose_print!("[godot-neovim] ShaderEditor has focus, path not found");
+                }
+
+                // Trigger buffer sync if editor type changed or path changed
+                if needs_buffer_sync {
+                    crate::verbose_print!(
+                        "[godot-neovim] ShaderEditor: triggering buffer sync (type_changed={}, path_changed={})",
+                        previous_type != EditorType::Shader,
+                        previous_path != self.current_script_path
+                    );
+                    self.handle_script_changed();
                 }
 
                 self.connect_caret_changed_signal();
