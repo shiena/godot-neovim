@@ -15,6 +15,10 @@ impl GodotNeovimPlugin {
             key_event.is_ctrl_pressed() && key_event.get_keycode() == Key::BRACKETLEFT;
 
         if is_escape || is_ctrl_bracket {
+            // Record <Esc> to macro buffer before send_escape
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("<Esc>".to_string());
+            }
             self.send_escape();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -31,12 +35,45 @@ impl GodotNeovimPlugin {
             let nvim_key = self.key_event_to_nvim_notation(key_event);
             // Only send if it's an actual Vim command notation (starts with <)
             if !nvim_key.is_empty() && nvim_key.starts_with('<') {
+                // Record to macro buffer
+                if self.recording_macro.is_some() && !self.playing_macro {
+                    self.macro_buffer.push(nvim_key.clone());
+                }
                 self.send_keys(&nvim_key);
                 if let Some(mut viewport) = self.base().get_viewport() {
                     viewport.set_input_as_handled();
                 }
             }
             return;
+        }
+
+        // Record keys to macro buffer if recording
+        if self.recording_macro.is_some() && !self.playing_macro {
+            let keycode = key_event.get_keycode();
+            // Special keys
+            match keycode {
+                Key::BACKSPACE => {
+                    self.macro_buffer.push("<BS>".to_string());
+                }
+                Key::ENTER => {
+                    self.macro_buffer.push("<CR>".to_string());
+                }
+                Key::DELETE => {
+                    self.macro_buffer.push("<Del>".to_string());
+                }
+                Key::TAB => {
+                    self.macro_buffer.push("<Tab>".to_string());
+                }
+                _ => {
+                    // Normal characters
+                    let unicode = key_event.get_unicode();
+                    if unicode > 0 {
+                        if let Some(c) = char::from_u32(unicode) {
+                            self.macro_buffer.push(c.to_string());
+                        }
+                    }
+                }
+            }
         }
 
         // In replace mode, we need to delete the character under cursor
