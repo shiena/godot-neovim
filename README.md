@@ -466,6 +466,8 @@ Insert mode uses Godot's native input system to support auto-completion and othe
 | `Ctrl+A` | Insert previously inserted text |
 | `Ctrl+N/P` | Keyword completion (use Godot's auto-completion instead) |
 
+**Macro recording in insert mode**: Character inputs are recorded from key events. IME compositions (e.g., Japanese input) are recorded as final confirmed characters only, not intermediate states.
+
 ### Not Implemented
 
 | Feature | Description |
@@ -481,6 +483,7 @@ Insert mode uses Godot's native input system to support auto-completion and othe
 |-------|------------|
 | Dirty flag not set after some operations (named register paste, macro playback) | Switch to another script tab and back (`gt` then `gT`) |
 | `(*)` marker remains after `:e!` reload | Switch tabs with `gt`/`gT` to clear the marker |
+| Macro recording with IME | Only confirmed characters are recorded; intermediate compositions are not captured |
 
 </details>
 
