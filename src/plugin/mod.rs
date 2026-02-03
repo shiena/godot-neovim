@@ -278,6 +278,9 @@ pub struct GodotNeovimPlugin {
     /// Flag to grab focus after script change (set by on_script_close)
     #[init(val = false)]
     focus_after_script_change: bool,
+    /// Flag to grab focus on ShaderEditor after closing a shader tab
+    #[init(val = false)]
+    pub(super) focus_shader_after_close: bool,
     /// Flag to skip on_script_changed processing during :qa (Close All)
     /// Reset when operation completes (detected in process())
     #[init(val = false)]
@@ -513,6 +516,13 @@ impl IEditorPlugin for GodotNeovimPlugin {
                     }
                 }
             }
+        }
+
+        // Handle deferred shader focus after close
+        // ShaderEditor doesn't have on_script_close signal, so we handle focus here
+        if self.focus_shader_after_close {
+            self.focus_shader_after_close = false;
+            self.focus_shader_editor_code_edit();
         }
 
         // Handle deferred script change (set by on_script_changed to avoid borrow conflicts)

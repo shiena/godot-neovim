@@ -687,4 +687,69 @@ impl GodotNeovimPlugin {
 
         false
     }
+
+    /// Find and focus the ShaderEditor's CodeEdit after closing a shader tab
+    /// Called from process() when focus_shader_after_close flag is set
+    pub(super) fn focus_shader_editor_code_edit(&mut self) {
+        // Find the ShaderEditor's visible CodeEdit
+        let editor = EditorInterface::singleton();
+        let Some(base_control) = editor.get_base_control() else {
+            crate::verbose_print!("[godot-neovim] focus_shader_editor: no base_control");
+            return;
+        };
+
+        // Find EditorNode to search for ShaderEditor
+        let Some(editor_node) = self.find_editor_node(base_control.clone().upcast()) else {
+            crate::verbose_print!("[godot-neovim] focus_shader_editor: no EditorNode found");
+            return;
+        };
+
+        // Search for ShaderEditor's CodeEdit
+        if let Some(mut code_edit) = self.find_shader_editor_code_edit(editor_node) {
+            code_edit.grab_focus();
+            crate::verbose_print!("[godot-neovim] Focused ShaderEditor CodeEdit after close");
+        } else {
+            crate::verbose_print!(
+                "[godot-neovim] focus_shader_editor: no ShaderEditor CodeEdit found"
+            );
+        }
+    }
+
+    /// Find visible CodeEdit in ShaderEditor hierarchy
+    fn find_shader_editor_code_edit(&self, node: Gd<Node>) -> Option<Gd<CodeEdit>> {
+        let class_name = node.get_class().to_string();
+
+        // Look for ShaderTextEditor (contains CodeEdit for shaders)
+        if class_name == "ShaderTextEditor" {
+            // ShaderTextEditor > CodeEdit
+            let child_count = node.get_child_count();
+            for i in 0..child_count {
+                if let Some(child) = node.get_child(i) {
+                    if let Ok(code_edit) = child.try_cast::<CodeEdit>() {
+                        if code_edit.is_visible_in_tree() {
+                            return Some(code_edit);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Recursively search children
+        let child_count = node.get_child_count();
+        for i in 0..child_count {
+            if let Some(child) = node.get_child(i) {
+                // Skip hidden nodes for efficiency
+                if let Ok(control) = child.clone().try_cast::<Control>() {
+                    if !control.is_visible() {
+                        continue;
+                    }
+                }
+                if let Some(code_edit) = self.find_shader_editor_code_edit(child) {
+                    return Some(code_edit);
+                }
+            }
+        }
+
+        None
+    }
 }

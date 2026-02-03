@@ -483,6 +483,10 @@ impl GodotNeovimPlugin {
         key_release.set_pressed(false);
         Input::singleton().parse_input_event(&key_release);
 
+        // Set flag to grab focus on shader editor after close
+        // This ensures we focus the remaining shader tab's CodeEdit
+        self.focus_shader_after_close = true;
+
         crate::verbose_print!("[godot-neovim] :q - Shader tab close triggered (Ctrl+W)");
     }
 
