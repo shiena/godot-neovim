@@ -86,6 +86,10 @@ impl GodotNeovimPlugin {
         // Handle Ctrl+A for increment number under cursor
         // Neovim Master: send to Neovim for proper undo/redo and register integration
         if key_event.is_ctrl_pressed() && keycode == Key::A {
+            // Record to macro buffer before early return
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("<C-a>".to_string());
+            }
             self.send_keys("<C-a>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -96,6 +100,10 @@ impl GodotNeovimPlugin {
         // Handle Ctrl+X for decrement number under cursor
         // Neovim Master: send to Neovim for proper undo/redo and register integration
         if key_event.is_ctrl_pressed() && keycode == Key::X {
+            // Record to macro buffer before early return
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("<C-x>".to_string());
+            }
             self.send_keys("<C-x>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -106,6 +114,10 @@ impl GodotNeovimPlugin {
         // Handle Ctrl+O for jump back in jump list
         // Neovim Master: send to Neovim for proper jumplist support
         if key_event.is_ctrl_pressed() && keycode == Key::O {
+            // Record to macro buffer before early return
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("<C-o>".to_string());
+            }
             self.send_keys("<C-o>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -116,6 +128,10 @@ impl GodotNeovimPlugin {
         // Handle Ctrl+I (Tab) for jump forward in jump list
         // Neovim Master: send to Neovim for proper jumplist support
         if key_event.is_ctrl_pressed() && keycode == Key::I {
+            // Record to macro buffer before early return
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("<C-i>".to_string());
+            }
             self.send_keys("<C-i>");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -454,6 +470,10 @@ impl GodotNeovimPlugin {
         // Handle 's' for substitute char (delete char and enter insert mode)
         // Neovim Master: send to Neovim only
         if keycode == Key::S && !key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            // Record to macro buffer before early return
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("s".to_string());
+            }
             self.send_keys("s");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -464,6 +484,10 @@ impl GodotNeovimPlugin {
         // Handle 'S' for substitute line (delete line content and enter insert mode)
         // Neovim Master: send to Neovim only
         if keycode == Key::S && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            // Record to macro buffer before early return
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("S".to_string());
+            }
             self.send_keys("S");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -487,6 +511,10 @@ impl GodotNeovimPlugin {
 
         // Handle 'R' for replace mode (continuous overwrite)
         if keycode == Key::R && key_event.is_shift_pressed() && !key_event.is_ctrl_pressed() {
+            // Record to macro buffer before early return
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("R".to_string());
+            }
             self.enter_replace_mode();
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
@@ -497,6 +525,10 @@ impl GodotNeovimPlugin {
         // Handle '~' for toggle case
         // Neovim Master: send to Neovim for proper undo/register integration
         if unicode_char == Some('~') {
+            // Record to macro buffer before early return
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("~".to_string());
+            }
             self.send_keys("~");
             if let Some(mut viewport) = self.base().get_viewport() {
                 viewport.set_input_as_handled();
