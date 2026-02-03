@@ -1,7 +1,7 @@
 //! Editor management: finding CodeEdit, script change handling
 
 use super::{EditorType, GodotNeovimPlugin};
-use godot::classes::{CodeEdit, Control, EditorInterface, Resource, Window};
+use godot::classes::{CodeEdit, Control, EditorInterface, Resource, ScriptEditorBase, Window};
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
@@ -187,6 +187,22 @@ impl GodotNeovimPlugin {
         }
     }
 
+    /// Get CodeEdit from ScriptEditor using public API (stable method)
+    /// Uses: ScriptEditor.get_current_editor() -> ScriptEditorBase.get_base_editor() -> CodeEdit
+    fn get_script_editor_code_edit_via_api(&self) -> Option<Gd<CodeEdit>> {
+        let editor = EditorInterface::singleton();
+        let mut script_editor = editor.get_script_editor()?;
+
+        // Use public API: get_current_editor() returns ScriptEditorBase
+        let current_editor: Gd<ScriptEditorBase> = script_editor.get_current_editor()?;
+
+        // get_base_editor() returns the underlying Control (which is a CodeEdit)
+        let base_editor: Gd<Control> = current_editor.get_base_editor()?;
+
+        // Cast Control to CodeEdit
+        base_editor.try_cast::<CodeEdit>().ok()
+    }
+
     /// Find and set current CodeEdit reference
     pub(super) fn find_current_code_edit(&mut self) {
         // Clear the reference first to avoid use-after-free when script is closed
@@ -230,22 +246,34 @@ impl GodotNeovimPlugin {
             }
         }
 
-        // If not found via direct focus, try ScriptEditor
+        // If not found via direct focus, try ScriptEditor using public API
         if self.current_editor.is_none() && self.current_editor_type != EditorType::Shader {
-            if let Some(script_editor) = editor.get_script_editor() {
+            // Priority 1: Use public API (most stable)
+            // ScriptEditor.get_current_editor() -> ScriptEditorBase.get_base_editor() -> CodeEdit
+            if let Some(code_edit) = self.get_script_editor_code_edit_via_api() {
+                crate::verbose_print!(
+                    "[godot-neovim] Found CodeEdit via public API (get_current_editor/get_base_editor)"
+                );
+                self.current_editor = Some(code_edit);
+                self.current_editor_type = EditorType::Script;
+            }
+            // Priority 2: GUI traversal fallback (for edge cases like floating windows)
+            else if let Some(script_editor) = editor.get_script_editor() {
                 // Try to find the currently focused CodeEdit by traversing ScriptEditor
                 if let Some(code_edit) =
                     self.find_focused_code_edit(script_editor.clone().upcast::<Control>())
                 {
-                    crate::verbose_print!("[godot-neovim] Found focused CodeEdit in ScriptEditor");
+                    crate::verbose_print!(
+                        "[godot-neovim] Found focused CodeEdit in ScriptEditor (GUI traversal fallback)"
+                    );
                     self.current_editor = Some(code_edit);
                     self.current_editor_type = EditorType::Script;
                 } else if let Some(code_edit) =
                     self.find_visible_code_edit_safe(script_editor.upcast::<Control>())
                 {
-                    // Fallback: find visible CodeEdit, but verify it's the active one
+                    // Last resort: find visible CodeEdit with content verification
                     crate::verbose_print!(
-                        "[godot-neovim] Found visible CodeEdit in ScriptEditor (safe fallback)"
+                        "[godot-neovim] Found visible CodeEdit in ScriptEditor (content-verified fallback)"
                     );
                     self.current_editor = Some(code_edit);
                     self.current_editor_type = EditorType::Script;
