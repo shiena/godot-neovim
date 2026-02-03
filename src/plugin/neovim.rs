@@ -8,19 +8,19 @@ impl GodotNeovimPlugin {
     /// Creates buffer if not exists, initializes content if new
     /// Returns (line, col, is_new) - cursor position and whether buffer was newly created
     pub(super) fn switch_to_neovim_buffer(&mut self) -> Option<(i64, i64, bool)> {
-        let Some(ref editor) = self.current_editor else {
-            crate::verbose_print!("[godot-neovim] switch_to_neovim_buffer: No current editor");
-            return None;
-        };
-
-        let Some(ref neovim) = self.neovim else {
-            crate::verbose_print!("[godot-neovim] switch_to_neovim_buffer: No neovim");
-            return None;
-        };
-
-        let Ok(client) = neovim.try_lock() else {
-            crate::verbose_print!("[godot-neovim] switch_to_neovim_buffer: Failed to lock");
-            return None;
+        // First, gather all data from editor (to avoid borrow conflicts)
+        let (text, godot_line_count, use_spaces, indent_size, visible_lines) = {
+            let Some(ref editor) = self.current_editor else {
+                crate::verbose_print!("[godot-neovim] switch_to_neovim_buffer: No current editor");
+                return None;
+            };
+            (
+                editor.get_text().to_string(),
+                editor.get_line_count(),
+                editor.is_indent_using_spaces(),
+                editor.get_indent_size(),
+                editor.get_visible_line_count(),
+            )
         };
 
         // Get absolute path for the buffer
@@ -40,7 +40,6 @@ impl GodotNeovimPlugin {
 
         // Get text from Godot and normalize: remove trailing newline to match Neovim's line count
         // Neovim treats trailing newline as implicit (eol option), not as an extra line
-        let text = editor.get_text().to_string();
         let trimmed = text.trim_end_matches('\n');
         let lines: Vec<String> = if trimmed.is_empty() {
             vec!["".to_string()]
@@ -50,10 +49,21 @@ impl GodotNeovimPlugin {
                 .map(|s| s.trim_end_matches('\r').to_string())
                 .collect()
         };
-        let godot_line_count = editor.get_line_count();
-        // Get indent settings from CodeEdit
-        let use_spaces = editor.is_indent_using_spaces();
-        let indent_size = editor.get_indent_size();
+
+        // Now access Neovim - access field directly to allow borrowing other fields
+        let neovim_ref = match self.current_editor_type {
+            super::EditorType::Shader => self.shader_neovim.as_ref(),
+            _ => self.script_neovim.as_ref(),
+        };
+        let Some(neovim) = neovim_ref else {
+            crate::verbose_print!("[godot-neovim] switch_to_neovim_buffer: No neovim");
+            return None;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            crate::verbose_print!("[godot-neovim] switch_to_neovim_buffer: Failed to lock");
+            return None;
+        };
 
         crate::verbose_print!(
             "[godot-neovim] Switching to buffer: {} (text {} lines, Godot {} lines, spaces={}, indent={})",
@@ -84,10 +94,13 @@ impl GodotNeovimPlugin {
                 self.sync_manager.set_attached(result.attached);
                 self.sync_manager.set_line_count(nvim_line_count);
 
-                // Set filetype for syntax highlighting
+                // Set filetype for syntax highlighting based on file extension
                 // This must be done BEFORE setting indent options, because filetype plugins
                 // may override buffer-local indent settings
-                let _ = client.command("set filetype=gdscript");
+                let filetype = super::filetype::detect_filetype(&abs_path);
+                let filetype_cmd = format!("set filetype={}", filetype);
+                let _ = client.command(&filetype_cmd);
+                crate::verbose_print!("[godot-neovim] Set filetype={}", filetype);
 
                 // Set indent options AFTER filetype to prevent filetype plugins from overriding them
                 crate::verbose_print!(
@@ -122,20 +135,17 @@ impl GodotNeovimPlugin {
 
                 // Resize Neovim UI to match Godot editor's visible area
                 // This is important for viewport commands (zz, zt, zb) to work correctly
-                if let Some(ref editor) = self.current_editor {
-                    let visible_lines = editor.get_visible_line_count();
-                    self.last_visible_lines = visible_lines;
-                    // Use reasonable default width (doesn't affect viewport commands)
-                    let width = 120i64;
-                    // Ensure at least 10 lines to avoid too small window
-                    let height = (visible_lines as i64).max(10);
-                    crate::verbose_print!(
-                        "[godot-neovim] Resize on script open: visible_lines={}, height={}",
-                        visible_lines,
-                        height
-                    );
-                    client.ui_try_resize(width, height);
-                }
+                self.last_visible_lines = visible_lines;
+                // Use reasonable default width (doesn't affect viewport commands)
+                let width = 120i64;
+                // Ensure at least 10 lines to avoid too small window
+                let height = (visible_lines as i64).max(10);
+                crate::verbose_print!(
+                    "[godot-neovim] Resize on script open: visible_lines={}, height={}",
+                    visible_lines,
+                    height
+                );
+                client.ui_try_resize(width, height);
 
                 // Force viewport_changed flag to ensure next viewport event is processed
                 // This is needed because viewport values may be same as before close
@@ -180,25 +190,18 @@ impl GodotNeovimPlugin {
     /// Sync buffer from Godot editor to Neovim (for ESC from insert mode)
     /// Preserves undo history
     pub(super) fn sync_buffer_to_neovim_keep_undo(&mut self) {
-        let Some(ref editor) = self.current_editor else {
-            crate::verbose_print!("[godot-neovim] sync_buffer_to_neovim: No current editor");
-            return;
-        };
-
-        let Some(ref neovim) = self.neovim else {
-            crate::verbose_print!("[godot-neovim] sync_buffer_to_neovim: No neovim");
-            return;
-        };
-
-        let Ok(client) = neovim.try_lock() else {
-            crate::verbose_print!("[godot-neovim] sync_buffer_to_neovim: Failed to lock");
-            return;
+        // First gather data from editor
+        let text = {
+            let Some(ref editor) = self.current_editor else {
+                crate::verbose_print!("[godot-neovim] sync_buffer_to_neovim: No current editor");
+                return;
+            };
+            editor.get_text().to_string()
         };
 
         // Get text from Godot editor
         // Use split('\n') and strip \r to handle both Unix and Windows line endings
         // Keep trailing empty line to match Godot's line count exactly
-        let text = editor.get_text().to_string();
         let lines: Vec<String> = text
             .split('\n')
             .map(|s| s.trim_end_matches('\r').to_string())
@@ -209,8 +212,31 @@ impl GodotNeovimPlugin {
         // Track line count before sending to Neovim
         let line_count = lines.len() as i32;
 
+        // Now access Neovim - access field directly to allow borrowing other fields
+        let neovim_ref = match self.current_editor_type {
+            super::EditorType::Shader => self.shader_neovim.as_ref(),
+            _ => self.script_neovim.as_ref(),
+        };
+        let Some(neovim) = neovim_ref else {
+            crate::verbose_print!("[godot-neovim] sync_buffer_to_neovim: No neovim");
+            return;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            crate::verbose_print!("[godot-neovim] sync_buffer_to_neovim: Failed to lock");
+            return;
+        };
+
         // ESC sync: update buffer preserving undo history
-        match client.buffer_update(lines) {
+        // Collect results first, then update sync_manager after releasing lock
+        let update_result = client.buffer_update(lines);
+        let attach_result = update_result
+            .as_ref()
+            .ok()
+            .and_then(|_| client.buf_attach_current().ok());
+        drop(client);
+
+        match update_result {
             Ok(tick) => {
                 crate::verbose_print!("[godot-neovim] Buffer updated (tick={})", tick);
 
@@ -221,33 +247,31 @@ impl GodotNeovimPlugin {
                 self.sync_manager.set_line_count(line_count);
 
                 // Re-attach to buffer for change notifications
-                match client.buf_attach_current() {
-                    Ok(true) => {
+                match attach_result {
+                    Some(true) => {
                         self.sync_manager.set_attached(true);
                         crate::verbose_print!(
                             "[godot-neovim] buf_attach: attached with changedtick={}",
                             tick
                         );
                     }
-                    Ok(false) => {
+                    Some(false) => {
                         crate::verbose_print!("[godot-neovim] buf_attach: returned false");
                     }
-                    Err(e) => {
-                        crate::verbose_print!("[godot-neovim] buf_attach: error: {}", e);
+                    None => {
+                        crate::verbose_print!("[godot-neovim] buf_attach: error or skipped");
                     }
                 }
             }
             Err(e) => {
                 let error_str = e.to_string();
                 // Check if this is a timeout or connection error
-                if error_str.contains("Timeout")
+                if (error_str.contains("Timeout")
                     || error_str.contains("timeout")
-                    || error_str.contains("Failed to")
+                    || error_str.contains("Failed to"))
+                    && self.record_timeout_error()
                 {
-                    drop(client);
-                    if self.record_timeout_error() {
-                        self.show_recovery_dialog();
-                    }
+                    self.show_recovery_dialog();
                 }
                 godot_error!("[godot-neovim] Failed to update buffer: {}", e);
             }
@@ -285,28 +309,20 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        let Some(ref mut editor) = self.current_editor else {
-            crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: No current editor");
-            return;
+        // First gather data from editor
+        let (line, char_col, byte_col) = {
+            let Some(ref editor) = self.current_editor else {
+                crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: No current editor");
+                return;
+            };
+            // Get cursor from Godot (0-indexed, character position)
+            let line = editor.get_caret_line();
+            let char_col = editor.get_caret_column();
+            // Convert character column to byte column for Neovim
+            let line_text = editor.get_line(line).to_string();
+            let byte_col = Self::char_col_to_byte_col(&line_text, char_col);
+            (line, char_col, byte_col)
         };
-
-        let Some(ref neovim) = self.neovim else {
-            crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: No neovim");
-            return;
-        };
-
-        let Ok(client) = neovim.try_lock() else {
-            crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: Failed to lock");
-            return;
-        };
-
-        // Get cursor from Godot (0-indexed, character position)
-        let line = editor.get_caret_line();
-        let char_col = editor.get_caret_column();
-
-        // Convert character column to byte column for Neovim
-        let line_text = editor.get_line(line).to_string();
-        let byte_col = Self::char_col_to_byte_col(&line_text, char_col);
 
         // Neovim uses 1-indexed lines, 0-indexed byte columns
         let mut nvim_line = (line + 1) as i64;
@@ -342,6 +358,21 @@ impl GodotNeovimPlugin {
             nvim_col,
             char_col
         );
+
+        // Now access Neovim - access field directly to allow borrowing other fields
+        let neovim_ref = match self.current_editor_type {
+            super::EditorType::Shader => self.shader_neovim.as_ref(),
+            _ => self.script_neovim.as_ref(),
+        };
+        let Some(neovim) = neovim_ref else {
+            crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: No neovim");
+            return;
+        };
+
+        let Ok(client) = neovim.try_lock() else {
+            crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: Failed to lock");
+            return;
+        };
 
         let cursor_result = client.set_cursor(nvim_line, nvim_col);
         // Release lock before potentially showing dialog
@@ -398,7 +429,7 @@ impl GodotNeovimPlugin {
 
         // Send keys via channel (lock scope limited to channel send only)
         {
-            let Some(ref neovim) = self.neovim else {
+            let Some(neovim) = self.get_current_neovim() else {
                 crate::verbose_print!("[godot-neovim] No neovim");
                 return false;
             };
@@ -477,7 +508,7 @@ impl GodotNeovimPlugin {
                     let line_text = editor.get_line(line).to_string();
                     // Convert character column to byte column for Neovim
                     let byte_col = Self::char_col_to_byte_col(&line_text, col);
-                    if let Some(ref neovim) = self.neovim {
+                    if let Some(neovim) = self.get_current_neovim() {
                         if let Ok(client) = neovim.try_lock() {
                             // nvim_win_set_cursor uses 1-indexed line, 0-indexed byte column
                             let nvim_line = (line + 1) as i64;
@@ -496,26 +527,31 @@ impl GodotNeovimPlugin {
             }
         }
 
-        let Some(ref neovim) = self.neovim else {
-            self.is_exiting_insert_mode = false;
-            return;
-        };
-
-        let Ok(client) = neovim.try_lock() else {
-            self.is_exiting_insert_mode = false;
-            return;
-        };
-
         // Send Escape to Neovim via channel
         // Neovim will automatically set '^' mark at current cursor position
-        if !client.send_key_via_channel("<Esc>") {
+        let escape_result = {
+            let neovim_ref = match self.current_editor_type {
+                super::EditorType::Shader => self.shader_neovim.as_ref(),
+                _ => self.script_neovim.as_ref(),
+            };
+            let Some(neovim) = neovim_ref else {
+                self.is_exiting_insert_mode = false;
+                return;
+            };
+
+            let Ok(client) = neovim.try_lock() else {
+                self.is_exiting_insert_mode = false;
+                return;
+            };
+
+            client.send_key_via_channel("<Esc>")
+        };
+
+        if !escape_result {
             godot_error!("[godot-neovim] Failed to send Escape");
             self.is_exiting_insert_mode = false;
             return;
         }
-
-        // Release lock
-        drop(client);
 
         // For non-insert modes, sync buffer after Escape
         if !was_insert {
@@ -524,28 +560,34 @@ impl GodotNeovimPlugin {
 
         // Process any buffer events triggered by sync_buffer_to_neovim
         // to prevent them from moving cursor later
-        let buf_events: Vec<BufEvent> = if let Some(ref neovim) = self.neovim {
-            if let Ok(client) = neovim.try_lock() {
-                client.poll();
+        let buf_events: Vec<BufEvent> = {
+            let neovim_ref = match self.current_editor_type {
+                super::EditorType::Shader => self.shader_neovim.as_ref(),
+                _ => self.script_neovim.as_ref(),
+            };
+            if let Some(neovim) = neovim_ref {
+                if let Ok(client) = neovim.try_lock() {
+                    client.poll();
 
-                // Drain buffer events (they're echoes of our sync)
-                if client.has_buf_events() {
-                    let events_arc = client.get_buf_events();
-                    let result = if let Ok(mut events_guard) = events_arc.try_lock() {
-                        client.clear_buf_events_flag();
-                        events_guard.drain(..).collect()
+                    // Drain buffer events (they're echoes of our sync)
+                    if client.has_buf_events() {
+                        let events_arc = client.get_buf_events();
+                        let result = if let Ok(mut events_guard) = events_arc.try_lock() {
+                            client.clear_buf_events_flag();
+                            events_guard.drain(..).collect()
+                        } else {
+                            Vec::new()
+                        };
+                        result
                     } else {
                         Vec::new()
-                    };
-                    result
+                    }
                 } else {
                     Vec::new()
                 }
             } else {
                 Vec::new()
             }
-        } else {
-            Vec::new()
         };
 
         // Discard buffer events as echoes (but still update changedtick)
@@ -644,7 +686,7 @@ impl GodotNeovimPlugin {
                 "[godot-neovim] Sending buffered keys after Insert mode exit: {}",
                 buffered_keys
             );
-            if let Some(ref neovim) = self.neovim {
+            if let Some(neovim) = self.get_current_neovim() {
                 if let Ok(client) = neovim.try_lock() {
                     let _ = client.send_key_via_channel(&buffered_keys);
                 }
@@ -674,7 +716,7 @@ impl GodotNeovimPlugin {
 
         // Collect data from Neovim while holding lock, then release and process
         let (state_from_redraw, buf_events, viewport_change, debug_messages) = {
-            let Some(ref neovim) = self.neovim else {
+            let Some(neovim) = self.get_current_neovim() else {
                 return;
             };
 
@@ -1008,7 +1050,7 @@ impl GodotNeovimPlugin {
 
                 // Debug: Compare win_viewport cursor with nvim_win_get_cursor
                 // This helps identify if the issue is with win_viewport or Neovim itself
-                if let Some(ref neovim) = self.neovim {
+                if let Some(neovim) = self.get_current_neovim() {
                     if let Ok(client) = neovim.try_lock() {
                         if let Ok((api_line, api_col)) = client.get_cursor() {
                             // api_line is 1-indexed, curline is 0-indexed
@@ -1053,7 +1095,7 @@ impl GodotNeovimPlugin {
                         self.sync_cursor_from_grid((corrected_line, curcol));
 
                         // Sync corrected cursor to Neovim
-                        if let Some(ref neovim) = self.neovim {
+                        if let Some(neovim) = self.get_current_neovim() {
                             if let Ok(client) = neovim.try_lock() {
                                 // set_cursor expects 1-indexed line
                                 let _ = client.set_cursor(corrected_line + 1, curcol);

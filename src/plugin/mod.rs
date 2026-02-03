@@ -6,6 +6,7 @@ const VERSION: &str = env!("BUILD_VERSION");
 mod commands;
 mod editing;
 mod editor;
+pub(crate) mod filetype;
 mod input;
 mod keys;
 mod macros;
@@ -34,6 +35,20 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
+
+/// Type of editor currently active
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum EditorType {
+    /// ScriptEditor (GDScript, C#, etc.)
+    #[default]
+    Script,
+    /// ShaderEditor (gdshader)
+    Shader,
+    /// TextFile editor (txt, md, json, etc.)
+    TextFile,
+    /// Unknown or no editor
+    Unknown,
+}
 
 /// Help query for goto_help()
 #[derive(Debug, Clone)]
@@ -103,12 +118,22 @@ impl HelpQuery {
 #[class(tool, init, base=EditorPlugin)]
 pub struct GodotNeovimPlugin {
     base: Base<EditorPlugin>,
+    /// Neovim client for ScriptEditor
     #[init(val = None)]
-    neovim: Option<Mutex<NeovimClient>>,
+    script_neovim: Option<Mutex<NeovimClient>>,
+    /// Neovim client for ShaderEditor (separate instance)
+    #[init(val = None)]
+    shader_neovim: Option<Mutex<NeovimClient>>,
     #[init(val = None)]
     mode_label: Option<Gd<Label>>,
+    /// Separate mode label for ShaderEditor (independent from ScriptEditor)
+    #[init(val = None)]
+    shader_mode_label: Option<Gd<Label>>,
     #[init(val = None)]
     current_editor: Option<Gd<CodeEdit>>,
+    /// Type of the current editor (Script, Shader, Unknown)
+    #[init(val = EditorType::Unknown)]
+    current_editor_type: EditorType,
     /// Current mode cached from last update
     #[init(val = String::from("n"))]
     current_mode: String,
@@ -253,6 +278,9 @@ pub struct GodotNeovimPlugin {
     /// Flag to grab focus after script change (set by on_script_close)
     #[init(val = false)]
     focus_after_script_change: bool,
+    /// Flag to grab focus on ShaderEditor after closing a shader tab
+    #[init(val = false)]
+    pub(super) focus_shader_after_close: bool,
     /// Flag to skip on_script_changed processing during :qa (Close All)
     /// Reset when operation completes (detected in process())
     #[init(val = false)]
@@ -334,48 +362,75 @@ impl IEditorPlugin for GodotNeovimPlugin {
             godot_warn!("[godot-neovim] Neovim validation failed, plugin may not work correctly");
         }
 
-        // Initialize Neovim client
+        // Get addons path for Lua plugin
+        let addons_path = ProjectSettings::singleton()
+            .globalize_path("res://addons/godot-neovim")
+            .to_string();
+
+        // Initialize Neovim client for ScriptEditor
         match NeovimClient::new() {
             Ok(mut client) => {
-                // Get addons path for Lua plugin
-                let addons_path = ProjectSettings::singleton()
-                    .globalize_path("res://addons/godot-neovim")
-                    .to_string();
-
                 if let Err(e) = client.start(Some(&addons_path)) {
-                    godot_error!("[godot-neovim] Failed to start Neovim: {}", e);
+                    godot_error!(
+                        "[godot-neovim] Failed to start Neovim for ScriptEditor: {}",
+                        e
+                    );
                     return;
                 }
+                self.script_neovim = Some(Mutex::new(client));
+                crate::verbose_print!("[godot-neovim] ScriptEditor Neovim initialized");
+            }
+            Err(e) => {
+                godot_error!(
+                    "[godot-neovim] Failed to create Neovim client for ScriptEditor: {}",
+                    e
+                );
+                return;
+            }
+        }
 
-                self.neovim = Some(Mutex::new(client));
-
-                // Create LSP client only if use_thread is enabled in editor settings
-                // (LSP server won't respond without threading enabled)
-                let use_thread = EditorInterface::singleton()
-                    .get_editor_settings()
-                    .map(|settings| {
-                        settings
-                            .get_setting("network/language_server/use_thread")
-                            .try_to::<bool>()
-                            .unwrap_or(false)
-                    })
-                    .unwrap_or(false);
-
-                if use_thread {
-                    let lsp_client = Arc::new(GodotLspClient::new());
-                    self.godot_lsp = Some(lsp_client);
-                    self.lsp_connected = true;
-                    crate::verbose_print!(
-                        "[godot-neovim] LSP client initialized (use_thread=true)"
+        // Initialize Neovim client for ShaderEditor (separate instance)
+        match NeovimClient::new() {
+            Ok(mut client) => {
+                if let Err(e) = client.start(Some(&addons_path)) {
+                    godot_error!(
+                        "[godot-neovim] Failed to start Neovim for ShaderEditor: {}",
+                        e
                     );
+                    // Continue with ScriptEditor only
                 } else {
-                    crate::verbose_print!("[godot-neovim] LSP disabled (use_thread=false)");
+                    self.shader_neovim = Some(Mutex::new(client));
+                    crate::verbose_print!("[godot-neovim] ShaderEditor Neovim initialized");
                 }
             }
             Err(e) => {
-                godot_error!("[godot-neovim] Failed to create Neovim client: {}", e);
-                return;
+                godot_warn!(
+                    "[godot-neovim] Failed to create Neovim client for ShaderEditor: {}",
+                    e
+                );
+                // Continue with ScriptEditor only
             }
+        }
+
+        // Create LSP client only if use_thread is enabled in editor settings
+        // (LSP server won't respond without threading enabled)
+        let use_thread = EditorInterface::singleton()
+            .get_editor_settings()
+            .map(|settings| {
+                settings
+                    .get_setting("network/language_server/use_thread")
+                    .try_to::<bool>()
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false);
+
+        if use_thread {
+            let lsp_client = Arc::new(GodotLspClient::new());
+            self.godot_lsp = Some(lsp_client);
+            self.lsp_connected = true;
+            crate::verbose_print!("[godot-neovim] LSP client initialized (use_thread=true)");
+        } else {
+            crate::verbose_print!("[godot-neovim] LSP disabled (use_thread=false)");
         }
 
         // Create mode indicator label
@@ -407,8 +462,13 @@ impl IEditorPlugin for GodotNeovimPlugin {
     fn exit_tree(&mut self) {
         crate::verbose_print!("[godot-neovim] Plugin exiting tree");
 
-        // Cleanup mode label (check if still valid before freeing)
+        // Cleanup mode labels (check if still valid before freeing)
         if let Some(mut label) = self.mode_label.take() {
+            if label.is_instance_valid() {
+                label.queue_free();
+            }
+        }
+        if let Some(mut label) = self.shader_mode_label.take() {
             if label.is_instance_valid() {
                 label.queue_free();
             }
@@ -426,8 +486,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
         }
         self.godot_lsp = None;
 
-        // Neovim client will be stopped when dropped (with timeout)
-        self.neovim = None;
+        // Neovim clients will be stopped when dropped (with timeout)
+        self.script_neovim = None;
+        self.shader_neovim = None;
 
         crate::verbose_print!("[godot-neovim] Plugin exit complete");
     }
@@ -449,12 +510,20 @@ impl IEditorPlugin for GodotNeovimPlugin {
                     self.closing_all_tabs = false;
 
                     // Delete pending buffers from Neovim (deferred from on_script_close)
+                    // These are always from ScriptEditor since on_script_close is ScriptEditor-only
                     let pending = std::mem::take(&mut self.pending_buffer_deletions);
                     for path in pending {
-                        self.delete_neovim_buffer(&path);
+                        self.delete_neovim_buffer(&path, EditorType::Script);
                     }
                 }
             }
+        }
+
+        // Handle deferred shader focus after close
+        // ShaderEditor doesn't have on_script_close signal, so we handle focus here
+        if self.focus_shader_after_close {
+            self.focus_shader_after_close = false;
+            self.focus_shader_editor_code_edit();
         }
 
         // Handle deferred script change (set by on_script_changed to avoid borrow conflicts)
@@ -546,7 +615,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
                             key_time.elapsed().as_millis()
                         );
                         // Cancel Neovim's pending operator
-                        if let Some(ref neovim) = self.neovim {
+                        if let Some(neovim) = self.get_current_neovim() {
                             if let Ok(client) = neovim.try_lock() {
                                 let _ = client.input("<Esc>");
                             }
@@ -623,7 +692,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
         }
 
         // Check if Neovim is connected
-        if self.neovim.is_none() {
+        if self.get_current_neovim().is_none() {
             crate::verbose_print!("[godot-neovim] input: No neovim");
             return;
         }
@@ -704,6 +773,15 @@ impl GodotNeovimPlugin {
             return;
         };
 
+        // Safety check: editor might be freed during close operations
+        // even though the signal is connected (timing issue with call_deferred)
+        if !editor.is_instance_valid() {
+            crate::verbose_print!(
+                "[godot-neovim] on_editor_resized: editor is no longer valid, skipping"
+            );
+            return;
+        }
+
         let visible_lines = editor.get_visible_line_count();
         if visible_lines != self.last_visible_lines && visible_lines > 0 {
             self.last_visible_lines = visible_lines;
@@ -712,7 +790,7 @@ impl GodotNeovimPlugin {
             // but we still want to apply viewport changes from Neovim after resize
             self.user_cursor_sync = false;
 
-            let Some(ref neovim) = self.neovim else {
+            let Some(neovim) = self.get_current_neovim() else {
                 return;
             };
 
@@ -884,7 +962,7 @@ impl GodotNeovimPlugin {
 
             // Use Lua function to atomically set visual selection
             // This ensures ordering: move to start -> enter visual mode -> move to end
-            if let Some(ref neovim) = self.neovim {
+            if let Some(neovim) = self.get_current_neovim() {
                 if let Ok(client) = neovim.try_lock() {
                     // Lua function expects 1-indexed line numbers
                     match client.set_visual_selection(
@@ -945,14 +1023,6 @@ impl GodotNeovimPlugin {
     /// Reads directly from EditorSettings to ensure we get the latest values
     /// (CodeEdit may not have applied the new settings yet when settings_changed fires)
     fn sync_indent_settings_to_neovim(&mut self) {
-        let Some(ref neovim) = self.neovim else {
-            return;
-        };
-
-        let Ok(client) = neovim.try_lock() else {
-            return;
-        };
-
         // Read directly from EditorSettings instead of CodeEdit
         // CodeEdit may have stale values when settings_changed signal fires
         let editor_interface = EditorInterface::singleton();
@@ -976,8 +1046,26 @@ impl GodotNeovimPlugin {
             indent_size
         );
 
-        if let Err(e) = client.set_indent_options(use_spaces, indent_size) {
-            crate::verbose_print!("[godot-neovim] Failed to sync indent settings: {}", e);
+        // Sync to both Neovim instances
+        if let Some(ref neovim) = self.script_neovim {
+            if let Ok(client) = neovim.try_lock() {
+                if let Err(e) = client.set_indent_options(use_spaces, indent_size) {
+                    crate::verbose_print!(
+                        "[godot-neovim] Failed to sync indent to ScriptEditor Neovim: {}",
+                        e
+                    );
+                }
+            }
+        }
+        if let Some(ref neovim) = self.shader_neovim {
+            if let Ok(client) = neovim.try_lock() {
+                if let Err(e) = client.set_indent_options(use_spaces, indent_size) {
+                    crate::verbose_print!(
+                        "[godot-neovim] Failed to sync indent to ShaderEditor Neovim: {}",
+                        e
+                    );
+                }
+            }
         }
     }
 
@@ -1007,7 +1095,8 @@ impl GodotNeovimPlugin {
                     // Convert character column to byte column for Neovim
                     let line_text = editor.get_line(editor.get_caret_line()).to_string();
                     let byte_col = Self::char_col_to_byte_col(&line_text, char_col) as i64;
-                    if let Some(ref neovim) = self.neovim {
+                    // Use script_neovim directly since on_script_changed is from ScriptEditor
+                    if let Some(ref neovim) = self.script_neovim {
                         if let Ok(client) = neovim.try_lock() {
                             let _ = client.set_cursor(line, byte_col);
                             crate::verbose_print!(
@@ -1023,21 +1112,31 @@ impl GodotNeovimPlugin {
             }
         }
 
-        // Handle null script (e.g., when all scripts are closed)
-        let Some(script) = script else {
-            crate::verbose_print!(
-                "[godot-neovim] on_script_changed: null script, clearing references"
-            );
-            self.current_editor = None;
-            self.mode_label = None;
-            self.current_script_path.clear();
-            return;
+        // Handle null script (e.g., when all scripts are closed or TextFile is opened)
+        // TextFile resources are not Script, so they appear as null here
+        let script_path = match script {
+            Some(s) => {
+                let path = s.get_path().to_string();
+                crate::verbose_print!("[godot-neovim] on_script_changed: {}", path);
+                if path.is_empty() {
+                    None
+                } else {
+                    Some(path)
+                }
+            }
+            None => {
+                crate::verbose_print!(
+                    "[godot-neovim] on_script_changed: null script (possibly TextFile or all closed)"
+                );
+                // Don't clear references immediately - might be TextFile
+                // The deferred handler will try to get path from ItemList
+                None
+            }
         };
 
         // Store the expected script path for verification in deferred handler
-        let script_path = script.get_path().to_string();
-        crate::verbose_print!("[godot-neovim] on_script_changed: {}", script_path);
-        self.expected_script_path = Some(script_path);
+        // For TextFile resources, this will be None and we'll use ItemList fallback
+        self.expected_script_path = script_path;
         self.script_change_retry_count = 0;
 
         // Only set flag - actual handling deferred to process() to avoid borrow conflicts
@@ -1067,7 +1166,8 @@ impl GodotNeovimPlugin {
         }
 
         // Delete the buffer from Neovim immediately
-        self.delete_neovim_buffer(&path);
+        // on_script_close is only connected to ScriptEditor
+        self.delete_neovim_buffer(&path, EditorType::Script);
 
         // Set flag to grab focus after script change processing completes
         // This ensures focus is set after the new CodeEdit is visible
@@ -1089,104 +1189,141 @@ impl GodotNeovimPlugin {
 
         crate::verbose_print!("[godot-neovim] Script changed (deferred processing)");
 
-        // Verify we're on the expected script before syncing
-        let editor = EditorInterface::singleton();
-        let Some(mut script_editor) = editor.get_script_editor() else {
-            crate::verbose_print!("[godot-neovim] No script editor found");
-            return;
-        };
-
-        // Get the current script path from ScriptEditor (source of truth)
-        let current_script_path = script_editor
-            .get_current_script()
-            .map(|s| s.get_path().to_string())
-            .unwrap_or_default();
-
-        crate::verbose_print!(
-            "[godot-neovim] Current script: '{}', Expected: '{}'",
-            current_script_path,
-            self.expected_script_path.as_deref().unwrap_or("(none)")
-        );
-
-        // If we have an expected path and it doesn't match, retry up to 3 times
-        if let Some(ref expected_path) = self.expected_script_path {
-            if !current_script_path.is_empty()
-                && !expected_path.is_empty()
-                && current_script_path != *expected_path
-            {
-                self.script_change_retry_count += 1;
-                if self.script_change_retry_count < 3 {
-                    crate::verbose_print!(
-                        "[godot-neovim] Script mismatch, retrying ({}/3)...",
-                        self.script_change_retry_count
-                    );
-                    // Retry in the next deferred call
-                    self.base_mut()
-                        .call_deferred("handle_script_changed_deferred", &[]);
-                    return;
-                }
-                crate::verbose_print!(
-                    "[godot-neovim] Script mismatch after retries, proceeding anyway"
-                );
-            }
-        }
-
         self.find_current_code_edit();
 
-        // Verify CodeEdit content matches current script
-        // If mismatch, retry instead of syncing wrong buffer
-        if let Some(ref editor) = self.current_editor {
-            let editor_lines = editor.get_line_count();
-            let editor_first_line = if editor_lines > 0 {
-                editor.get_line(0).to_string()
-            } else {
-                String::new()
+        // For ShaderEditor, skip ScriptEditor-based verification since it doesn't apply
+        // ShaderEditor doesn't use on_script_changed signal, so path is already set in find_current_code_edit
+        if self.current_editor_type == EditorType::Shader {
+            crate::verbose_print!(
+                "[godot-neovim] ShaderEditor detected, using path: '{}'",
+                self.current_script_path
+            );
+            // Clear expected path and proceed to buffer sync
+            self.expected_script_path = None;
+        } else {
+            // Verify we're on the expected script before syncing (ScriptEditor only)
+            let editor = EditorInterface::singleton();
+            let Some(mut script_editor) = editor.get_script_editor() else {
+                crate::verbose_print!("[godot-neovim] No script editor found");
+                return;
             };
 
-            // Get current script's source for comparison
-            if let Some(current_script) = script_editor.get_current_script() {
-                let script_source = current_script.get_source_code().to_string();
-                let script_first_line = script_source.lines().next().unwrap_or("");
-                let script_lines = script_source.lines().count();
+            // Get the current script path from ScriptEditor (source of truth)
+            // Try multiple methods:
+            // 1. get_current_script() - works for Script resources
+            // 2. expected_script_path from on_script_changed signal
+            // 3. Tab tooltip fallback for TextFile resources
+            let current_script_path = script_editor
+                .get_current_script()
+                .map(|s| s.get_path().to_string())
+                .filter(|p| !p.is_empty())
+                .or_else(|| {
+                    // Fallback 1: use expected_script_path from signal
+                    // This is useful when get_current_script() returns null
+                    self.expected_script_path.clone()
+                })
+                .or_else(|| {
+                    // Fallback 2: try to get path from ScriptEditor's tab
+                    self.get_script_editor_current_tab_path(&script_editor)
+                })
+                .unwrap_or_default();
 
+            crate::verbose_print!(
+                "[godot-neovim] Current script: '{}', Expected: '{}'",
+                current_script_path,
+                self.expected_script_path.as_deref().unwrap_or("(none)")
+            );
+
+            // If no path found from any source, all scripts are closed
+            if current_script_path.is_empty() {
                 crate::verbose_print!(
-                    "[godot-neovim] Verification - CodeEdit: {} lines, first='{}'; Script: {} lines, first='{}'",
-                    editor_lines,
-                    editor_first_line.chars().take(30).collect::<String>(),
-                    script_lines,
-                    script_first_line.chars().take(30).collect::<String>()
+                    "[godot-neovim] No script path found (all scripts closed), clearing references"
                 );
+                self.current_editor = None;
+                self.mode_label = None;
+                self.current_script_path.clear();
+                self.expected_script_path = None;
+                return;
+            }
 
-                // If content doesn't match, the CodeEdit is stale - retry
-                let content_matches = editor_first_line.trim() == script_first_line.trim()
-                    || editor_lines as usize == script_lines.max(1);
-
-                if !content_matches {
+            // If we have an expected path and it doesn't match, retry up to 3 times
+            if let Some(ref expected_path) = self.expected_script_path {
+                if !current_script_path.is_empty()
+                    && !expected_path.is_empty()
+                    && current_script_path != *expected_path
+                {
                     self.script_change_retry_count += 1;
-                    if self.script_change_retry_count < 5 {
+                    if self.script_change_retry_count < 3 {
                         crate::verbose_print!(
-                            "[godot-neovim] Content mismatch, retrying ({}/5)...",
+                            "[godot-neovim] Script mismatch, retrying ({}/3)...",
                             self.script_change_retry_count
                         );
-                        // Clear expected path to prevent path-based retry
-                        self.expected_script_path = None;
-                        // Retry
+                        // Retry in the next deferred call
                         self.base_mut()
                             .call_deferred("handle_script_changed_deferred", &[]);
                         return;
                     }
                     crate::verbose_print!(
-                        "[godot-neovim] Content mismatch after retries, proceeding anyway"
+                        "[godot-neovim] Script mismatch after retries, proceeding anyway"
                     );
+                }
+            }
+
+            // Update current script path for LSP (ScriptEditor only)
+            self.current_script_path = current_script_path.clone();
+
+            // Verify CodeEdit content matches current script (ScriptEditor only)
+            // If mismatch, retry instead of syncing wrong buffer
+            if let Some(ref editor) = self.current_editor {
+                let editor_lines = editor.get_line_count();
+                let editor_first_line = if editor_lines > 0 {
+                    editor.get_line(0).to_string()
+                } else {
+                    String::new()
+                };
+
+                // Get current script's source for comparison
+                if let Some(current_script) = script_editor.get_current_script() {
+                    let script_source = current_script.get_source_code().to_string();
+                    let script_first_line = script_source.lines().next().unwrap_or("");
+                    let script_lines = script_source.lines().count();
+
+                    crate::verbose_print!(
+                        "[godot-neovim] Verification - CodeEdit: {} lines, first='{}'; Script: {} lines, first='{}'",
+                        editor_lines,
+                        editor_first_line.chars().take(30).collect::<String>(),
+                        script_lines,
+                        script_first_line.chars().take(30).collect::<String>()
+                    );
+
+                    // If content doesn't match, the CodeEdit is stale - retry
+                    let content_matches = editor_first_line.trim() == script_first_line.trim()
+                        || editor_lines as usize == script_lines.max(1);
+
+                    if !content_matches {
+                        self.script_change_retry_count += 1;
+                        if self.script_change_retry_count < 5 {
+                            crate::verbose_print!(
+                                "[godot-neovim] Content mismatch, retrying ({}/5)...",
+                                self.script_change_retry_count
+                            );
+                            // Clear expected path to prevent path-based retry
+                            self.expected_script_path = None;
+                            // Retry
+                            self.base_mut()
+                                .call_deferred("handle_script_changed_deferred", &[]);
+                            return;
+                        }
+                        crate::verbose_print!(
+                            "[godot-neovim] Content mismatch after retries, proceeding anyway"
+                        );
+                    }
                 }
             }
         }
 
         // Clear the expected path
         self.expected_script_path = None;
-
-        // Update current script path for LSP
-        self.current_script_path = current_script_path.clone();
 
         self.reposition_mode_label();
 
@@ -1294,7 +1431,7 @@ impl GodotNeovimPlugin {
         }
 
         // Check if Neovim is connected
-        if self.neovim.is_none() {
+        if self.get_current_neovim().is_none() {
             crate::verbose_print!("[godot-neovim] gui_input: No neovim");
             return;
         }
@@ -1412,6 +1549,24 @@ impl GodotNeovimPlugin {
             self.restart_neovim();
         }
         self.cleanup_recovery_dialog();
+    }
+}
+
+/// Private helper methods for Neovim instance management
+impl GodotNeovimPlugin {
+    /// Get Neovim client for a specific editor type
+    /// Use this when you need to borrow other fields mutably while holding the neovim reference
+    pub(super) fn neovim_for(&self, editor_type: EditorType) -> Option<&Mutex<NeovimClient>> {
+        match editor_type {
+            EditorType::Shader => self.shader_neovim.as_ref(),
+            _ => self.script_neovim.as_ref(),
+        }
+    }
+
+    /// Get the current Neovim client based on current_editor_type
+    /// Note: This borrows self, so you cannot mutably borrow other fields while holding the result
+    pub(super) fn get_current_neovim(&self) -> Option<&Mutex<NeovimClient>> {
+        self.neovim_for(self.current_editor_type)
     }
 }
 

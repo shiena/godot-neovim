@@ -1,24 +1,31 @@
 //! UI-related operations: mode label, status bar, signal connections
 
-use super::GodotNeovimPlugin;
+use super::{EditorType, GodotNeovimPlugin};
 use godot::classes::{Control, EditorInterface, Label};
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
     /// Create and add the mode label to the status bar
+    /// Creates separate labels for ScriptEditor and ShaderEditor
     pub(super) fn create_mode_label(&mut self) {
+        crate::verbose_print!(
+            "[godot-neovim] create_mode_label called for {:?}",
+            self.current_editor_type
+        );
+
         // Only create label if we have a current editor with a status bar
         let Some(code_edit) = &self.current_editor else {
+            crate::verbose_print!("[godot-neovim] create_mode_label: no current_editor");
             return;
         };
 
         let Some(mut status_bar) = self.find_status_bar(code_edit.clone().upcast()) else {
+            crate::verbose_print!("[godot-neovim] create_mode_label: no status_bar found");
             return;
         };
 
         let mut label = Label::new_alloc();
         label.set_text(" NORMAL ");
-        label.set_name("NeovimModeLabel");
 
         // Style the label
         label.add_theme_color_override("font_color", Color::from_rgb(0.0, 1.0, 0.5));
@@ -26,7 +33,28 @@ impl GodotNeovimPlugin {
         // Add to status bar
         status_bar.add_child(&label);
         status_bar.move_child(&label, 0);
-        self.mode_label = Some(label);
+
+        // Store in appropriate field based on editor type
+        match self.current_editor_type {
+            EditorType::Shader => {
+                label.set_name("NeovimShaderModeLabel");
+                self.shader_mode_label = Some(label);
+                crate::verbose_print!("[godot-neovim] Created mode label for ShaderEditor");
+            }
+            _ => {
+                label.set_name("NeovimModeLabel");
+                self.mode_label = Some(label);
+                crate::verbose_print!("[godot-neovim] Created mode label for ScriptEditor");
+            }
+        }
+    }
+
+    /// Get the current mode label based on editor type
+    pub(super) fn get_current_mode_label(&mut self) -> Option<&mut Gd<Label>> {
+        match self.current_editor_type {
+            EditorType::Shader => self.shader_mode_label.as_mut(),
+            _ => self.mode_label.as_mut(),
+        }
     }
 
     /// Find the status bar HBoxContainer in the editor hierarchy
@@ -47,9 +75,19 @@ impl GodotNeovimPlugin {
 
         // Search siblings for HBoxContainer (status bar)
         let child_count = parent.get_child_count();
+        crate::verbose_print!(
+            "[godot-neovim] Searching {} siblings for status bar",
+            child_count
+        );
         for i in 0..child_count {
             if let Some(child) = parent.get_child(i) {
                 let class_name = child.get_class().to_string();
+                crate::verbose_print!(
+                    "[godot-neovim]   Sibling {}: {} ({})",
+                    i,
+                    child.get_name(),
+                    class_name
+                );
                 if class_name == "HBoxContainer" {
                     if let Ok(control) = child.try_cast::<Control>() {
                         crate::verbose_print!("[godot-neovim] Found HBoxContainer status bar");

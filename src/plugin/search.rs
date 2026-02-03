@@ -1,6 +1,6 @@
 //! Search operations: character find, Neovim search
 
-use super::GodotNeovimPlugin;
+use super::{EditorType, GodotNeovimPlugin};
 
 impl GodotNeovimPlugin {
     /// Find character forward on current line (f/t commands)
@@ -127,7 +127,11 @@ impl GodotNeovimPlugin {
         };
 
         // Show search prompt in mode label
-        if let Some(ref mut label) = self.mode_label {
+        let label = match self.current_editor_type {
+            EditorType::Shader => self.shader_mode_label.as_mut(),
+            _ => self.mode_label.as_mut(),
+        };
+        if let Some(label) = label {
             label.set_text(&self.search_buffer);
         }
 
@@ -151,7 +155,11 @@ impl GodotNeovimPlugin {
 
     /// Update search display in mode label
     pub(super) fn update_search_display(&mut self) {
-        if let Some(ref mut label) = self.mode_label {
+        let label = match self.current_editor_type {
+            EditorType::Shader => self.shader_mode_label.as_mut(),
+            _ => self.mode_label.as_mut(),
+        };
+        if let Some(label) = label {
             label.set_text(&self.search_buffer);
         }
     }
@@ -181,7 +189,7 @@ impl GodotNeovimPlugin {
     /// the search command is fully processed by Neovim before getting the cursor position.
     /// Without this, the cursor position returned would be from BEFORE the search.
     fn send_search_and_sync_cursor(&mut self, keys: &str) {
-        let Some(ref neovim) = self.neovim else {
+        let Some(neovim) = self.get_current_neovim() else {
             return;
         };
 

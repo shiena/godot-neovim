@@ -1,7 +1,7 @@
 //! File operations: :w, :wa, :q, :qa, :e, :e!, ZZ, ZQ
 //! Also handles forwarding Ex commands to Neovim
 
-use super::super::GodotNeovimPlugin;
+use super::super::{EditorType, GodotNeovimPlugin};
 use godot::classes::{EditorInterface, Input, InputEventKey, MenuButton, ResourceSaver};
 use godot::global::Key;
 use godot::prelude::*;
@@ -16,7 +16,11 @@ impl GodotNeovimPlugin {
     /// - :m (move line)
     /// - Line range commands (e.g., :1,5d)
     pub(in crate::plugin) fn cmd_forward_to_neovim(&mut self, cmd: &str) {
-        let Some(ref neovim) = self.neovim else {
+        let neovim_ref = match self.current_editor_type {
+            EditorType::Shader => self.shader_neovim.as_ref(),
+            _ => self.script_neovim.as_ref(),
+        };
+        let Some(neovim) = neovim_ref else {
             godot_warn!("[godot-neovim] Cannot forward command: Neovim not connected");
             return;
         };
@@ -30,7 +34,46 @@ impl GodotNeovimPlugin {
         let full_cmd = format!(":{}", cmd);
         crate::verbose_print!("[godot-neovim] Forwarding to Neovim: {}", full_cmd);
 
-        if let Err(e) = client.command(&full_cmd) {
+        // For :set commands with ?, get the option value directly via Neovim API
+        if cmd.starts_with("set ") && cmd.contains('?') {
+            // Extract option name from "set optname?" format
+            let option_name = cmd
+                .strip_prefix("set ")
+                .and_then(|s| s.strip_suffix('?'))
+                .unwrap_or("");
+
+            if !option_name.is_empty() {
+                // Use nvim_get_option_value API for reliable option retrieval
+                // Use buf=0 to get the current buffer's option (for buffer-local options like filetype)
+                let lua_cmd = format!(
+                    "return vim.api.nvim_get_option_value('{}', {{ buf = 0 }})",
+                    option_name
+                );
+                crate::verbose_print!("[godot-neovim] Querying option: {}", lua_cmd);
+                match client.execute_lua_with_result(&lua_cmd) {
+                    Ok(result) => {
+                        let value_str = if result.is_str() {
+                            result.as_str().unwrap_or("").to_string()
+                        } else if result.is_bool() {
+                            result.as_bool().map_or("".to_string(), |b| b.to_string())
+                        } else if result.is_i64() {
+                            result.as_i64().map_or("".to_string(), |n| n.to_string())
+                        } else {
+                            format!("{:?}", result)
+                        };
+                        crate::verbose_print!("[godot-neovim] Option result: {:?}", result);
+                        godot_print!("[godot-neovim] {}={}", option_name, value_str);
+                    }
+                    Err(e) => {
+                        godot_warn!(
+                            "[godot-neovim] Failed to get option '{}': {}",
+                            option_name,
+                            e
+                        );
+                    }
+                }
+            }
+        } else if let Err(e) = client.command(&full_cmd) {
             godot_warn!("[godot-neovim] Neovim command failed: {}", e);
         }
     }
@@ -98,9 +141,15 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// :w - Save the current file using ScriptEditor's File menu
+    /// :w - Save the current file using ScriptEditor's or ShaderEditor's File menu
     /// Uses FILE_MENU_SAVE to ensure cross-platform compatibility (macOS Cmd+S, Windows Ctrl+S)
     pub(in crate::plugin) fn cmd_save(&self) {
+        // Handle ShaderEditor separately
+        if self.current_editor_type == EditorType::Shader {
+            self.cmd_save_shader();
+            return;
+        }
+
         let editor = EditorInterface::singleton();
         let Some(script_editor) = editor.get_script_editor() else {
             crate::verbose_print!("[godot-neovim] :w - Could not find ScriptEditor");
@@ -151,6 +200,31 @@ impl GodotNeovimPlugin {
         }
 
         crate::verbose_print!("[godot-neovim] :w - File menu not found");
+    }
+
+    /// :w for ShaderEditor - Save the current shader using Ctrl+S
+    /// In Godot 4.6, ShaderEditor uses "script_editor/save" shortcut (Ctrl+S)
+    fn cmd_save_shader(&self) {
+        let Some(ref _editor) = self.current_editor else {
+            crate::verbose_print!("[godot-neovim] :w (shader) - No current editor");
+            return;
+        };
+
+        // Simulate Ctrl+S key press - ShaderEditor uses script_editor/save shortcut
+        let mut key_press = InputEventKey::new_gd();
+        key_press.set_keycode(Key::S);
+        key_press.set_ctrl_pressed(true);
+        key_press.set_pressed(true);
+        Input::singleton().parse_input_event(&key_press);
+
+        // Release the key
+        let mut key_release = InputEventKey::new_gd();
+        key_release.set_keycode(Key::S);
+        key_release.set_ctrl_pressed(true);
+        key_release.set_pressed(false);
+        Input::singleton().parse_input_event(&key_release);
+
+        crate::verbose_print!("[godot-neovim] :w (shader) - Ctrl+S simulated");
     }
 
     /// :wa/:wall - Save all open scripts
@@ -211,7 +285,11 @@ impl GodotNeovimPlugin {
     /// :e!/:edit! - Reload current file from disk (discard changes)
     /// Uses Neovim Master design: call Lua reload_buffer to reload and re-attach
     pub(in crate::plugin) fn cmd_reload(&mut self) {
-        let Some(ref neovim) = self.neovim else {
+        let neovim_ref = match self.current_editor_type {
+            EditorType::Shader => self.shader_neovim.as_ref(),
+            _ => self.script_neovim.as_ref(),
+        };
+        let Some(neovim) = neovim_ref else {
             godot_warn!("[godot-neovim] :e! - Neovim not connected");
             return;
         };
@@ -361,27 +439,46 @@ impl GodotNeovimPlugin {
 
         // Sync cursor to Neovim BEFORE closing, because on_script_changed
         // is called after the editor is freed and we can't read cursor then
-        if let Some(ref editor) = self.current_editor {
+        // First gather cursor data from editor
+        let cursor_data = if let Some(ref editor) = self.current_editor {
             if editor.is_instance_valid() {
                 let line = editor.get_caret_line() as i64 + 1; // 1-indexed for Neovim
                 let char_col = editor.get_caret_column();
-                // Convert character column to byte column for Neovim
                 let line_text = editor.get_line(editor.get_caret_line()).to_string();
                 let byte_col = Self::char_col_to_byte_col(&line_text, char_col) as i64;
-                if let Some(ref neovim) = self.neovim {
-                    if let Ok(client) = neovim.try_lock() {
-                        let _ = client.set_cursor(line, byte_col);
-                        // Set flag to skip cursor sync in on_script_changed
-                        self.cursor_synced_before_close = true;
-                        crate::verbose_print!(
-                            "[godot-neovim] :q - Synced cursor to Neovim before close: ({}, {}) (char_col={})",
-                            line,
-                            byte_col,
-                            char_col
-                        );
-                    }
+                Some((line, byte_col, char_col))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Now sync to Neovim
+        if let Some((line, byte_col, char_col)) = cursor_data {
+            let neovim_ref = match self.current_editor_type {
+                EditorType::Shader => self.shader_neovim.as_ref(),
+                _ => self.script_neovim.as_ref(),
+            };
+            if let Some(neovim) = neovim_ref {
+                if let Ok(client) = neovim.try_lock() {
+                    let _ = client.set_cursor(line, byte_col);
+                    // Set flag to skip cursor sync in on_script_changed
+                    self.cursor_synced_before_close = true;
+                    crate::verbose_print!(
+                        "[godot-neovim] :q - Synced cursor to Neovim before close: ({}, {}) (char_col={})",
+                        line,
+                        byte_col,
+                        char_col
+                    );
                 }
             }
+        }
+
+        // Handle ShaderEditor differently - close via TabContainer
+        if self.current_editor_type == EditorType::Shader {
+            self.close_shader_tab();
+            return;
         }
 
         // Don't clear current_editor here - if user cancels the save dialog,
@@ -405,6 +502,52 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] :q - Close triggered (Ctrl+W)");
     }
 
+    /// Close the current shader tab using Ctrl+W (same as ScriptEditor)
+    /// ShaderEditor also responds to Ctrl+W when it has focus
+    fn close_shader_tab(&mut self) {
+        // Disconnect from signals BEFORE clearing editor reference
+        // to avoid accessing freed CodeEdit instance
+        self.disconnect_caret_changed_signal();
+        self.disconnect_resized_signal();
+        self.disconnect_gui_input_signal();
+
+        // Delete shader buffer from Neovim before closing
+        if !self.current_script_path.is_empty() {
+            // Convert res:// path to absolute path for Neovim
+            let abs_path = if self.current_script_path.starts_with("res://") {
+                godot::classes::ProjectSettings::singleton()
+                    .globalize_path(&self.current_script_path)
+                    .to_string()
+            } else {
+                self.current_script_path.clone()
+            };
+            self.delete_neovim_buffer(&abs_path, EditorType::Shader);
+        }
+
+        // Clear current editor after disconnecting signals
+        self.current_editor = None;
+        self.current_editor_type = EditorType::Unknown;
+
+        // Use Ctrl+W to close the shader tab - Godot's ShaderEditor handles this
+        let mut key_press = InputEventKey::new_gd();
+        key_press.set_keycode(Key::W);
+        key_press.set_ctrl_pressed(true);
+        key_press.set_pressed(true);
+        Input::singleton().parse_input_event(&key_press);
+
+        let mut key_release = InputEventKey::new_gd();
+        key_release.set_keycode(Key::W);
+        key_release.set_ctrl_pressed(true);
+        key_release.set_pressed(false);
+        Input::singleton().parse_input_event(&key_release);
+
+        // Set flag to grab focus on shader editor after close
+        // This ensures we focus the remaining shader tab's CodeEdit
+        self.focus_shader_after_close = true;
+
+        crate::verbose_print!("[godot-neovim] :q - Shader tab close triggered (Ctrl+W)");
+    }
+
     /// ZQ - Close without saving (discard changes)
     pub(in crate::plugin) fn cmd_close_discard(&mut self) {
         // Disconnect from signals BEFORE closing
@@ -413,62 +556,79 @@ impl GodotNeovimPlugin {
 
         // Reload from disk using Lua function (same as :e!)
         // This ensures we get the actual disk content, not stale Script data
-        if let Some(ref neovim) = self.neovim {
-            if let Ok(client) = neovim.try_lock() {
-                match client.execute_lua_with_result("return _G.godot_neovim.reload_buffer()") {
-                    Ok(result) => {
-                        if let rmpv::Value::Map(map) = result {
-                            let mut lines: Vec<String> = Vec::new();
+        // First get the text from Neovim, then release lock before modifying editor
+        let restored_text: Option<String> = {
+            let neovim_ref = match self.current_editor_type {
+                EditorType::Shader => self.shader_neovim.as_ref(),
+                _ => self.script_neovim.as_ref(),
+            };
+            if let Some(neovim) = neovim_ref {
+                if let Ok(client) = neovim.try_lock() {
+                    match client.execute_lua_with_result("return _G.godot_neovim.reload_buffer()") {
+                        Ok(result) => {
+                            if let rmpv::Value::Map(map) = result {
+                                let mut lines: Vec<String> = Vec::new();
 
-                            for (key, value) in map {
-                                if let rmpv::Value::String(k) = key {
-                                    if k.as_str() == Some("lines") {
-                                        if let rmpv::Value::Array(arr) = value {
-                                            lines = arr
-                                                .into_iter()
-                                                .filter_map(|v| {
-                                                    if let rmpv::Value::String(s) = v {
-                                                        s.into_str()
-                                                    } else {
-                                                        None
-                                                    }
-                                                })
-                                                .collect();
+                                for (key, value) in map {
+                                    if let rmpv::Value::String(k) = key {
+                                        if k.as_str() == Some("lines") {
+                                            if let rmpv::Value::Array(arr) = value {
+                                                lines = arr
+                                                    .into_iter()
+                                                    .filter_map(|v| {
+                                                        if let rmpv::Value::String(s) = v {
+                                                            s.into_str()
+                                                        } else {
+                                                            None
+                                                        }
+                                                    })
+                                                    .collect();
+                                            }
                                         }
                                     }
                                 }
-                            }
-
-                            let text = lines.join("\n");
-
-                            // Apply disk content to CodeEdit before closing
-                            if let Some(ref mut code_edit) = self.current_editor {
-                                code_edit.set_text(&text);
-                                code_edit.tag_saved_version();
-                                crate::verbose_print!(
-                                    "[godot-neovim] ZQ - Restored {} lines to CodeEdit",
-                                    lines.len()
-                                );
-                            }
-
-                            // Also update the Script resource to prevent Godot from
-                            // caching the modified content when reopening
-                            let editor = EditorInterface::singleton();
-                            if let Some(mut script_editor) = editor.get_script_editor() {
-                                if let Some(mut current_script) = script_editor.get_current_script()
-                                {
-                                    current_script.set_source_code(&text);
-                                    crate::verbose_print!(
-                                        "[godot-neovim] ZQ - Restored {} lines to Script",
-                                        lines.len()
-                                    );
-                                }
+                                Some(lines.join("\n"))
+                            } else {
+                                None
                             }
                         }
+                        Err(e) => {
+                            godot_warn!("[godot-neovim] ZQ - Failed to reload from disk: {}", e);
+                            None
+                        }
                     }
-                    Err(e) => {
-                        godot_warn!("[godot-neovim] ZQ - Failed to reload from disk: {}", e);
-                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        // Now apply restored text to editor (lock is released)
+        if let Some(text) = restored_text {
+            let line_count = text.lines().count();
+
+            // Apply disk content to CodeEdit before closing
+            if let Some(ref mut code_edit) = self.current_editor {
+                code_edit.set_text(&text);
+                code_edit.tag_saved_version();
+                crate::verbose_print!(
+                    "[godot-neovim] ZQ - Restored {} lines to CodeEdit",
+                    line_count
+                );
+            }
+
+            // Also update the Script resource to prevent Godot from
+            // caching the modified content when reopening
+            let editor = EditorInterface::singleton();
+            if let Some(mut script_editor) = editor.get_script_editor() {
+                if let Some(mut current_script) = script_editor.get_current_script() {
+                    current_script.set_source_code(&text);
+                    crate::verbose_print!(
+                        "[godot-neovim] ZQ - Restored {} lines to Script",
+                        line_count
+                    );
                 }
             }
         }
@@ -492,21 +652,34 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] ZQ - Close triggered (discard changes)");
     }
 
-    /// :qa/:qall - Close all script tabs
-    /// Uses the same mechanism as Godot's "Close All" menu option
-    /// Note: Neovim buffer deletion is handled by on_script_close signal
+    /// :qa/:qall - Close all tabs in the current editor type
+    /// - ShaderEditor: Close all shader tabs only
+    /// - ScriptEditor: Close all script tabs only
+    ///
+    /// Note: Neovim buffer deletion is handled by on_script_close signal for scripts
     pub(in crate::plugin) fn cmd_close_all(&mut self) {
+        // Determine which editor type we're in
+        let is_shader_editor = self.current_editor_type == EditorType::Shader;
+
         // Disconnect from signals BEFORE closing
         self.disconnect_caret_changed_signal();
         self.disconnect_resized_signal();
+
+        // Clear current editor reference since it will be freed
+        self.current_editor = None;
+        self.current_editor_type = EditorType::Unknown;
+
+        // If in ShaderEditor, close only shader tabs
+        if is_shader_editor {
+            self.close_all_shader_tabs();
+            return;
+        }
 
         // Set flag to skip on_script_changed processing during close all
         // Will be reset by process() when operation completes
         self.closing_all_tabs = true;
 
-        // Clear current editor reference since it will be freed
-        self.current_editor = None;
-
+        // Close all script tabs
         let editor = EditorInterface::singleton();
         let Some(script_editor) = editor.get_script_editor() else {
             godot_warn!("[godot-neovim] :qa - Could not find ScriptEditor");
@@ -562,5 +735,210 @@ impl GodotNeovimPlugin {
 
         godot_warn!("[godot-neovim] :qa - Could not find File menu in ScriptEditor");
         self.closing_all_tabs = false;
+    }
+
+    /// Close all shader tabs in ShaderEditor
+    /// Called from cmd_close_all when in ShaderEditor
+    fn close_all_shader_tabs(&mut self) {
+        // Find ShaderEditor's TabContainer and get shader paths for buffer cleanup
+        let editor = EditorInterface::singleton();
+        let Some(base_control) = editor.get_base_control() else {
+            return;
+        };
+
+        // Find EditorNode
+        let Some(editor_node) = self.find_editor_node_from_control(&base_control) else {
+            return;
+        };
+
+        // Find ShaderEditor's TabContainer and collect shader paths
+        let shader_paths = self.collect_shader_paths(&editor_node);
+
+        if shader_paths.is_empty() {
+            crate::verbose_print!("[godot-neovim] :qa - No shader tabs to close");
+            return;
+        }
+
+        let tab_count = shader_paths.len();
+        crate::verbose_print!("[godot-neovim] :qa - Closing {} shader tab(s)", tab_count);
+
+        // Delete shader buffers from Neovim (use Shader type for shader_neovim)
+        for path in &shader_paths {
+            self.delete_neovim_buffer(path, EditorType::Shader);
+        }
+
+        // Close shader tabs using file_menu's "Close" (id=8) repeatedly
+        // We can't access context_menu's Close All because it's only populated when shown
+        if let Some(mut popup) = self.find_shader_file_menu_popup(&editor_node) {
+            // FILE_MENU_CLOSE = 8 in ShaderEditorPlugin (Godot 4.6)
+            const SHADER_FILE_MENU_CLOSE: i64 = 8;
+
+            // Queue up close operations for each tab
+            for i in 0..tab_count {
+                popup.call_deferred(
+                    "emit_signal",
+                    &[
+                        "id_pressed".to_variant(),
+                        SHADER_FILE_MENU_CLOSE.to_variant(),
+                    ],
+                );
+                crate::verbose_print!(
+                    "[godot-neovim] :qa - queued close for tab {} (id={})",
+                    i,
+                    SHADER_FILE_MENU_CLOSE
+                );
+            }
+        } else {
+            crate::verbose_print!("[godot-neovim] :qa - ShaderEditor file_menu not found");
+        }
+    }
+
+    /// Find ShaderEditor's file_menu popup (PopupMenu)
+    /// The file_menu is a MenuButton with text "File" in ShaderEditor's UI
+    fn find_shader_file_menu_popup(
+        &self,
+        node: &Gd<godot::classes::Node>,
+    ) -> Option<Gd<godot::classes::PopupMenu>> {
+        let class_name = node.get_class().to_string();
+
+        // Look for HSplitContainer that contains ItemList (this is files_split)
+        if class_name == "HSplitContainer" {
+            // Check if this is files_split (has ItemList child)
+            let has_item_list = (0..node.get_child_count()).any(|i| {
+                node.get_child(i)
+                    .is_some_and(|c| c.get_class().to_string() == "ItemList")
+            });
+
+            if has_item_list {
+                // This is files_split, search for file_menu MenuButton within entire subtree
+                if let Some(popup) = self.find_file_menu_button(node) {
+                    return Some(popup);
+                }
+            }
+        }
+
+        // Recursively search children
+        for i in 0..node.get_child_count() {
+            if let Some(child) = node.get_child(i) {
+                if let Some(found) = self.find_shader_file_menu_popup(&child) {
+                    return Some(found);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Find MenuButton with text "File" in a subtree
+    fn find_file_menu_button(
+        &self,
+        node: &Gd<godot::classes::Node>,
+    ) -> Option<Gd<godot::classes::PopupMenu>> {
+        let class_name = node.get_class().to_string();
+
+        if class_name == "MenuButton" {
+            if let Ok(menu_button) = node.clone().try_cast::<MenuButton>() {
+                let text = menu_button.get_text().to_string();
+                if text == "File" {
+                    crate::verbose_print!("[godot-neovim] Found ShaderEditor file_menu");
+                    return menu_button.get_popup();
+                }
+            }
+        }
+
+        // Recursively search children
+        for i in 0..node.get_child_count() {
+            if let Some(child) = node.get_child(i) {
+                if let Some(found) = self.find_file_menu_button(&child) {
+                    return Some(found);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Find EditorNode from a Control
+    fn find_editor_node_from_control(
+        &self,
+        control: &Gd<godot::classes::Control>,
+    ) -> Option<Gd<godot::classes::Node>> {
+        let mut current: Gd<godot::classes::Node> = control.clone().upcast();
+        loop {
+            let class_name = current.get_class().to_string();
+            if class_name == "EditorNode" {
+                return Some(current);
+            }
+            current = current.get_parent()?;
+        }
+    }
+
+    /// Collect all shader paths from ShaderEditor's ItemList
+    fn collect_shader_paths(&self, editor_node: &Gd<godot::classes::Node>) -> Vec<String> {
+        let mut paths = Vec::new();
+
+        // Search for HSplitContainer containing ItemList with shader paths
+        self.find_shader_item_list(editor_node, &mut paths);
+
+        paths
+    }
+
+    /// Recursively find ItemList in ShaderEditor and collect shader paths
+    fn find_shader_item_list(&self, node: &Gd<godot::classes::Node>, paths: &mut Vec<String>) {
+        let class_name = node.get_class().to_string();
+
+        // Look for HSplitContainer (files_split in ShaderEditor)
+        if class_name == "HSplitContainer" {
+            use godot::classes::ItemList;
+
+            let child_count = node.get_child_count();
+            for i in 0..child_count {
+                if let Some(child) = node.get_child(i) {
+                    if child.get_class().to_string() == "ItemList" {
+                        if let Ok(item_list) = child.try_cast::<ItemList>() {
+                            // Collect all shader paths from ItemList tooltips
+                            let item_count = item_list.get_item_count();
+                            for idx in 0..item_count {
+                                let tooltip = item_list.get_item_tooltip(idx).to_string();
+                                if !tooltip.is_empty()
+                                    && (tooltip.ends_with(".gdshader")
+                                        || tooltip.ends_with(".shader")
+                                        || tooltip.ends_with(".gdshaderinc"))
+                                {
+                                    // Convert res:// path to absolute path for Neovim
+                                    if let Some(abs_path) =
+                                        self.convert_res_path_to_absolute(&tooltip)
+                                    {
+                                        paths.push(abs_path);
+                                    }
+                                }
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Recursively search children
+        let child_count = node.get_child_count();
+        for i in 0..child_count {
+            if let Some(child) = node.get_child(i) {
+                self.find_shader_item_list(&child, paths);
+            }
+        }
+    }
+
+    /// Convert res:// path to absolute path
+    fn convert_res_path_to_absolute(&self, res_path: &str) -> Option<String> {
+        use godot::classes::ProjectSettings;
+        let project_path = ProjectSettings::singleton()
+            .globalize_path(res_path)
+            .to_string();
+        if project_path.is_empty() {
+            None
+        } else {
+            Some(project_path)
+        }
     }
 }
