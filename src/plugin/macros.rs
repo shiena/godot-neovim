@@ -7,6 +7,7 @@ impl GodotNeovimPlugin {
     pub(super) fn start_macro_recording(&mut self, register: char) {
         self.recording_macro = Some(register);
         self.macro_buffer.clear();
+        self.update_recording_label(Some(register));
         crate::verbose_print!("[godot-neovim] q{}: Started recording macro", register);
     }
 
@@ -14,6 +15,7 @@ impl GodotNeovimPlugin {
     pub(super) fn stop_macro_recording(&mut self) {
         if let Some(register) = self.recording_macro.take() {
             let keys = std::mem::take(&mut self.macro_buffer);
+            self.update_recording_label(None);
             if !keys.is_empty() {
                 self.macros.insert(register, keys.clone());
                 crate::verbose_print!(

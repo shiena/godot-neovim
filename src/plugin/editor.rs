@@ -117,10 +117,13 @@ impl GodotNeovimPlugin {
             // Label was freed, clear and create a new one
             if label_field_is_shader {
                 self.shader_mode_label = None;
+                self.shader_recording_label = None;
             } else {
                 self.mode_label = None;
+                self.recording_label = None;
             }
             self.create_mode_label();
+            self.create_recording_label();
             return;
         }
 
@@ -168,10 +171,19 @@ impl GodotNeovimPlugin {
                             if let Some(mut old_label) = self.shader_mode_label.take() {
                                 old_label.queue_free();
                             }
-                        } else if let Some(mut old_label) = self.mode_label.take() {
-                            old_label.queue_free();
+                            if let Some(mut old_label) = self.shader_recording_label.take() {
+                                old_label.queue_free();
+                            }
+                        } else {
+                            if let Some(mut old_label) = self.mode_label.take() {
+                                old_label.queue_free();
+                            }
+                            if let Some(mut old_label) = self.recording_label.take() {
+                                old_label.queue_free();
+                            }
                         }
                         self.create_mode_label();
+                        self.create_recording_label();
                         return;
                     }
 
@@ -191,7 +203,7 @@ impl GodotNeovimPlugin {
     /// Uses: ScriptEditor.get_current_editor() -> ScriptEditorBase.get_base_editor() -> CodeEdit
     fn get_script_editor_code_edit_via_api(&self) -> Option<Gd<CodeEdit>> {
         let editor = EditorInterface::singleton();
-        let mut script_editor = editor.get_script_editor()?;
+        let script_editor = editor.get_script_editor()?;
 
         // Use public API: get_current_editor() returns ScriptEditorBase
         let current_editor: Gd<ScriptEditorBase> = script_editor.get_current_editor()?;
