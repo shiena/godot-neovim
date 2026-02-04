@@ -129,6 +129,12 @@ pub struct GodotNeovimPlugin {
     /// Separate mode label for ShaderEditor (independent from ScriptEditor)
     #[init(val = None)]
     shader_mode_label: Option<Gd<Label>>,
+    /// Recording indicator label for ScriptEditor
+    #[init(val = None)]
+    recording_label: Option<Gd<Label>>,
+    /// Separate recording indicator label for ShaderEditor
+    #[init(val = None)]
+    shader_recording_label: Option<Gd<Label>>,
     #[init(val = None)]
     current_editor: Option<Gd<CodeEdit>>,
     /// Type of the current editor (Script, Shader, Unknown)
@@ -433,8 +439,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
             crate::verbose_print!("[godot-neovim] LSP disabled (use_thread=false)");
         }
 
-        // Create mode indicator label
+        // Create mode indicator label and recording indicator
         self.create_mode_label();
+        self.create_recording_label();
 
         // Connect to script editor signals
         self.connect_script_editor_signals();

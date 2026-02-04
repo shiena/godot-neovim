@@ -57,6 +57,77 @@ impl GodotNeovimPlugin {
         }
     }
 
+    /// Create and add the recording indicator label to the status bar
+    /// Creates separate labels for ScriptEditor and ShaderEditor
+    pub(super) fn create_recording_label(&mut self) {
+        let Some(code_edit) = &self.current_editor else {
+            return;
+        };
+
+        let Some(mut status_bar) = self.find_status_bar(code_edit.clone().upcast()) else {
+            return;
+        };
+
+        // Check if label already exists
+        let label_name = match self.current_editor_type {
+            EditorType::Shader => "NeovimShaderRecordingLabel",
+            _ => "NeovimRecordingLabel",
+        };
+
+        // Don't create if already exists
+        if status_bar.has_node(label_name) {
+            return;
+        }
+
+        let mut label = Label::new_alloc();
+        label.set_name(label_name);
+        label.set_text("");
+        label.set_visible(false);
+
+        // Style: red color for recording indicator
+        label.add_theme_color_override("font_color", Color::from_rgb(1.0, 0.3, 0.3));
+
+        // Add to status bar, after mode label (index 1)
+        status_bar.add_child(&label);
+        status_bar.move_child(&label, 1);
+
+        match self.current_editor_type {
+            EditorType::Shader => {
+                self.shader_recording_label = Some(label);
+            }
+            _ => {
+                self.recording_label = Some(label);
+            }
+        }
+    }
+
+    /// Update recording indicator visibility and text
+    pub(super) fn update_recording_label(&mut self, register: Option<char>) {
+        let label = match self.current_editor_type {
+            EditorType::Shader => self.shader_recording_label.as_mut(),
+            _ => self.recording_label.as_mut(),
+        };
+
+        let Some(label) = label else {
+            return;
+        };
+
+        if !label.is_instance_valid() {
+            return;
+        }
+
+        match register {
+            Some(reg) => {
+                label.set_text(&format!(" recording @{} ", reg));
+                label.set_visible(true);
+            }
+            None => {
+                label.set_text("");
+                label.set_visible(false);
+            }
+        }
+    }
+
     /// Find the status bar HBoxContainer in the editor hierarchy
     pub(super) fn find_status_bar(&self, node: Gd<Control>) -> Option<Gd<Control>> {
         // The status bar is an HBoxContainer inside CodeTextEditor (sibling of CodeEdit)
