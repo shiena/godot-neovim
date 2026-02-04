@@ -2,7 +2,7 @@
 //! Also handles forwarding Ex commands to Neovim
 
 use super::super::{EditorType, GodotNeovimPlugin};
-use godot::classes::{EditorInterface, Input, InputEventKey, MenuButton, ResourceSaver};
+use godot::classes::{CodeEdit, EditorInterface, Input, InputEventKey, MenuButton, ResourceSaver};
 use godot::global::Key;
 use godot::prelude::*;
 
@@ -141,8 +141,8 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// :w - Save the current file using ScriptEditor's or ShaderEditor's File menu
-    /// Uses FILE_MENU_SAVE to ensure cross-platform compatibility (macOS Cmd+S, Windows Ctrl+S)
+    /// :w - Save the current file using public API
+    /// Uses Script.set_source_code() + ResourceSaver.save() for stability
     pub(in crate::plugin) fn cmd_save(&self) {
         // Handle ShaderEditor separately
         if self.current_editor_type == EditorType::Shader {
@@ -151,55 +151,52 @@ impl GodotNeovimPlugin {
         }
 
         let editor = EditorInterface::singleton();
-        let Some(script_editor) = editor.get_script_editor() else {
+        let Some(mut script_editor) = editor.get_script_editor() else {
             crate::verbose_print!("[godot-neovim] :w - Could not find ScriptEditor");
             return;
         };
 
-        let script_editor_node: Gd<Node> = script_editor.upcast();
+        // Use public API: get_current_script() to get the Script resource
+        let Some(mut current_script) = script_editor.get_current_script() else {
+            crate::verbose_print!("[godot-neovim] :w - No current script");
+            return;
+        };
 
-        // Structure: ScriptEditor -> VBoxContainer -> HBoxContainer (menu_hb) -> MenuButton (File)
-        let children = script_editor_node.get_children();
-        for i in 0..children.len() {
-            if let Some(child) = children.get(i) {
-                if child.is_class("VBoxContainer") {
-                    let vbox_children = child.get_children();
-                    for j in 0..vbox_children.len() {
-                        if let Some(vbox_child) = vbox_children.get(j) {
-                            if vbox_child.is_class("HBoxContainer") {
-                                // Found menu_hb, now find MenuButton (File)
-                                let hbox_children = vbox_child.get_children();
-                                for k in 0..hbox_children.len() {
-                                    if let Some(hbox_child) = hbox_children.get(k) {
-                                        if hbox_child.is_class("MenuButton") {
-                                            let menu_button: Gd<MenuButton> = hbox_child.cast();
-                                            if let Some(mut popup) = menu_button.get_popup() {
-                                                // FILE_MENU_SAVE = 5 (from Godot's script_editor_plugin.h)
-                                                const FILE_MENU_SAVE: i64 = 5;
-                                                popup.call_deferred(
-                                                    "emit_signal",
-                                                    &[
-                                                        "id_pressed".to_variant(),
-                                                        FILE_MENU_SAVE.to_variant(),
-                                                    ],
-                                                );
-                                                crate::verbose_print!(
-                                                    "[godot-neovim] :w - emit_signal(id_pressed, {})",
-                                                    FILE_MENU_SAVE
-                                                );
-                                                return;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+        let path = current_script.get_path();
+        if path.is_empty() {
+            crate::verbose_print!("[godot-neovim] :w - Script has no path (unsaved new file)");
+            return;
+        }
+
+        // Sync CodeEdit content to Script resource before saving
+        if let Some(ref code_editor) = self.current_editor {
+            if code_editor.is_instance_valid() {
+                let text = code_editor.get_text();
+                current_script.set_source_code(&text);
             }
         }
 
-        crate::verbose_print!("[godot-neovim] :w - File menu not found");
+        // Save using ResourceSaver (public API, stable)
+        let result = ResourceSaver::singleton()
+            .save_ex(&current_script)
+            .path(&path)
+            .done();
+
+        if result == godot::global::Error::OK {
+            // Mark CodeEdit as saved to clear dirty flag
+            if let Some(ref mut code_editor) = self.current_editor.clone() {
+                if code_editor.is_instance_valid() {
+                    code_editor.tag_saved_version();
+                }
+            }
+            crate::verbose_print!("[godot-neovim] :w - Saved via public API: {}", path);
+        } else {
+            godot_warn!(
+                "[godot-neovim] :w - Failed to save: {} (error: {:?})",
+                path,
+                result
+            );
+        }
     }
 
     /// :w for ShaderEditor - Save the current shader using Ctrl+S
@@ -228,58 +225,68 @@ impl GodotNeovimPlugin {
     }
 
     /// :wa/:wall - Save all open scripts
-    /// Uses Godot's built-in FILE_MENU_SAVE_ALL to properly update dirty markers
+    /// Uses public API: get_open_script_editors() to access all CodeEdits
     pub(in crate::plugin) fn cmd_save_all(&self) {
         let editor = EditorInterface::singleton();
-        let Some(script_editor) = editor.get_script_editor() else {
+        let Some(mut script_editor) = editor.get_script_editor() else {
             crate::verbose_print!("[godot-neovim] :wa - Could not find ScriptEditor");
             return;
         };
 
-        let script_editor_node: Gd<Node> = script_editor.upcast();
+        // Get all open script editors and scripts (public API)
+        let open_editors = script_editor.get_open_script_editors();
+        let open_scripts = script_editor.get_open_scripts();
+        let mut saved_count = 0;
 
-        // Structure: ScriptEditor -> VBoxContainer -> HBoxContainer (menu_hb) -> MenuButton (File)
-        let children = script_editor_node.get_children();
-        for i in 0..children.len() {
-            if let Some(child) = children.get(i) {
-                if child.is_class("VBoxContainer") {
-                    let vbox_children = child.get_children();
-                    for j in 0..vbox_children.len() {
-                        if let Some(vbox_child) = vbox_children.get(j) {
-                            if vbox_child.is_class("HBoxContainer") {
-                                // Found menu_hb, now find MenuButton (File)
-                                let hbox_children = vbox_child.get_children();
-                                for k in 0..hbox_children.len() {
-                                    if let Some(hbox_child) = hbox_children.get(k) {
-                                        if hbox_child.is_class("MenuButton") {
-                                            let menu_button: Gd<MenuButton> = hbox_child.cast();
-                                            if let Some(mut popup) = menu_button.get_popup() {
-                                                // FILE_MENU_SAVE_ALL = 7
-                                                const FILE_MENU_SAVE_ALL: i64 = 7;
-                                                popup.call_deferred(
-                                                    "emit_signal",
-                                                    &[
-                                                        "id_pressed".to_variant(),
-                                                        FILE_MENU_SAVE_ALL.to_variant(),
-                                                    ],
-                                                );
-                                                crate::verbose_print!(
-                                                    "[godot-neovim] :wa - emit_signal(id_pressed, {})",
-                                                    FILE_MENU_SAVE_ALL
-                                                );
-                                                return;
-                                            }
-                                        }
-                                    }
-                                }
+        // Sync and save each script
+        for i in 0..open_scripts.len() {
+            if let Some(script) = open_scripts.get(i) {
+                let path = script.get_path();
+                if path.is_empty() {
+                    continue;
+                }
+
+                // Get the corresponding ScriptEditorBase to access its CodeEdit
+                if let Some(editor_base) = open_editors.get(i) {
+                    // Sync CodeEdit content to Script resource before saving
+                    if let Some(base_editor) = editor_base.get_base_editor() {
+                        if let Ok(code_edit) = base_editor.try_cast::<CodeEdit>() {
+                            let text = code_edit.get_text();
+                            script
+                                .clone()
+                                .cast::<godot::classes::Script>()
+                                .set_source_code(&text);
+                        }
+                    }
+                }
+
+                // Save using ResourceSaver (public API)
+                let result = ResourceSaver::singleton()
+                    .save_ex(&script)
+                    .path(&path)
+                    .done();
+
+                if result == godot::global::Error::OK {
+                    saved_count += 1;
+
+                    // Mark CodeEdit as saved to clear dirty flag (*)
+                    if let Some(editor_base) = open_editors.get(i) {
+                        if let Some(base_editor) = editor_base.get_base_editor() {
+                            if let Ok(mut code_edit) = base_editor.try_cast::<CodeEdit>() {
+                                code_edit.tag_saved_version();
                             }
                         }
                     }
+                } else {
+                    godot_warn!("[godot-neovim] :wa - Failed to save: {}", path);
                 }
             }
         }
 
-        crate::verbose_print!("[godot-neovim] :wa - File menu not found");
+        crate::verbose_print!(
+            "[godot-neovim] :wa - Saved {} scripts via public API",
+            saved_count
+        );
     }
 
     /// :e!/:edit! - Reload current file from disk (discard changes)
