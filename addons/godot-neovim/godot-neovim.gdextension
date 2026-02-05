@@ -4,13 +4,13 @@ compatibility_minimum = 4.4
 reloadable = true
 
 [libraries]
-linux.debug.x86_64 = "res://addons/godot-neovim/bin/linux/libgodot_neovim.so"
-linux.release.x86_64 = "res://addons/godot-neovim/bin/linux/libgodot_neovim.so"
-linux.debug.arm64 = "res://addons/godot-neovim/bin/linux-arm64/libgodot_neovim.so"
-linux.release.arm64 = "res://addons/godot-neovim/bin/linux-arm64/libgodot_neovim.so"
-windows.debug.x86_64 = "res://addons/godot-neovim/bin/windows/godot_neovim.dll"
-windows.release.x86_64 = "res://addons/godot-neovim/bin/windows/godot_neovim.dll"
-macos.debug.x86_64 = "res://addons/godot-neovim/bin/macos-x86_64/libgodot_neovim.dylib"
-macos.release.x86_64 = "res://addons/godot-neovim/bin/macos-x86_64/libgodot_neovim.dylib"
-macos.debug.arm64 = "res://addons/godot-neovim/bin/macos-arm64/libgodot_neovim.dylib"
-macos.release.arm64 = "res://addons/godot-neovim/bin/macos-arm64/libgodot_neovim.dylib"
+linux.debug.editor.x86_64 = "res://addons/godot-neovim/bin/linux/libgodot_neovim.so"
+linux.release.editor.x86_64 = "res://addons/godot-neovim/bin/linux/libgodot_neovim.so"
+linux.debug.editor.arm64 = "res://addons/godot-neovim/bin/linux-arm64/libgodot_neovim.so"
+linux.release.editor.arm64 = "res://addons/godot-neovim/bin/linux-arm64/libgodot_neovim.so"
+windows.debug.editor.x86_64 = "res://addons/godot-neovim/bin/windows/godot_neovim.dll"
+windows.release.editor.x86_64 = "res://addons/godot-neovim/bin/windows/godot_neovim.dll"
+macos.debug.editor.x86_64 = "res://addons/godot-neovim/bin/macos-x86_64/libgodot_neovim.dylib"
+macos.release.editor.x86_64 = "res://addons/godot-neovim/bin/macos-x86_64/libgodot_neovim.dylib"
+macos.debug.editor.arm64 = "res://addons/godot-neovim/bin/macos-arm64/libgodot_neovim.dylib"
+macos.release.editor.arm64 = "res://addons/godot-neovim/bin/macos-arm64/libgodot_neovim.dylib"
