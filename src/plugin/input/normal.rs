@@ -579,9 +579,11 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 'q' for macro recording (start/stop) - but not after 'g' (that's gq for format)
+        // Also skip if Alt is pressed (AltGr+Q = '@' on German keyboards)
         if keycode == Key::Q
             && !key_event.is_shift_pressed()
             && !key_event.is_ctrl_pressed()
+            && !key_event.is_alt_pressed()
             && self.last_key != "g"
         {
             if self.recording_macro.is_some() {
