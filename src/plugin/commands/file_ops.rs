@@ -2,8 +2,8 @@
 //! Also handles forwarding Ex commands to Neovim
 
 use super::super::{EditorType, GodotNeovimPlugin};
-use godot::classes::{CodeEdit, EditorInterface, Input, InputEventKey, MenuButton, ResourceSaver};
-use godot::global::Key;
+use super::{simulate_ctrl_s, simulate_ctrl_shift_alt_s, simulate_ctrl_w};
+use godot::classes::{EditorInterface, MenuButton, ResourceSaver};
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
@@ -141,152 +141,23 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// :w - Save the current file using public API
-    /// Uses Script.set_source_code() + ResourceSaver.save() for stability
+    /// :w - Save the current file using Ctrl+S simulation
+    /// This triggers Godot's internal save processing, including EditorPlugin hooks
     pub(in crate::plugin) fn cmd_save(&self) {
-        // Handle ShaderEditor separately
-        if self.current_editor_type == EditorType::Shader {
-            self.cmd_save_shader();
-            return;
-        }
-
-        let editor = EditorInterface::singleton();
-        let Some(mut script_editor) = editor.get_script_editor() else {
-            crate::verbose_print!("[godot-neovim] :w - Could not find ScriptEditor");
-            return;
-        };
-
-        // Use public API: get_current_script() to get the Script resource
-        let Some(mut current_script) = script_editor.get_current_script() else {
-            crate::verbose_print!("[godot-neovim] :w - No current script");
-            return;
-        };
-
-        let path = current_script.get_path();
-        if path.is_empty() {
-            crate::verbose_print!("[godot-neovim] :w - Script has no path (unsaved new file)");
-            return;
-        }
-
-        // Sync CodeEdit content to Script resource before saving
-        if let Some(ref code_editor) = self.current_editor {
-            if code_editor.is_instance_valid() {
-                let text = code_editor.get_text();
-                current_script.set_source_code(&text);
-            }
-        }
-
-        // Save using ResourceSaver (public API, stable)
-        let result = ResourceSaver::singleton()
-            .save_ex(&current_script)
-            .path(&path)
-            .done();
-
-        if result == godot::global::Error::OK {
-            // Mark CodeEdit as saved to clear dirty flag
-            if let Some(ref mut code_editor) = self.current_editor.clone() {
-                if code_editor.is_instance_valid() {
-                    code_editor.tag_saved_version();
-                }
-            }
-            crate::verbose_print!("[godot-neovim] :w - Saved via public API: {}", path);
-        } else {
-            godot_warn!(
-                "[godot-neovim] :w - Failed to save: {} (error: {:?})",
-                path,
-                result
-            );
-        }
-    }
-
-    /// :w for ShaderEditor - Save the current shader using Ctrl+S
-    /// In Godot 4.6, ShaderEditor uses "script_editor/save" shortcut (Ctrl+S)
-    fn cmd_save_shader(&self) {
         let Some(ref _editor) = self.current_editor else {
-            crate::verbose_print!("[godot-neovim] :w (shader) - No current editor");
+            crate::verbose_print!("[godot-neovim] :w - No current editor");
             return;
         };
 
-        // Simulate Ctrl+S key press - ShaderEditor uses script_editor/save shortcut
-        let mut key_press = InputEventKey::new_gd();
-        key_press.set_keycode(Key::S);
-        key_press.set_ctrl_pressed(true);
-        key_press.set_pressed(true);
-        Input::singleton().parse_input_event(&key_press);
-
-        // Release the key
-        let mut key_release = InputEventKey::new_gd();
-        key_release.set_keycode(Key::S);
-        key_release.set_ctrl_pressed(true);
-        key_release.set_pressed(false);
-        Input::singleton().parse_input_event(&key_release);
-
-        crate::verbose_print!("[godot-neovim] :w (shader) - Ctrl+S simulated");
+        simulate_ctrl_s();
+        crate::verbose_print!("[godot-neovim] :w - Ctrl+S simulated");
     }
 
-    /// :wa/:wall - Save all open scripts
-    /// Uses public API: get_open_script_editors() to access all CodeEdits
+    /// :wa/:wall - Save all open scripts using Ctrl+Shift+Alt+S simulation
+    /// This triggers Godot's internal save_all processing, including EditorPlugin hooks
     pub(in crate::plugin) fn cmd_save_all(&self) {
-        let editor = EditorInterface::singleton();
-        let Some(mut script_editor) = editor.get_script_editor() else {
-            crate::verbose_print!("[godot-neovim] :wa - Could not find ScriptEditor");
-            return;
-        };
-
-        // Get all open script editors and scripts (public API)
-        let open_editors = script_editor.get_open_script_editors();
-        let open_scripts = script_editor.get_open_scripts();
-        let mut saved_count = 0;
-
-        // Sync and save each script
-        for i in 0..open_scripts.len() {
-            if let Some(script) = open_scripts.get(i) {
-                let path = script.get_path();
-                if path.is_empty() {
-                    continue;
-                }
-
-                // Get the corresponding ScriptEditorBase to access its CodeEdit
-                if let Some(editor_base) = open_editors.get(i) {
-                    // Sync CodeEdit content to Script resource before saving
-                    if let Some(base_editor) = editor_base.get_base_editor() {
-                        if let Ok(code_edit) = base_editor.try_cast::<CodeEdit>() {
-                            let text = code_edit.get_text();
-                            script
-                                .clone()
-                                .cast::<godot::classes::Script>()
-                                .set_source_code(&text);
-                        }
-                    }
-                }
-
-                // Save using ResourceSaver (public API)
-                let result = ResourceSaver::singleton()
-                    .save_ex(&script)
-                    .path(&path)
-                    .done();
-
-                if result == godot::global::Error::OK {
-                    saved_count += 1;
-
-                    // Mark CodeEdit as saved to clear dirty flag (*)
-                    if let Some(editor_base) = open_editors.get(i) {
-                        if let Some(base_editor) = editor_base.get_base_editor() {
-                            if let Ok(mut code_edit) = base_editor.try_cast::<CodeEdit>() {
-                                code_edit.tag_saved_version();
-                            }
-                        }
-                    }
-                } else {
-                    godot_warn!("[godot-neovim] :wa - Failed to save: {}", path);
-                }
-            }
-        }
-
-        crate::verbose_print!(
-            "[godot-neovim] :wa - Saved {} scripts via public API",
-            saved_count
-        );
+        simulate_ctrl_shift_alt_s();
+        crate::verbose_print!("[godot-neovim] :wa - Ctrl+Shift+Alt+S simulated");
     }
 
     /// :e!/:edit! - Reload current file from disk (discard changes)
@@ -492,20 +363,7 @@ impl GodotNeovimPlugin {
         // the script stays open and we need to keep the reference.
         // When the script actually closes, on_script_changed will handle cleanup.
 
-        // Simulate Ctrl+W key press
-        let mut key_press = InputEventKey::new_gd();
-        key_press.set_keycode(Key::W);
-        key_press.set_ctrl_pressed(true);
-        key_press.set_pressed(true);
-        Input::singleton().parse_input_event(&key_press);
-
-        // Release the key
-        let mut key_release = InputEventKey::new_gd();
-        key_release.set_keycode(Key::W);
-        key_release.set_ctrl_pressed(true);
-        key_release.set_pressed(false);
-        Input::singleton().parse_input_event(&key_release);
-
+        simulate_ctrl_w();
         crate::verbose_print!("[godot-neovim] :q - Close triggered (Ctrl+W)");
     }
 
@@ -536,17 +394,7 @@ impl GodotNeovimPlugin {
         self.current_editor_type = EditorType::Unknown;
 
         // Use Ctrl+W to close the shader tab - Godot's ShaderEditor handles this
-        let mut key_press = InputEventKey::new_gd();
-        key_press.set_keycode(Key::W);
-        key_press.set_ctrl_pressed(true);
-        key_press.set_pressed(true);
-        Input::singleton().parse_input_event(&key_press);
-
-        let mut key_release = InputEventKey::new_gd();
-        key_release.set_keycode(Key::W);
-        key_release.set_ctrl_pressed(true);
-        key_release.set_pressed(false);
-        Input::singleton().parse_input_event(&key_release);
+        simulate_ctrl_w();
 
         // Set flag to grab focus on shader editor after close
         // This ensures we focus the remaining shader tab's CodeEdit
@@ -643,19 +491,7 @@ impl GodotNeovimPlugin {
         // Now close the tab (should not prompt since changes are discarded)
         self.current_editor = None;
 
-        // Simulate Ctrl+W key press
-        let mut key_press = InputEventKey::new_gd();
-        key_press.set_keycode(Key::W);
-        key_press.set_ctrl_pressed(true);
-        key_press.set_pressed(true);
-        Input::singleton().parse_input_event(&key_press);
-
-        let mut key_release = InputEventKey::new_gd();
-        key_release.set_keycode(Key::W);
-        key_release.set_ctrl_pressed(true);
-        key_release.set_pressed(false);
-        Input::singleton().parse_input_event(&key_release);
-
+        simulate_ctrl_w();
         crate::verbose_print!("[godot-neovim] ZQ - Close triggered (discard changes)");
     }
 
