@@ -42,11 +42,6 @@ pub(super) fn simulate_ctrl_s() {
     simulate_key_press(Key::S, true, false, false);
 }
 
-/// Simulate Ctrl+Shift+Alt+S to trigger Godot's save_all with all EditorPlugin hooks
-pub(super) fn simulate_ctrl_shift_alt_s() {
-    simulate_key_press(Key::S, true, true, true);
-}
-
 /// Simulate Ctrl+W to close the current tab
 pub(super) fn simulate_ctrl_w() {
     simulate_key_press(Key::W, true, false, false);

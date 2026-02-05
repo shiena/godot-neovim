@@ -2,8 +2,8 @@
 //! Also handles forwarding Ex commands to Neovim
 
 use super::super::{EditorType, GodotNeovimPlugin};
-use super::{simulate_ctrl_s, simulate_ctrl_shift_alt_s, simulate_ctrl_w};
-use godot::classes::{EditorInterface, MenuButton, ResourceSaver};
+use super::{simulate_ctrl_s, simulate_ctrl_w};
+use godot::classes::{EditorInterface, MenuButton, Node, ResourceSaver};
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
@@ -153,11 +153,59 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] :w - Ctrl+S simulated");
     }
 
-    /// :wa/:wall - Save all open scripts using Ctrl+Shift+Alt+S simulation
+    /// :wa/:wall - Save all open scripts via ScriptEditor's File menu
     /// This triggers Godot's internal save_all processing, including EditorPlugin hooks
     pub(in crate::plugin) fn cmd_save_all(&self) {
-        simulate_ctrl_shift_alt_s();
-        crate::verbose_print!("[godot-neovim] :wa - Ctrl+Shift+Alt+S simulated");
+        let editor = EditorInterface::singleton();
+        let Some(script_editor) = editor.get_script_editor() else {
+            godot_warn!("[godot-neovim] :wa - Could not find ScriptEditor");
+            return;
+        };
+
+        let script_editor_node: Gd<Node> = script_editor.upcast();
+
+        // Structure: ScriptEditor -> VBoxContainer -> HBoxContainer (menu_hb) -> MenuButton (File)
+        let children = script_editor_node.get_children();
+        for i in 0..children.len() {
+            if let Some(child) = children.get(i) {
+                if child.is_class("VBoxContainer") {
+                    let vbox_children = child.get_children();
+                    for j in 0..vbox_children.len() {
+                        if let Some(vbox_child) = vbox_children.get(j) {
+                            if vbox_child.is_class("HBoxContainer") {
+                                // Found menu_hb, now find MenuButton (File)
+                                let hbox_children = vbox_child.get_children();
+                                for k in 0..hbox_children.len() {
+                                    if let Some(hbox_child) = hbox_children.get(k) {
+                                        if hbox_child.is_class("MenuButton") {
+                                            let menu_button: Gd<MenuButton> = hbox_child.cast();
+                                            if let Some(mut popup) = menu_button.get_popup() {
+                                                // FILE_MENU_SAVE_ALL = 7 (from ScriptEditor enum)
+                                                const FILE_MENU_SAVE_ALL: i64 = 7;
+                                                popup.call_deferred(
+                                                    "emit_signal",
+                                                    &[
+                                                        "id_pressed".to_variant(),
+                                                        FILE_MENU_SAVE_ALL.to_variant(),
+                                                    ],
+                                                );
+                                                crate::verbose_print!(
+                                                    "[godot-neovim] :wa - emit_signal(id_pressed, {})",
+                                                    FILE_MENU_SAVE_ALL
+                                                );
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        godot_warn!("[godot-neovim] :wa - Could not find File menu in ScriptEditor");
     }
 
     /// :e!/:edit! - Reload current file from disk (discard changes)
