@@ -2,9 +2,62 @@
 //! Also handles forwarding Ex commands to Neovim
 
 use super::super::{EditorType, GodotNeovimPlugin};
-use super::{simulate_ctrl_s, simulate_ctrl_w};
-use godot::classes::{EditorInterface, MenuButton, Node, ResourceSaver};
+use super::simulate_ctrl_w;
+use godot::classes::{EditorInterface, MenuButton, Node, PopupMenu};
 use godot::prelude::*;
+
+/// ScriptEditor File menu IDs (from Godot source: editor/script_editor.cpp)
+#[allow(dead_code)]
+mod file_menu {
+    pub const SAVE: i64 = 5;
+    pub const SAVE_AS: i64 = 6;
+    pub const SAVE_ALL: i64 = 7;
+    // Note: CLOSE ID varies by Godot version, using Ctrl+W simulation instead
+    pub const CLOSE_ALL: i64 = 16;
+}
+
+/// Find the ScriptEditor's File menu PopupMenu
+fn find_script_editor_file_menu() -> Option<Gd<PopupMenu>> {
+    let editor = EditorInterface::singleton();
+    let script_editor = editor.get_script_editor()?;
+    let script_editor_node: Gd<Node> = script_editor.upcast();
+
+    // Structure: ScriptEditor -> VBoxContainer -> HBoxContainer (menu_hb) -> MenuButton (File)
+    let children = script_editor_node.get_children();
+    for i in 0..children.len() {
+        let child = children.get(i)?;
+        if child.is_class("VBoxContainer") {
+            let vbox_children = child.get_children();
+            for j in 0..vbox_children.len() {
+                let vbox_child = vbox_children.get(j)?;
+                if vbox_child.is_class("HBoxContainer") {
+                    let hbox_children = vbox_child.get_children();
+                    for k in 0..hbox_children.len() {
+                        let hbox_child = hbox_children.get(k)?;
+                        if hbox_child.is_class("MenuButton") {
+                            let menu_button: Gd<MenuButton> = hbox_child.cast();
+                            return menu_button.get_popup();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Emit a menu signal on ScriptEditor's File menu
+fn emit_file_menu_signal(menu_id: i64) -> bool {
+    if let Some(mut popup) = find_script_editor_file_menu() {
+        popup.call_deferred(
+            "emit_signal",
+            &["id_pressed".to_variant(), menu_id.to_variant()],
+        );
+        true
+    } else {
+        false
+    }
+}
 
 impl GodotNeovimPlugin {
     /// Forward an Ex command to Neovim for execution
@@ -141,71 +194,35 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// :w - Save the current file using Ctrl+S simulation
+    /// :w - Save the current file via ScriptEditor's File menu
     /// This triggers Godot's internal save processing, including EditorPlugin hooks
     pub(in crate::plugin) fn cmd_save(&self) {
-        let Some(ref _editor) = self.current_editor else {
+        if self.current_editor.is_none() {
             crate::verbose_print!("[godot-neovim] :w - No current editor");
             return;
-        };
+        }
 
-        simulate_ctrl_s();
-        crate::verbose_print!("[godot-neovim] :w - Ctrl+S simulated");
+        if emit_file_menu_signal(file_menu::SAVE) {
+            crate::verbose_print!(
+                "[godot-neovim] :w - emit_signal(id_pressed, {})",
+                file_menu::SAVE
+            );
+        } else {
+            godot_warn!("[godot-neovim] :w - Could not find File menu in ScriptEditor");
+        }
     }
 
     /// :wa/:wall - Save all open scripts via ScriptEditor's File menu
     /// This triggers Godot's internal save_all processing, including EditorPlugin hooks
     pub(in crate::plugin) fn cmd_save_all(&self) {
-        let editor = EditorInterface::singleton();
-        let Some(script_editor) = editor.get_script_editor() else {
-            godot_warn!("[godot-neovim] :wa - Could not find ScriptEditor");
-            return;
-        };
-
-        let script_editor_node: Gd<Node> = script_editor.upcast();
-
-        // Structure: ScriptEditor -> VBoxContainer -> HBoxContainer (menu_hb) -> MenuButton (File)
-        let children = script_editor_node.get_children();
-        for i in 0..children.len() {
-            if let Some(child) = children.get(i) {
-                if child.is_class("VBoxContainer") {
-                    let vbox_children = child.get_children();
-                    for j in 0..vbox_children.len() {
-                        if let Some(vbox_child) = vbox_children.get(j) {
-                            if vbox_child.is_class("HBoxContainer") {
-                                // Found menu_hb, now find MenuButton (File)
-                                let hbox_children = vbox_child.get_children();
-                                for k in 0..hbox_children.len() {
-                                    if let Some(hbox_child) = hbox_children.get(k) {
-                                        if hbox_child.is_class("MenuButton") {
-                                            let menu_button: Gd<MenuButton> = hbox_child.cast();
-                                            if let Some(mut popup) = menu_button.get_popup() {
-                                                // FILE_MENU_SAVE_ALL = 7 (from ScriptEditor enum)
-                                                const FILE_MENU_SAVE_ALL: i64 = 7;
-                                                popup.call_deferred(
-                                                    "emit_signal",
-                                                    &[
-                                                        "id_pressed".to_variant(),
-                                                        FILE_MENU_SAVE_ALL.to_variant(),
-                                                    ],
-                                                );
-                                                crate::verbose_print!(
-                                                    "[godot-neovim] :wa - emit_signal(id_pressed, {})",
-                                                    FILE_MENU_SAVE_ALL
-                                                );
-                                                return;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        if emit_file_menu_signal(file_menu::SAVE_ALL) {
+            crate::verbose_print!(
+                "[godot-neovim] :wa - emit_signal(id_pressed, {})",
+                file_menu::SAVE_ALL
+            );
+        } else {
+            godot_warn!("[godot-neovim] :wa - Could not find File menu in ScriptEditor");
         }
-
-        godot_warn!("[godot-neovim] :wa - Could not find File menu in ScriptEditor");
     }
 
     /// :e!/:edit! - Reload current file from disk (discard changes)
@@ -317,43 +334,29 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// ZZ/:wq - Save and close (sync CodeEdit content to Script, then save)
+    /// ZZ/:wq - Save and close via ScriptEditor's File menu
+    /// This triggers Godot's internal save processing, including EditorPlugin hooks
+    /// Close is deferred to next frame via pending_close_after_save flag
     pub(in crate::plugin) fn cmd_save_and_close(&mut self) {
-        let editor = EditorInterface::singleton();
-        if let Some(mut script_editor) = editor.get_script_editor() {
-            if let Some(mut current_script) = script_editor.get_current_script() {
-                let path = current_script.get_path();
-                if !path.is_empty() {
-                    // Sync CodeEdit content to Script resource before saving
-                    if let Some(ref code_editor) = self.current_editor {
-                        if code_editor.is_instance_valid() {
-                            let text = code_editor.get_text();
-                            current_script.set_source_code(&text);
-                        }
-                    }
-
-                    // Save the script using ResourceSaver (synchronous)
-                    let result = ResourceSaver::singleton()
-                        .save_ex(&current_script)
-                        .path(&path)
-                        .done();
-                    if result == godot::global::Error::OK {
-                        // Mark CodeEdit as saved to clear dirty flag
-                        if let Some(ref mut code_editor) = self.current_editor {
-                            if code_editor.is_instance_valid() {
-                                code_editor.tag_saved_version();
-                            }
-                        }
-                        crate::verbose_print!("[godot-neovim] :wq/ZZ - Saved: {}", path);
-                    } else {
-                        godot_warn!("[godot-neovim] :wq/ZZ - Failed to save: {}", path);
-                    }
-                }
-            }
+        if self.current_editor.is_none() {
+            crate::verbose_print!("[godot-neovim] :wq/ZZ - No current editor");
+            return;
         }
 
-        // Now close the tab
-        self.cmd_close();
+        // Emit save signal (deferred)
+        if emit_file_menu_signal(file_menu::SAVE) {
+            crate::verbose_print!(
+                "[godot-neovim] :wq/ZZ - emit_signal(id_pressed, {})",
+                file_menu::SAVE
+            );
+        } else {
+            godot_warn!("[godot-neovim] :wq/ZZ - Could not find File menu for save");
+            return;
+        }
+
+        // Set flag to close in next frame (after save completes)
+        self.pending_close_after_save = true;
+        crate::verbose_print!("[godot-neovim] :wq/ZZ - Close scheduled for next frame");
     }
 
     /// :q - Close the current script tab by simulating Ctrl+W
@@ -571,61 +574,15 @@ impl GodotNeovimPlugin {
         self.closing_all_tabs = true;
 
         // Close all script tabs
-        let editor = EditorInterface::singleton();
-        let Some(script_editor) = editor.get_script_editor() else {
-            godot_warn!("[godot-neovim] :qa - Could not find ScriptEditor");
+        if emit_file_menu_signal(file_menu::CLOSE_ALL) {
+            crate::verbose_print!(
+                "[godot-neovim] :qa - emit_signal(id_pressed, {})",
+                file_menu::CLOSE_ALL
+            );
+        } else {
+            godot_warn!("[godot-neovim] :qa - Could not find File menu in ScriptEditor");
             self.closing_all_tabs = false;
-            return;
-        };
-
-        let script_editor_node: Gd<Node> = script_editor.upcast();
-
-        // Structure: ScriptEditor -> VBoxContainer -> HBoxContainer (menu_hb) -> MenuButton (File)
-        let children = script_editor_node.get_children();
-        for i in 0..children.len() {
-            if let Some(child) = children.get(i) {
-                if child.is_class("VBoxContainer") {
-                    let vbox_children = child.get_children();
-                    for j in 0..vbox_children.len() {
-                        if let Some(vbox_child) = vbox_children.get(j) {
-                            if vbox_child.is_class("HBoxContainer") {
-                                // Found menu_hb, now find MenuButton (File)
-                                let hbox_children = vbox_child.get_children();
-                                for k in 0..hbox_children.len() {
-                                    if let Some(hbox_child) = hbox_children.get(k) {
-                                        if hbox_child.is_class("MenuButton") {
-                                            let menu_button: Gd<MenuButton> = hbox_child.cast();
-                                            if let Some(mut popup) = menu_button.get_popup() {
-                                                // FILE_MENU_CLOSE_ALL = 16
-                                                const FILE_MENU_CLOSE_ALL: i64 = 16;
-                                                // Use call_deferred to avoid borrow conflict:
-                                                // emit_signal triggers script_close synchronously,
-                                                // which calls on_script_close needing &mut self
-                                                popup.call_deferred(
-                                                    "emit_signal",
-                                                    &[
-                                                        "id_pressed".to_variant(),
-                                                        FILE_MENU_CLOSE_ALL.to_variant(),
-                                                    ],
-                                                );
-                                                crate::verbose_print!(
-                                                    "[godot-neovim] :qa - call_deferred emit_signal(id_pressed, {})",
-                                                    FILE_MENU_CLOSE_ALL
-                                                );
-                                                return;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
-
-        godot_warn!("[godot-neovim] :qa - Could not find File menu in ScriptEditor");
-        self.closing_all_tabs = false;
     }
 
     /// Close all shader tabs in ShaderEditor
