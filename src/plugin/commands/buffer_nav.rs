@@ -1,8 +1,8 @@
 //! Buffer/tab navigation: :bn, :bp, gt, gT, :{n}
 
 use super::super::{EditorType, GodotNeovimPlugin};
-use godot::classes::{CodeEdit, EditorInterface, Input, InputEventKey, TabBar};
-use godot::global::Key;
+use super::simulate_ctrl_f;
+use godot::classes::{CodeEdit, EditorInterface, TabBar};
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
@@ -208,13 +208,7 @@ impl GodotNeovimPlugin {
 
     /// Start backward search (? command) - opens Godot's search dialog
     pub(in crate::plugin) fn start_search_backward(&self) {
-        // Simulate Ctrl+F to open the search dialog
-        let mut key_event = InputEventKey::new_gd();
-        key_event.set_keycode(Key::F);
-        key_event.set_ctrl_pressed(true);
-        key_event.set_pressed(true);
-        Input::singleton().parse_input_event(&key_event);
-
+        simulate_ctrl_f();
         crate::verbose_print!(
             "[godot-neovim] ?: Opening search dialog (use Find Previous for backward search)"
         );
