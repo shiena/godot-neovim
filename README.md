@@ -173,6 +173,13 @@ The `gd` command uses Godot's built-in LSP server for accurate navigation. To en
 
 When this setting is disabled, `gd` will show a message prompting you to enable it.
 
+## Exporting Projects
+
+> [!IMPORTANT]
+> This is an **editor-only** plugin. It does not include libraries for export platforms (iOS, Android, Web, etc.), so Godot will show a warning about missing GDExtension libraries when exporting.
+>
+> To suppress this warning, add `addons/godot-neovim/*` to the **Exclude Filter** in your export preset's **Resources** tab.
+
 ## Usage
 
 Once the plugin is enabled:
