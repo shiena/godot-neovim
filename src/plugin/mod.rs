@@ -291,6 +291,10 @@ pub struct GodotNeovimPlugin {
     /// Reset when operation completes (detected in process())
     #[init(val = false)]
     closing_all_tabs: bool,
+    /// Flag to close tab in next frame (set by ZZ/:wq after save signal)
+    /// Ensures save completes before close
+    #[init(val = false)]
+    pending_close_after_save: bool,
     /// Buffers to delete from Neovim after :qa completes
     /// Collected during closing_all_tabs to avoid sync commands during dialog processing
     #[init(val = Vec::new())]
@@ -524,6 +528,14 @@ impl IEditorPlugin for GodotNeovimPlugin {
                     }
                 }
             }
+        }
+
+        // Handle deferred close after save (ZZ/:wq)
+        // This ensures save completes before close by waiting one frame
+        if self.pending_close_after_save {
+            self.pending_close_after_save = false;
+            crate::verbose_print!("[godot-neovim] process: Executing deferred close after save");
+            self.cmd_close();
         }
 
         // Handle deferred shader focus after close
