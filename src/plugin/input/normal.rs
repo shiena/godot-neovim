@@ -4,6 +4,7 @@
 //! including g-prefix commands, [/] bracket commands, z-commands, etc.
 
 use super::super::GodotNeovimPlugin;
+use godot::classes::Input;
 use godot::global::Key;
 use godot::prelude::*;
 
@@ -579,11 +580,15 @@ impl GodotNeovimPlugin {
         }
 
         // Handle 'q' for macro recording (start/stop) - but not after 'g' (that's gq for format)
-        // Also skip if Alt is pressed (AltGr+Q = '@' on German keyboards)
+        // Also skip if AltGr is pressed (Ctrl+Alt on German keyboards for '@')
+        // Note: Use Input::singleton() to check actual key state because AltGr sends
+        // separate Ctrl and Alt events, and key_event modifiers may not be set correctly
+        let input = Input::singleton();
+        let is_altgr_held = input.is_key_pressed(Key::CTRL) && input.is_key_pressed(Key::ALT);
         if keycode == Key::Q
             && !key_event.is_shift_pressed()
             && !key_event.is_ctrl_pressed()
-            && !key_event.is_alt_pressed()
+            && !is_altgr_held
             && self.last_key != "g"
         {
             if self.recording_macro.is_some() {
