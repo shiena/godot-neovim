@@ -200,6 +200,7 @@ impl GodotNeovimPlugin {
 
     /// Update status label to show "SHADER" mode (when ShaderEditor is focused)
     /// This indicates that the plugin is not intercepting input and Godot is handling editing
+    #[allow(dead_code)]
     pub(super) fn update_shader_mode_display(&mut self) {
         let Some(ref mut label) = self.mode_label else {
             return;

@@ -248,11 +248,11 @@ impl GodotNeovimPlugin {
                     self.cmd_version();
                 }
                 // :set - forward to Neovim (e.g., :set filetype?, :set number)
-                else if cmd == "set" || cmd.starts_with("set ") {
-                    self.cmd_forward_to_neovim(cmd);
-                }
-                // User-defined commands (start with uppercase) are handled by Neovim
-                else if cmd.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                // User-defined commands (start with uppercase) are also handled by Neovim
+                else if cmd == "set"
+                    || cmd.starts_with("set ")
+                    || cmd.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                {
                     self.cmd_forward_to_neovim(cmd);
                 } else {
                     godot_warn!("[godot-neovim] Unknown command: {}", cmd);
