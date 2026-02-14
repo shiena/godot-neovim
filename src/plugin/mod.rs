@@ -1928,7 +1928,6 @@ impl GodotNeovimPlugin {
     fn is_recording_macro(&self) -> bool {
         self.is_recording_macro_impl()
     }
-
 }
 
 /// Private helper methods for Neovim instance management

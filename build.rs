@@ -8,8 +8,8 @@ fn main() {
         println!("cargo:rerun-if-changed=Cargo.toml");
         env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "unknown".to_string())
     } else {
-        // Debug: use current datetime, always rebuild (no rerun-if-changed)
-        chrono::Utc::now().format("%Y%m%d%H%M%S").to_string()
+        // Debug: use current datetime in local timezone, always rebuild (no rerun-if-changed)
+        chrono::Local::now().format("%Y%m%d%H%M%S").to_string()
     };
 
     println!("cargo:rustc-env=BUILD_VERSION={}", version);
