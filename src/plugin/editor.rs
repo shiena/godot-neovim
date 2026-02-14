@@ -345,6 +345,7 @@ impl GodotNeovimPlugin {
     }
 
     /// Check if a ShaderEditor is currently focused (even if not syncing)
+    #[allow(dead_code)]
     pub(super) fn is_shader_editor_focused(&self) -> bool {
         self.current_editor_type == EditorType::Shader
     }

@@ -50,6 +50,7 @@ impl GodotNeovimPlugin {
     }
 
     /// Get the current mode label based on editor type
+    #[allow(dead_code)]
     pub(super) fn get_current_mode_label(&mut self) -> Option<&mut Gd<Label>> {
         match self.current_editor_type {
             EditorType::Shader => self.shader_mode_label.as_mut(),

@@ -3,6 +3,7 @@
 /// Plugin version: Cargo.toml version for release, build datetime for debug
 const VERSION: &str = env!("BUILD_VERSION");
 
+mod actions;
 mod commands;
 mod editing;
 mod editor;
@@ -45,6 +46,7 @@ pub enum EditorType {
     /// ShaderEditor (gdshader)
     Shader,
     /// TextFile editor (txt, md, json, etc.)
+    #[allow(dead_code)]
     TextFile,
     /// Unknown or no editor
     Unknown,
@@ -1569,6 +1571,364 @@ impl GodotNeovimPlugin {
         }
         self.cleanup_recovery_dialog();
     }
+
+    // =========================================================================
+    // Action API: #[func] wrappers for GDScript-callable actions
+    // Implementation is in actions.rs
+    // =========================================================================
+
+    /// Send arbitrary keys to Neovim (generic action for unmapped keys)
+    #[func]
+    fn action_send_keys(&mut self, keys: GString) {
+        self.action_send_keys_impl(&keys.to_string());
+    }
+
+    /// Undo (u)
+    #[func]
+    fn action_undo(&mut self) {
+        self.action_undo_impl();
+    }
+
+    /// Redo (Ctrl+R)
+    #[func]
+    fn action_redo(&mut self) {
+        self.action_redo_impl();
+    }
+
+    /// Page up (Ctrl+B)
+    #[func]
+    fn action_page_up(&mut self) {
+        self.action_page_up_impl();
+    }
+
+    /// Page down (Ctrl+F)
+    #[func]
+    fn action_page_down(&mut self) {
+        self.action_page_down_impl();
+    }
+
+    /// Half page down (Ctrl+D)
+    #[func]
+    fn action_half_page_down(&mut self) {
+        self.action_half_page_down_impl();
+    }
+
+    /// Half page up (Ctrl+U)
+    #[func]
+    fn action_half_page_up(&mut self) {
+        self.action_half_page_up_impl();
+    }
+
+    /// Scroll viewport up by one line (Ctrl+Y)
+    #[func]
+    fn action_scroll_viewport_up(&mut self) {
+        self.action_scroll_viewport_up_impl();
+    }
+
+    /// Scroll viewport down by one line (Ctrl+E)
+    #[func]
+    fn action_scroll_viewport_down(&mut self) {
+        self.action_scroll_viewport_down_impl();
+    }
+
+    /// Increment number under cursor (Ctrl+A)
+    #[func]
+    fn action_increment(&mut self) {
+        self.action_increment_impl();
+    }
+
+    /// Decrement number under cursor (Ctrl+X)
+    #[func]
+    fn action_decrement(&mut self) {
+        self.action_decrement_impl();
+    }
+
+    /// Jump back in jump list (Ctrl+O)
+    #[func]
+    fn action_jump_back(&mut self) {
+        self.action_jump_back_impl();
+    }
+
+    /// Jump forward in jump list (Ctrl+I)
+    #[func]
+    fn action_jump_forward(&mut self) {
+        self.action_jump_forward_impl();
+    }
+
+    /// Show file info (Ctrl+G)
+    #[func]
+    fn action_show_file_info(&mut self) {
+        self.action_show_file_info_impl();
+    }
+
+    /// Open forward search mode (/)
+    #[func]
+    fn action_open_search_forward(&mut self) {
+        self.action_open_search_forward_impl();
+    }
+
+    /// Open backward search mode (?)
+    #[func]
+    fn action_open_search_backward(&mut self) {
+        self.action_open_search_backward_impl();
+    }
+
+    /// Open command line (:)
+    #[func]
+    fn action_open_command_line(&mut self) {
+        self.action_open_command_line_impl();
+    }
+
+    /// Search word under cursor forward (*)
+    #[func]
+    fn action_search_word_forward(&mut self) {
+        self.action_search_word_forward_impl();
+    }
+
+    /// Search word under cursor backward (#)
+    #[func]
+    fn action_search_word_backward(&mut self) {
+        self.action_search_word_backward_impl();
+    }
+
+    /// Search next forward (n)
+    #[func]
+    fn action_search_next(&mut self) {
+        self.action_search_next_impl();
+    }
+
+    /// Search next backward (N)
+    #[func]
+    fn action_search_prev(&mut self) {
+        self.action_search_prev_impl();
+    }
+
+    /// Go to definition (gd) - uses Godot LSP
+    #[func]
+    fn action_goto_definition(&mut self) {
+        self.action_goto_definition_impl();
+    }
+
+    /// Go to file under cursor (gf)
+    #[func]
+    fn action_goto_file(&mut self) {
+        self.action_goto_file_impl();
+    }
+
+    /// Open URL under cursor (gx)
+    #[func]
+    fn action_open_url(&mut self) {
+        self.action_open_url_impl();
+    }
+
+    /// Go to next tab (gt)
+    #[func]
+    fn action_next_tab(&mut self) {
+        self.action_next_tab_impl();
+    }
+
+    /// Go to previous tab (gT)
+    #[func]
+    fn action_prev_tab(&mut self) {
+        self.action_prev_tab_impl();
+    }
+
+    /// Toggle visual block mode (gv / Ctrl+V alternative)
+    #[func]
+    fn action_visual_block_toggle(&mut self) {
+        self.action_visual_block_toggle_impl();
+    }
+
+    /// Join lines without space (gJ)
+    #[func]
+    fn action_join_no_space(&mut self) {
+        self.action_join_no_space_impl();
+    }
+
+    /// Move down by display line (gj)
+    #[func]
+    fn action_display_line_down(&mut self) {
+        self.action_display_line_down_impl();
+    }
+
+    /// Move up by display line (gk)
+    #[func]
+    fn action_display_line_up(&mut self) {
+        self.action_display_line_up_impl();
+    }
+
+    /// Insert at column 0 (gI)
+    #[func]
+    fn action_insert_at_column_zero(&mut self) {
+        self.action_insert_at_column_zero_impl();
+    }
+
+    /// Insert at last insert position (gi)
+    #[func]
+    fn action_insert_at_last_position(&mut self) {
+        self.action_insert_at_last_position_impl();
+    }
+
+    /// Show character info under cursor (ga)
+    #[func]
+    fn action_show_char_info(&mut self) {
+        self.action_show_char_info_impl();
+    }
+
+    /// Repeat last substitution on all lines (g&)
+    #[func]
+    fn action_repeat_substitution(&mut self) {
+        self.action_repeat_substitution_impl();
+    }
+
+    /// Paste and move cursor after (gp)
+    #[func]
+    fn action_paste_move_cursor(&mut self) {
+        self.action_paste_move_cursor_impl();
+    }
+
+    /// Paste before and move cursor after (gP)
+    #[func]
+    fn action_paste_before_move_cursor(&mut self) {
+        self.action_paste_before_move_cursor_impl();
+    }
+
+    /// Move to end of previous word (ge)
+    #[func]
+    fn action_word_end_backward(&mut self) {
+        self.action_word_end_backward_impl();
+    }
+
+    /// Move to start of display line (g0)
+    #[func]
+    fn action_display_line_start(&mut self) {
+        self.action_display_line_start_impl();
+    }
+
+    /// Move to end of display line (g$)
+    #[func]
+    fn action_display_line_end(&mut self) {
+        self.action_display_line_end_impl();
+    }
+
+    /// Move to first non-blank of display line (g^)
+    #[func]
+    fn action_display_line_first_non_blank(&mut self) {
+        self.action_display_line_first_non_blank_impl();
+    }
+
+    /// Open fold at current line (zo)
+    #[func]
+    fn action_fold_open(&mut self) {
+        self.action_fold_open_impl();
+    }
+
+    /// Close fold at current line (zc)
+    #[func]
+    fn action_fold_close(&mut self) {
+        self.action_fold_close_impl();
+    }
+
+    /// Toggle fold at current line (za)
+    #[func]
+    fn action_fold_toggle(&mut self) {
+        self.action_fold_toggle_impl();
+    }
+
+    /// Open all folds (zR)
+    #[func]
+    fn action_fold_open_all(&mut self) {
+        self.action_fold_open_all_impl();
+    }
+
+    /// Close all folds (zM)
+    #[func]
+    fn action_fold_close_all(&mut self) {
+        self.action_fold_close_all_impl();
+    }
+
+    /// Open documentation for word under cursor (K)
+    #[func]
+    fn action_open_documentation(&mut self) {
+        self.action_open_documentation_impl();
+    }
+
+    /// Save and close (ZZ / :wq)
+    #[func]
+    fn action_save_and_close(&mut self) {
+        self.action_save_and_close_impl();
+    }
+
+    /// Close without saving (ZQ / :q!)
+    #[func]
+    fn action_close_discard(&mut self) {
+        self.action_close_discard_impl();
+    }
+
+    // =========================================================================
+    // State query API: #[func] wrappers for GDScript
+    // =========================================================================
+
+    /// Get current Vim mode (n, i, v, V, R, etc.)
+    #[func]
+    fn get_vim_mode(&self) -> GString {
+        self.get_current_mode_impl()
+    }
+
+    /// Get the last key pressed (for sequence detection)
+    #[func]
+    fn get_last_key(&self) -> GString {
+        self.get_last_key_impl()
+    }
+
+    /// Check if there is a pending operation (f/t/r/m/q/@/")
+    #[func]
+    fn is_pending_operation(&self) -> bool {
+        self.is_pending_operation_impl()
+    }
+
+    /// Get the count buffer string (for 3dd, 5j, etc.)
+    #[func]
+    fn get_count_prefix(&self) -> GString {
+        self.get_count_buffer_impl()
+    }
+
+    /// Check if currently in insert mode
+    #[func]
+    fn is_in_insert_mode(&self) -> bool {
+        self.is_insert_mode()
+    }
+
+    /// Check if currently in replace mode
+    #[func]
+    fn is_in_replace_mode(&self) -> bool {
+        self.is_replace_mode()
+    }
+
+    /// Check if currently in visual mode
+    #[func]
+    fn is_in_visual_mode_query(&self) -> bool {
+        self.is_in_visual_mode()
+    }
+
+    /// Check if command mode is active
+    #[func]
+    fn is_in_command_mode(&self) -> bool {
+        self.command_mode
+    }
+
+    /// Check if search mode is active
+    #[func]
+    fn is_in_search_mode(&self) -> bool {
+        self.search_mode
+    }
+
+    /// Check if a macro is currently being recorded
+    #[func]
+    fn is_recording_macro(&self) -> bool {
+        self.is_recording_macro_impl()
+    }
+
 }
 
 /// Private helper methods for Neovim instance management

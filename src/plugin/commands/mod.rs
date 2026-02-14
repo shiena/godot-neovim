@@ -38,6 +38,7 @@ pub(super) fn simulate_key_press(key: Key, ctrl: bool, shift: bool, alt: bool) {
 }
 
 /// Simulate Ctrl+S to trigger Godot's save with all EditorPlugin hooks
+#[allow(dead_code)]
 pub(super) fn simulate_ctrl_s() {
     simulate_key_press(Key::S, true, false, false);
 }
