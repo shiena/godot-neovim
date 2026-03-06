@@ -1212,11 +1212,15 @@ impl GodotNeovimPlugin {
 
         self.find_current_code_edit();
 
-        // For ShaderEditor, skip ScriptEditor-based verification since it doesn't apply
+        // For ShaderEditor and external CodeEdits (Unknown), skip ScriptEditor-based verification
         // ShaderEditor doesn't use on_script_changed signal, so path is already set in find_current_code_edit
-        if self.current_editor_type == EditorType::Shader {
+        // Unknown editors (e.g. Dialogic) have a synthetic path and no ScriptEditor association
+        if self.current_editor_type == EditorType::Shader
+            || self.current_editor_type == EditorType::Unknown
+        {
             crate::verbose_print!(
-                "[godot-neovim] ShaderEditor detected, using path: '{}'",
+                "[godot-neovim] Non-ScriptEditor CodeEdit detected (type={:?}), using path: '{}'",
+                self.current_editor_type,
                 self.current_script_path
             );
             // Clear expected path and proceed to buffer sync
@@ -1463,7 +1467,10 @@ impl GodotNeovimPlugin {
         // Accept the event to prevent CodeEdit from processing it
         // This must be done in Normal/Visual modes to prevent characters from being typed
         // In Insert/Replace modes, we let CodeEdit handle the input normally
-        let should_consume = !self.is_insert_mode() && !self.is_replace_mode();
+        // Meta/Cmd+key events pass through for OS shortcuts (Cmd+S, Cmd+Z, etc.)
+        let should_consume = !self.is_insert_mode()
+            && !self.is_replace_mode()
+            && !(key_event.is_meta_pressed() && !key_event.is_ctrl_pressed());
         if should_consume {
             if let Some(ref mut editor) = self.current_editor {
                 editor.accept_event();

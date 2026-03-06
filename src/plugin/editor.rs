@@ -251,10 +251,19 @@ impl GodotNeovimPlugin {
                     }
                     self.current_script_path = path;
                 }
-            } else {
+            } else if self.is_code_edit_in_script_editor(&code_edit) {
                 crate::verbose_print!("[godot-neovim] Found focused CodeEdit (direct)");
                 self.current_editor = Some(code_edit);
                 self.current_editor_type = EditorType::Script;
+            } else {
+                let instance_id = code_edit.instance_id().to_i64();
+                crate::verbose_print!(
+                    "[godot-neovim] Found external CodeEdit (id={}), using scratch buffer",
+                    instance_id
+                );
+                self.current_editor = Some(code_edit);
+                self.current_editor_type = EditorType::Unknown;
+                self.current_script_path = format!("godot-neovim://external/{}", instance_id);
             }
         }
 
@@ -533,6 +542,28 @@ impl GodotNeovimPlugin {
         }
     }
 
+    /// Check if a CodeEdit belongs to Godot's built-in ScriptEditor
+    /// Verifies by looking for `CodeTextEditor` in the parent hierarchy, which is
+    /// Godot's internal wrapper class for code editing areas in the ScriptEditor.
+    /// This prevents hooking into CodeEdits from third-party plugins (e.g., Dialogic's
+    /// timeline text editor) that happen to gain focus. See issue #56.
+    fn is_code_edit_in_script_editor(&self, code_edit: &Gd<CodeEdit>) -> bool {
+        let mut current: Option<Gd<godot::classes::Node>> = code_edit.get_parent();
+
+        while let Some(node) = current {
+            let class_name = node.get_class().to_string();
+            // Godot internal classes that wrap CodeEdits in the built-in ScriptEditor
+            if class_name == "CodeTextEditor"
+                || class_name == "ScriptTextEditor"
+                || class_name == "ScriptEditor"
+            {
+                return true;
+            }
+            current = node.get_parent();
+        }
+        false
+    }
+
     /// Check if a CodeEdit is inside ShaderEditor hierarchy
     /// Returns true if the CodeEdit's ancestor contains "ShaderEditor" or "TextShaderEditor"
     fn is_code_edit_in_shader_editor(&self, code_edit: &Gd<CodeEdit>) -> bool {
@@ -755,6 +786,8 @@ impl GodotNeovimPlugin {
                 return true;
             }
 
+            let in_script_editor = self.is_code_edit_in_script_editor(&focused_code_edit);
+
             // Check if this is a different CodeEdit
             let is_different = match &self.current_editor {
                 Some(current) => current.instance_id() != focused_code_edit.instance_id(),
@@ -764,27 +797,43 @@ impl GodotNeovimPlugin {
             // Save previous type before changing (for buffer sync decision)
             let previous_type = self.current_editor_type;
 
-            if is_different {
-                crate::verbose_print!(
-                    "[godot-neovim] Switching to focused CodeEdit (float/dock change)"
-                );
-                let type_changed = previous_type != EditorType::Script;
-                self.current_editor = Some(focused_code_edit);
-                self.current_editor_type = EditorType::Script;
-                self.connect_caret_changed_signal();
-                self.connect_resized_signal();
-                self.reposition_mode_label();
-
-                // Trigger buffer sync if switching from ShaderEditor
-                if type_changed {
+            if in_script_editor {
+                if is_different {
                     crate::verbose_print!(
-                        "[godot-neovim] ScriptEditor: triggering buffer sync (from {:?})",
-                        previous_type
+                        "[godot-neovim] Switching to focused CodeEdit (float/dock change)"
                     );
-                    self.handle_script_changed();
+                    let type_changed = previous_type != EditorType::Script;
+                    self.current_editor = Some(focused_code_edit);
+                    self.current_editor_type = EditorType::Script;
+                    self.connect_caret_changed_signal();
+                    self.connect_resized_signal();
+                    self.reposition_mode_label();
+
+                    if type_changed {
+                        crate::verbose_print!(
+                            "[godot-neovim] ScriptEditor: triggering buffer sync (from {:?})",
+                            previous_type
+                        );
+                        self.handle_script_changed();
+                    }
+                } else {
+                    crate::verbose_print!("[godot-neovim] Same CodeEdit found in focused window");
                 }
             } else {
-                crate::verbose_print!("[godot-neovim] Same CodeEdit found in focused window");
+                // External CodeEdit (third-party plugin like Dialogic)
+                if is_different {
+                    let instance_id = focused_code_edit.instance_id().to_i64();
+                    crate::verbose_print!(
+                        "[godot-neovim] Switching to external CodeEdit (id={})",
+                        instance_id
+                    );
+                    self.current_editor = Some(focused_code_edit);
+                    self.current_editor_type = EditorType::Unknown;
+                    self.current_script_path = format!("godot-neovim://external/{}", instance_id);
+                    self.connect_caret_changed_signal();
+                    self.connect_resized_signal();
+                    self.handle_script_changed();
+                }
             }
 
             // Update float window connection for input handling
