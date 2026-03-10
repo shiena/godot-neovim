@@ -911,6 +911,16 @@ impl GodotNeovimPlugin {
         self.sync_cursor_to_neovim();
     }
 
+    /// Sync buffer to Neovim after Ctrl+/ comment toggle
+    /// Called via call_deferred to ensure Godot has already processed the key
+    #[func]
+    fn sync_buffer_after_toggle_comment(&mut self) {
+        self.sync_buffer_to_neovim_keep_undo();
+        self.sync_cursor_to_neovim();
+
+        crate::verbose_print!("[godot-neovim] Synced buffer after toggle comment");
+    }
+
     /// Sync mouse selection to Neovim on mouse release
     /// If there's a selection (drag), enter visual mode and sync selection range
     /// If no selection (click), just sync cursor position
@@ -1659,6 +1669,12 @@ impl GodotNeovimPlugin {
     #[func]
     fn action_show_file_info(&mut self) {
         self.action_show_file_info_impl();
+    }
+
+    /// Toggle comment (Ctrl+/)
+    #[func]
+    fn action_toggle_comment(&mut self) {
+        self.action_toggle_comment_impl();
     }
 
     /// Open forward search mode (/)
