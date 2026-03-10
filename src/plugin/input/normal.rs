@@ -90,6 +90,13 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        // Handle Ctrl+/ (Cmd+/ on macOS) for toggle comment (pass through to Godot)
+        if key_event.is_command_or_control_pressed() && keycode == Key::SLASH {
+            self.action_toggle_comment_impl();
+            // Do NOT call set_input_as_handled() — let Godot handle the key
+            return;
+        }
+
         // Handle Ctrl+O for jump back in jump list
         if key_event.is_ctrl_pressed() && keycode == Key::O {
             self.action_jump_back_impl();

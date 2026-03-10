@@ -302,6 +302,7 @@ Once the plugin is enabled:
 | `gu{motion}` | Convert to lowercase |
 | `gU{motion}` | Convert to uppercase |
 | `g~{motion}` | Toggle case |
+| `Ctrl+/` | Toggle comment (uses Godot's native comment toggle) |
 | `ga` | Display ASCII/Unicode of char under cursor |
 | `gqq` | Format current line |
 
@@ -483,6 +484,14 @@ Insert mode uses Godot's native input system to support auto-completion and othe
 | Neovim config | `init.lua` and plugins are not loaded by default (`neovim_clean = true`). Can be enabled but may cause compatibility issues with some plugins (e.g., copilot.vim, lexima.vim). |
 | `K` for signals | Signal documentation lookup not supported (class/method/property/constant only) |
 | `[m`/`]m` for GDScript | Method jump commands require Neovim treesitter or language support. GDScript is not recognized by Neovim. |
+
+### Toggle Comment (`Ctrl+/`)
+
+`Ctrl+/` (`Cmd+/` on macOS) toggles comments using Godot's native CodeEdit feature. Since this is a Godot passthrough (not a Neovim command), the following limitations apply:
+
+- **Macro recording**: `Ctrl+/` is not recorded during macro recording (`q{a-z}`)
+- **Dot repeat**: `.` does not repeat `Ctrl+/`
+- **Undo**: Uses Godot's undo system, not Neovim's `u`
 
 ### Known Issues
 

@@ -338,6 +338,26 @@ impl GodotNeovimPlugin {
     }
 
     // =========================================================================
+    // Toggle comment (Ctrl+/)
+    // =========================================================================
+
+    /// Toggle comment on current line or visual selection (Ctrl+/)
+    /// Passes the key through to Godot's CodeEdit for native comment toggling,
+    /// then syncs the changed buffer to Neovim via deferred call.
+    pub(super) fn action_toggle_comment_impl(&mut self) {
+        // If in visual mode, exit visual mode after comment toggle
+        if Self::is_visual_mode(&self.current_mode) {
+            self.send_keys("<Esc>");
+        }
+
+        // Schedule deferred buffer sync (Godot hasn't processed the key yet)
+        self.base_mut()
+            .call_deferred("sync_buffer_after_toggle_comment", &[]);
+
+        // Do NOT call set_input_as_handled() — let Godot's CodeEdit handle Ctrl+/
+    }
+
+    // =========================================================================
     // Documentation
     // =========================================================================
 
