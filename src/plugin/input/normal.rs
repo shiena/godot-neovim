@@ -16,6 +16,20 @@ impl GodotNeovimPlugin {
         let keycode = key_event.get_keycode();
         let unicode_char = char::from_u32(key_event.get_unicode());
 
+        // Let Meta/Cmd+key pass through to Godot for OS shortcuts (Cmd+S, Cmd+Z, etc.)
+        if key_event.is_meta_pressed() && !key_event.is_ctrl_pressed() {
+            return;
+        }
+
+        // Handle Ctrl+S for save
+        if key_event.is_ctrl_pressed() && keycode == Key::S {
+            self.cmd_save();
+            if let Some(mut viewport) = self.base().get_viewport() {
+                viewport.set_input_as_handled();
+            }
+            return;
+        }
+
         // Handle Ctrl+B: visual block in visual mode, page up in normal mode
         if key_event.is_ctrl_pressed() && keycode == Key::B {
             if Self::is_visual_mode(&self.current_mode) {
