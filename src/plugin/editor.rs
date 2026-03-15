@@ -543,21 +543,23 @@ impl GodotNeovimPlugin {
     }
 
     /// Check if a CodeEdit belongs to Godot's built-in ScriptEditor
-    /// Verifies by looking for `CodeTextEditor` in the parent hierarchy, which is
-    /// Godot's internal wrapper class for code editing areas in the ScriptEditor.
-    /// This prevents hooking into CodeEdits from third-party plugins (e.g., Dialogic's
-    /// timeline text editor) that happen to gain focus. See issue #56.
+    /// Uses partial matching (`contains("Script")`) for consistency with
+    /// `is_code_edit_in_shader_editor` which uses `contains("Shader")`.
+    /// This also catches edge cases like `TextFileEditor` which uses
+    /// `CodeTextEditor` as a parent. Shader classes are excluded to avoid
+    /// false positives. See issue #56.
     fn is_code_edit_in_script_editor(&self, code_edit: &Gd<CodeEdit>) -> bool {
         let mut current: Option<Gd<godot::classes::Node>> = code_edit.get_parent();
 
         while let Some(node) = current {
             let class_name = node.get_class().to_string();
-            // Godot internal classes that wrap CodeEdits in the built-in ScriptEditor
-            if class_name == "CodeTextEditor"
-                || class_name == "ScriptTextEditor"
-                || class_name == "ScriptEditor"
-            {
-                return true;
+            // Use partial matching for consistency with is_code_edit_in_shader_editor
+            // Matches: CodeTextEditor, ScriptTextEditor, ScriptEditor, etc.
+            // Excludes: ShaderEditor and related classes
+            if class_name.contains("Script") || class_name.contains("CodeTextEditor") {
+                if !class_name.contains("Shader") {
+                    return true;
+                }
             }
             current = node.get_parent();
         }

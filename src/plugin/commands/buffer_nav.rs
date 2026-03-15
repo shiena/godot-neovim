@@ -33,6 +33,14 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        // External CodeEdits (Unknown) have no ScriptEditor tabs to switch
+        if self.current_editor_type == EditorType::Unknown {
+            crate::verbose_print!(
+                "[godot-neovim] switch_script_tab: ignoring for external CodeEdit"
+            );
+            return;
+        }
+
         let mut editor = EditorInterface::singleton();
         let Some(mut script_editor) = editor.get_script_editor() else {
             return;

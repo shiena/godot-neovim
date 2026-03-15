@@ -383,9 +383,12 @@ impl GodotNeovimPlugin {
         self.disconnect_resized_signal();
 
         if self.current_editor_type == EditorType::Unknown {
+            // Delete scratch buffer before clearing state to avoid buffer leak
+            if !self.current_script_path.is_empty() {
+                self.delete_neovim_buffer(&self.current_script_path.clone(), EditorType::Unknown);
+            }
             self.disconnect_gui_input_signal();
             self.current_editor = None;
-            self.current_editor_type = EditorType::Unknown;
             self.current_script_path.clear();
             crate::verbose_print!("[godot-neovim] :q - Detached from external CodeEdit");
             return;
@@ -486,9 +489,12 @@ impl GodotNeovimPlugin {
         self.disconnect_resized_signal();
 
         if self.current_editor_type == EditorType::Unknown {
+            // Delete scratch buffer before clearing state to avoid buffer leak
+            if !self.current_script_path.is_empty() {
+                self.delete_neovim_buffer(&self.current_script_path.clone(), EditorType::Unknown);
+            }
             self.disconnect_gui_input_signal();
             self.current_editor = None;
-            self.current_editor_type = EditorType::Unknown;
             self.current_script_path.clear();
             crate::verbose_print!("[godot-neovim] ZQ - Detached from external CodeEdit");
             return;
