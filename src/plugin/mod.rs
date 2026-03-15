@@ -1467,10 +1467,7 @@ impl GodotNeovimPlugin {
         // Accept the event to prevent CodeEdit from processing it
         // This must be done in Normal/Visual modes to prevent characters from being typed
         // In Insert/Replace modes, we let CodeEdit handle the input normally
-        // Meta/Cmd+key events pass through for OS shortcuts (Cmd+S, Cmd+Z, etc.)
-        let should_consume = !self.is_insert_mode()
-            && !self.is_replace_mode()
-            && !(key_event.is_meta_pressed() && !key_event.is_ctrl_pressed());
+        let should_consume = !self.is_insert_mode() && !self.is_replace_mode();
         if should_consume {
             if let Some(ref mut editor) = self.current_editor {
                 editor.accept_event();
