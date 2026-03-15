@@ -94,6 +94,16 @@ impl GodotNeovimPlugin {
                 self.sync_manager.set_attached(result.attached);
                 self.sync_manager.set_line_count(nvim_line_count);
 
+                // For external CodeEdits, configure as scratch buffer
+                if self.current_editor_type == super::EditorType::Unknown {
+                    let _ = client.command("setlocal buftype=nofile");
+                    let _ = client.command("setlocal bufhidden=hide");
+                    let _ = client.command("setlocal noswapfile");
+                    crate::verbose_print!(
+                        "[godot-neovim] Configured scratch buffer for external CodeEdit"
+                    );
+                }
+
                 // Set filetype for syntax highlighting based on file extension
                 // This must be done BEFORE setting indent options, because filetype plugins
                 // may override buffer-local indent settings

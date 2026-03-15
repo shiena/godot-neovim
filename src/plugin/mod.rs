@@ -1222,11 +1222,15 @@ impl GodotNeovimPlugin {
 
         self.find_current_code_edit();
 
-        // For ShaderEditor, skip ScriptEditor-based verification since it doesn't apply
+        // For ShaderEditor and external CodeEdits (Unknown), skip ScriptEditor-based verification
         // ShaderEditor doesn't use on_script_changed signal, so path is already set in find_current_code_edit
-        if self.current_editor_type == EditorType::Shader {
+        // Unknown editors (e.g. Dialogic) have a synthetic path and no ScriptEditor association
+        if self.current_editor_type == EditorType::Shader
+            || self.current_editor_type == EditorType::Unknown
+        {
             crate::verbose_print!(
-                "[godot-neovim] ShaderEditor detected, using path: '{}'",
+                "[godot-neovim] Non-ScriptEditor CodeEdit detected (type={:?}), using path: '{}'",
+                self.current_editor_type,
                 self.current_script_path
             );
             // Clear expected path and proceed to buffer sync

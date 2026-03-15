@@ -202,6 +202,11 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        if self.current_editor_type == EditorType::Unknown {
+            crate::verbose_print!("[godot-neovim] :w - External CodeEdit, no file to save");
+            return;
+        }
+
         if emit_file_menu_signal(file_menu::SAVE) {
             crate::verbose_print!(
                 "[godot-neovim] :w - emit_signal(id_pressed, {})",
@@ -215,6 +220,11 @@ impl GodotNeovimPlugin {
     /// :wa/:wall - Save all open scripts via ScriptEditor's File menu
     /// This triggers Godot's internal save_all processing, including EditorPlugin hooks
     pub(in crate::plugin) fn cmd_save_all(&self) {
+        if self.current_editor_type == EditorType::Unknown {
+            crate::verbose_print!("[godot-neovim] :wa - External CodeEdit, no files to save");
+            return;
+        }
+
         if emit_file_menu_signal(file_menu::SAVE_ALL) {
             crate::verbose_print!(
                 "[godot-neovim] :wa - emit_signal(id_pressed, {})",
@@ -228,6 +238,11 @@ impl GodotNeovimPlugin {
     /// :e!/:edit! - Reload current file from disk (discard changes)
     /// Uses Neovim Master design: call Lua reload_buffer to reload and re-attach
     pub(in crate::plugin) fn cmd_reload(&mut self) {
+        if self.current_editor_type == EditorType::Unknown {
+            crate::verbose_print!("[godot-neovim] :e! - External CodeEdit, nothing to reload");
+            return;
+        }
+
         let neovim_ref = match self.current_editor_type {
             EditorType::Shader => self.shader_neovim.as_ref(),
             _ => self.script_neovim.as_ref(),
@@ -343,6 +358,12 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        if self.current_editor_type == EditorType::Unknown {
+            crate::verbose_print!("[godot-neovim] :wq/ZZ - External CodeEdit, detaching");
+            self.cmd_close();
+            return;
+        }
+
         // Emit save signal (deferred)
         if emit_file_menu_signal(file_menu::SAVE) {
             crate::verbose_print!(
@@ -365,6 +386,18 @@ impl GodotNeovimPlugin {
         // accessing freed CodeEdit instance
         self.disconnect_caret_changed_signal();
         self.disconnect_resized_signal();
+
+        if self.current_editor_type == EditorType::Unknown {
+            // Delete scratch buffer before clearing state to avoid buffer leak
+            if !self.current_script_path.is_empty() {
+                self.delete_neovim_buffer(&self.current_script_path.clone(), EditorType::Unknown);
+            }
+            self.disconnect_gui_input_signal();
+            self.current_editor = None;
+            self.current_script_path.clear();
+            crate::verbose_print!("[godot-neovim] :q - Detached from external CodeEdit");
+            return;
+        }
 
         // Sync cursor to Neovim BEFORE closing, because on_script_changed
         // is called after the editor is freed and we can't read cursor then
@@ -459,6 +492,18 @@ impl GodotNeovimPlugin {
         // Disconnect from signals BEFORE closing
         self.disconnect_caret_changed_signal();
         self.disconnect_resized_signal();
+
+        if self.current_editor_type == EditorType::Unknown {
+            // Delete scratch buffer before clearing state to avoid buffer leak
+            if !self.current_script_path.is_empty() {
+                self.delete_neovim_buffer(&self.current_script_path.clone(), EditorType::Unknown);
+            }
+            self.disconnect_gui_input_signal();
+            self.current_editor = None;
+            self.current_script_path.clear();
+            crate::verbose_print!("[godot-neovim] ZQ - Detached from external CodeEdit");
+            return;
+        }
 
         // Reload from disk using Lua function (same as :e!)
         // This ensures we get the actual disk content, not stale Script data
