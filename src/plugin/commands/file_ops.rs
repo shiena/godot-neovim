@@ -220,6 +220,11 @@ impl GodotNeovimPlugin {
     /// :wa/:wall - Save all open scripts via ScriptEditor's File menu
     /// This triggers Godot's internal save_all processing, including EditorPlugin hooks
     pub(in crate::plugin) fn cmd_save_all(&self) {
+        if self.current_editor_type == EditorType::Unknown {
+            crate::verbose_print!("[godot-neovim] :wa - External CodeEdit, no files to save");
+            return;
+        }
+
         if emit_file_menu_signal(file_menu::SAVE_ALL) {
             crate::verbose_print!(
                 "[godot-neovim] :wa - emit_signal(id_pressed, {})",
