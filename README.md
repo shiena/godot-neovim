@@ -38,51 +38,73 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 
 | Category | Feature | godot-neovim | GodotVim |
 |----------|---------|:------------:|:---------:|
-| **Architecture** | Backend | Neovim (RPC) | GDExtension |
+| **Architecture** | Backend | Neovim (RPC) | GDExtension (vim-core) |
 | | Language | Rust | Rust |
-| | Auto-completion | ✅ | ❌ |
+| | Auto-completion | ✅ | ✅ (`Ctrl+N/P/Space`) |
 | **Modes** | Normal, Insert, Visual, V-Line | ✅ | ✅ |
-| | Visual Block | ✅ (`Ctrl+V`, `gv`) | ✅ |
+| | Visual Block | ✅ (`Ctrl+V`, `gv`) | ✅ (with block I/A) |
 | | Replace | ✅ (`R`) | ✅ |
 | | Command-line | ✅ (`:` commands) | ✅ |
+| | Select (`gh`) | ❌ | ✅ |
 | **Navigation** | Basic (hjkl, w, b, e, gg, G) | ✅ | ✅ |
-| | Paragraph (`{`, `}`) | ✅ | ✅ |
-| | Display lines (`gj`, `gk`, `g0`, `g$`, `g_`) | ✅ | ❌ |
-| | Block jump (`[{`, `]}`) | ✅ | ❌ |
+| | Paragraph/Sentence (`{`, `}`, `(`, `)`) | ✅ | ✅ |
+| | Display lines (`gj`, `gk`, `g0`, `g$`, `g_`) | ✅ | ✅ |
+| | Block jump (`[{`, `]}`, `[(`, `])`) | ✅ | ✅ |
 | | Method jump (`[m`, `]m`) | ⚠️* | ❌ |
+| | Indent jump (`[i`, `]i`) | ❌ | ✅ |
+| | Change list (`g;`, `g,`) | ❌ | ✅ |
 | **Scrolling** | Ctrl+F/B/D/U | ✅ | ✅ |
-| | Ctrl+Y/E, zz/zt/zb | ✅ | ✅ |
-| **Search** | `/`, `?` | ✅ | ✅ |
-| | `gd` (go to definition) | ✅ | ❌ |
+| | Ctrl+Y/E, zz/zt/zb, H/M/L | ✅ | ✅ |
+| **Search** | `/`, `?`, `*`, `#`, `n`, `N` | ✅ | ✅ |
+| | Incremental search highlighting | ❌ | ✅ |
+| | `gd` (go to definition) | ✅ | ✅ |
 | | `gx` (open URL) | ✅ | ❌ |
-| | `K` (documentation) | ✅ | ❌ |
+| | `K` (documentation/hover) | ✅ | ✅ |
 | **Editing** | Basic (x, dd, yy, p, J, etc.) | ✅ | ✅ |
 | | `gp`, `gP`, `[p`, `]p` | ✅ | ❌ |
 | | `Ctrl+A`/`Ctrl+X` (numbers) | ✅ | ❌ |
-| | `ga`, `gqq` | ✅ | ✅ |
+| | `ga`, `gq`/`gw` | ✅ | ✅ |
+| | Visual block insert (`I`/`A`) | ❌ | ✅ |
+| **Insert Mode** | `Ctrl+W`/`Ctrl+U` (delete) | ❌ | ✅ |
+| | `Ctrl+R` (insert from register) | ❌ | ✅ |
+| | `Ctrl+A` (re-insert last text) | ❌ | ✅ |
+| | `Ctrl+T`/`Ctrl+D` (indent) | ❌ | ✅ |
 | **Text Objects** | Words, quotes, brackets | ✅ | ✅ |
-| | Entire buffer (`ie`, `ae`) | ✅ | ❌ |
-| **Registers** | Named (`"{a-z}`) | ✅ | ❌ |
+| | Sentence (`is`, `as`), Paragraph (`ip`, `ap`) | ✅ | ✅ |
+| | Entire buffer (`ie`, `ae`) | ✅ | ✅ |
+| | Indent (`ii`, `ai`) | ❌ | ✅ |
+| **Registers** | Named (`"{a-z}`) | ✅ | ✅ |
 | | Clipboard (`"+`, `"*`) | ✅ | ✅ |
-| | Black hole (`"_`), Yank (`"0`) | ✅ | ❌ |
-| **Marks** | `m{a-z}`, `'{a-z}` | ✅ | ✅ |
-| | Exact position (`` `{a-z} ``) | ✅ | ✅ |
+| | Black hole (`"_`), Yank (`"0`) | ✅ | ✅ |
+| | Numbered (`"1`-`"9`) | ✅ | ✅ |
+| **Marks** | Local (`m{a-z}`, `'{a-z}`, `` `{a-z} ``) | ✅ | ✅ |
+| | Global (`m{A-Z}`) | ❌ | ✅ |
 | **Macros** | `q{a-z}`, `@{a-z}`, `@@` | ✅ | ✅ |
-| **Folding** | `za`, `zo`, `zc`, `zM`, `zR` | ✅ | ❌ |
+| **Folding** | `za`, `zo`, `zc`, `zM`, `zR` | ✅ | ✅ |
 | **Ex Commands** | `:w`, `:q`, `:wq`, `:x` | ✅ | ✅ |
-| | `:e`, `:e!`, `:wa`, `:qa` | ✅ | `:e` only |
+| | `:e`, `:e!`, `:wa`, `:qa` | ✅ | ✅ |
 | | `:%s/old/new/g` | ✅ | ✅ |
-| | `:g/{pattern}/d` | ✅ | ❌ |
-| | `:sort`, `:t`, `:m` | ✅ | ❌ |
-| | `:bn`, `:bp`, `:bd`, `:ls` | ✅ | ❌ |
+| | `:g/{pattern}/d`, `:v` | ✅ | ✅ |
+| | `:sort`, `:t`, `:m` | ✅ | ✅ |
+| | `:bn`, `:bp`, `:bd`, `:ls` | ✅ | ✅ |
 | | `ZZ`, `ZQ`, `@:`, `Ctrl+G` | ✅ | ❌ |
-| **Other** | Custom key mappings | ✅ (Neovim Keymaps panel) | ✅ |
+| | `:set` (options) | ❌ | ✅ |
+| | `:earlier`, `:later` (undo tree) | ❌ | ✅ |
+| | `:norm`, `:!` (shell) | ❌ | ✅ |
+| **Godot Integration** | `:run`/`:stop` (scene control) | ❌ | ✅ |
+| | Debugger (`:GodotBreakpoint`, step) | ❌ | ✅ |
+| | Dock navigation (`Ctrl+H/J/K/L`) | ❌ | ✅ |
+| | Zen mode (`:zen`) | ❌ | ✅ |
+| **Other** | Custom key mappings | ✅ (Neovim Keymaps panel) | ✅ (`.godot-vimrc`) |
+| | Neovim config/plugins | ⚠️** | N/A |
 
 \* `[m`/`]m` requires Neovim's treesitter or language-specific support. GDScript is not recognized by Neovim, so these commands may not work as expected.
 
+\** Neovim config (`init.lua`) and plugins are not loaded by default (`neovim_clean = true`). Can be enabled but may cause compatibility issues.
+
 **Summary:**
-- **godot-neovim**: Full Neovim backend with all Ex commands, named registers, Godot auto-completion support. Requires Neovim 0.9+ installation.
-- **GodotVim**: GDExtension-based emulator with custom key mapping support. No external dependencies.
+- **godot-neovim**: Real Neovim backend with full Ex command support and Godot auto-completion. Requires Neovim 0.9+ installation.
+- **GodotVim**: Self-contained Vim engine (vim-core) with comprehensive Vim emulation, Godot-specific commands (debugger, scene control), and `.godot-vimrc` configuration. No external dependencies.
 
 </details>
 
