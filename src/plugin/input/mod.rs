@@ -9,6 +9,7 @@
 //! - normal: Normal mode (largest, may be further split)
 
 mod command;
+mod dispatch;
 mod insert;
 mod normal;
 mod pending;
