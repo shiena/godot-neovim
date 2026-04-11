@@ -324,6 +324,13 @@ pub struct GodotNeovimPlugin {
     /// This flag prevents incorrect cursor positioning after :q and reopen
     #[init(val = false)]
     skip_grid_cursor_after_switch: bool,
+    /// Flag to sync cursor at insert mode entry even across frame boundaries
+    /// Set when entering insert mode without a viewport_change in the same frame
+    /// (e.g., cw: mode_change arrives Frame N, buf_lines+viewport arrive Frame N+1).
+    /// Without this, the is_insert && !entering_insert guard skips the cursor sync in N+1,
+    /// leaving the cursor at Godot's auto-moved position instead of the Neovim position.
+    #[init(val = false)]
+    pending_insert_cursor_sync: bool,
     /// Flag to apply cursor correction after Ctrl+B
     /// With ext_multigrid, Ctrl+B at end of file reports wrong viewport height,
     /// causing cursor to barely move. This flag triggers correction after viewport sync.
@@ -2031,6 +2038,7 @@ impl GodotNeovimPlugin {
         self.script_neovim = None;
         self.shader_neovim = None;
 
+        self.pending_insert_cursor_sync = false;
         self.plugin_active = false;
         crate::verbose_print!("[godot-neovim] Plugin deactivated");
     }

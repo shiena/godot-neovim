@@ -962,6 +962,15 @@ impl GodotNeovimPlugin {
                 self.clear_last_key();
             }
 
+            // If entering insert mode but no viewport_change in this frame, set a flag so
+            // the NEXT frame's viewport_change still syncs the cursor once (handles cw, ciw,
+            // etc. where the mode_change and buf_lines+viewport arrive in separate frames).
+            // When entering_insert and viewport_change arrive together, the else branch in
+            // viewport_change processing will clear the flag itself.
+            if entering_insert && viewport_change.is_none() {
+                self.pending_insert_cursor_sync = true;
+            }
+
             // Visual selection update (only when no viewport_change)
             // When viewport_change is present, we must update visual selection AFTER
             // sync_cursor_from_grid, otherwise the cursor sync will clear the selection
@@ -1005,11 +1014,12 @@ impl GodotNeovimPlugin {
                 if let Some((ref mode, _)) = state_from_redraw {
                     self.update_mode_display_with_cursor(mode, Some(display_cursor));
                 }
-            } else if is_insert && !entering_insert {
+            } else if is_insert && !entering_insert && !self.pending_insert_cursor_sync {
                 // Skip cursor sync while in insert mode (after initial entry)
                 // Godot controls cursor during insert mode, syncing would override user's position
                 // and cause typed characters to appear in reverse order
-                // Only entering_insert allows cursor sync to position cursor on the new line (o/O commands)
+                // Only entering_insert (or pending_insert_cursor_sync for cross-frame entry like cw)
+                // allows cursor sync to position cursor at the operation's insertion point.
                 crate::verbose_print!(
                     "[godot-neovim] Skipping cursor sync (in insert mode): cursor=({}, {})",
                     curline,
@@ -1025,6 +1035,8 @@ impl GodotNeovimPlugin {
                     self.update_mode_display_with_cursor(mode, Some(display_cursor));
                 }
             } else {
+                // Clear pending_insert_cursor_sync since we're about to sync the cursor
+                self.pending_insert_cursor_sync = false;
                 // Set cursor FIRST - this may trigger Godot's auto-scroll
                 self.sync_cursor_from_grid(cursor);
 
@@ -1183,6 +1195,13 @@ impl GodotNeovimPlugin {
         // Set flag to prevent echo back to Neovim
         self.sync_manager.begin_nvim_change();
 
+        // Prevent caret_changed from syncing Godot's cursor back to Neovim while
+        // we are modifying the buffer. Buffer edits (remove_line_at, insert_line_at,
+        // set_text) cause Godot to reposition the caret automatically, and without
+        // this guard that stale position would be sent to Neovim, overriding the
+        // correct post-change cursor that Neovim sends separately (e.g. cc → col 0).
+        self.syncing_from_grid = true;
+
         let line_count = editor.get_line_count() as i64;
         let first = change.first_line.max(0) as i32;
         let last = if change.last_line < 0 {
@@ -1200,7 +1219,13 @@ impl GodotNeovimPlugin {
             // Full buffer replacement: use set_text for reliability
             let new_text = change.new_lines.join("\n");
             editor.set_text(&new_text);
+            // Record Godot's caret after the edit so the deferred caret_changed matches.
+            // See comment before end_nvim_change() below for details.
+            let after_line = editor.get_caret_line() as i64;
+            let after_col = editor.get_caret_column() as i64;
+            self.last_synced_cursor = (after_line, after_col);
             self.sync_manager.end_nvim_change();
+            self.syncing_from_grid = false;
             return;
         }
 
@@ -1265,7 +1290,17 @@ impl GodotNeovimPlugin {
             }
         }
 
+        // Record Godot's caret position right after the buffer edit so that the deferred
+        // caret_changed (Godot's TextEdit queues the signal via call_deferred) fires with
+        // last_synced_cursor already matching the transient caret. Without this, on_caret_changed
+        // would call sync_cursor_to_neovim() with Godot's auto-moved caret, overriding the
+        // correct cursor that Neovim sends separately via win_viewport → sync_cursor_from_grid().
+        let after_line = editor.get_caret_line() as i64;
+        let after_col = editor.get_caret_column() as i64;
+        self.last_synced_cursor = (after_line, after_col);
+
         self.sync_manager.end_nvim_change();
+        self.syncing_from_grid = false;
     }
 
     /// Convert byte column to character column for a given line
