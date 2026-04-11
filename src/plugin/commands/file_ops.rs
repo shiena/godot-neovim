@@ -321,6 +321,10 @@ impl GodotNeovimPlugin {
                             let char_col = Self::byte_col_to_char_col(&line_text, col as i32);
                             code_edit.set_caret_line(line);
                             code_edit.set_caret_column(char_col);
+                            // Update last_synced_cursor so the deferred caret_changed (emitted
+                            // via call_deferred by TextEdit) matches and is skipped in
+                            // on_caret_changed, preventing a redundant sync back to Neovim.
+                            self.last_synced_cursor = (line as i64, char_col as i64);
                             crate::verbose_print!(
                                 "[godot-neovim] :e! - Set cursor to line={}, col={} (byte_col={})",
                                 line,
