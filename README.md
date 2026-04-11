@@ -76,7 +76,7 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 | | `:sort`, `:t`, `:m` | ✅ | ❌ |
 | | `:bn`, `:bp`, `:bd`, `:ls` | ✅ | ❌ |
 | | `ZZ`, `ZQ`, `@:`, `Ctrl+G` | ✅ | ❌ |
-| **Other** | Custom key mappings | ❌ | ✅ |
+| **Other** | Custom key mappings | ✅ (Neovim Keymaps panel) | ✅ |
 
 \* `[m`/`]m` requires Neovim's treesitter or language-specific support. GDScript is not recognized by Neovim, so these commands may not work as expected.
 
@@ -172,6 +172,31 @@ The `gd` command uses Godot's built-in LSP server for accurate navigation. To en
 3. Enable **Use Thread** option
 
 When this setting is disabled, `gd` will show a message prompting you to enable it.
+
+### Custom Key Mappings
+
+The **Neovim Keymaps** dock panel allows you to customize key bindings without recompiling the plugin. The panel appears in the right dock area (alongside Inspector, Node, etc.) when the plugin is active.
+
+**Features:**
+- View all current key bindings for Normal and Visual modes
+- Edit key bindings by double-clicking the Key column
+- Delete bindings with the `Delete` key
+- Reset to defaults with the **Reset** button
+- Import keymaps from Neovim with the **Import from Neovim** button (requires `neovim_clean = false` for user keymaps)
+
+**Key format** follows Neovim notation:
+- Single characters: `a`, `A`, `/`, `$`, etc.
+- Control combinations: `<C-a>`, `<C-f>`, etc.
+- Special keys: `<CR>`, `<Esc>`, `<Tab>`, `<BS>`, etc.
+- Key sequences: `gd`, `zo`, `ZZ`, `[[`, etc.
+
+**Validation:**
+- Only valid Neovim key notation is accepted
+- Duplicate keys within the same mode are rejected
+
+Custom mappings are persisted in `Editor Settings` under `godot_neovim/custom_keymaps` and survive editor restarts. Custom overrides are marked with `*` in the panel.
+
+> **Note**: Not all keys are customizable through the panel. Keys handled internally by the Neovim state machine (count prefixes, pending operations like `f`/`t`/`r`, register selection `"`, macro recording `q`/`@`, and operators `>`/`<`) are managed by the plugin's Rust backend.
 
 ## Exporting Projects
 

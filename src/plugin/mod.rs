@@ -367,6 +367,10 @@ pub struct GodotNeovimPlugin {
     /// so we use this flag to defer initialization until plugin.gd calls set_plugin_active.
     #[init(val = false)]
     plugin_active: bool,
+    /// GDScript input handler Callable (when set, delegates input dispatch to GDScript)
+    /// This enables GDScript-based keybinding customization without recompiling the GDExtension.
+    #[init(val = None)]
+    input_handler: Option<Callable>,
 }
 
 #[godot_api]
@@ -670,7 +674,20 @@ impl IEditorPlugin for GodotNeovimPlugin {
         }
 
         // Handle normal/visual mode input
-        self.handle_normal_mode_input(&key_event);
+        if self.input_handler.is_some() {
+            // GDScript dispatch path: process key in Rust, defer keymap lookup to GDScript.
+            // Cannot call GDScript Callable directly here (re-entrant &mut self borrow).
+            let result = self.process_key_event_impl(&key_event);
+            if result.get_or_nil("needs_dispatch").to::<bool>() {
+                let resolved_key = result.get_or_nil("resolved_key");
+                let mode = result.get_or_nil("mode");
+                self.base_mut()
+                    .call_deferred("_dispatch_key_to_gdscript", &[resolved_key, mode]);
+            }
+        } else {
+            // Fallback: built-in Rust handling
+            self.handle_normal_mode_input(&key_event);
+        }
     }
 }
 
@@ -1492,6 +1509,124 @@ impl GodotNeovimPlugin {
             self.restart_neovim();
         }
         self.cleanup_recovery_dialog();
+    }
+
+    // =========================================================================
+    // Input handler API: GDScript-based keybinding dispatch
+    // =========================================================================
+
+    /// Register a GDScript Callable as the keymap dispatch handler.
+    /// When set, input() uses process_key_event for normal/visual mode,
+    /// then defers keymap lookup to this Callable via call_deferred.
+    /// The Callable signature should be: func(resolved_key: String, mode: String) -> void
+    #[func]
+    fn set_input_handler(&mut self, handler: Callable) {
+        crate::verbose_print!("[godot-neovim] GDScript input handler registered");
+        self.input_handler = Some(handler);
+    }
+
+    /// Deferred dispatch: called via call_deferred from input() to avoid re-entrant borrow.
+    /// Invokes the GDScript dispatch handler with the resolved key and mode.
+    #[func]
+    fn _dispatch_key_to_gdscript(&mut self, resolved_key: GString, mode: GString) {
+        if let Some(handler) = self.input_handler.clone() {
+            handler.call(&[resolved_key.to_variant(), mode.to_variant()]);
+        }
+    }
+
+    /// Clear the GDScript input handler, reverting to built-in Rust handling.
+    #[func]
+    fn clear_input_handler(&mut self) {
+        crate::verbose_print!("[godot-neovim] GDScript input handler cleared");
+        self.input_handler = None;
+    }
+
+    /// Handle mouse events (called by GDScript input handler).
+    /// Extracts mouse handling logic from input() for GDScript delegation.
+    #[func]
+    fn handle_mouse_event(&mut self, event: Gd<godot::classes::InputEvent>) {
+        let Ok(mouse_event) = event.try_cast::<godot::classes::InputEventMouseButton>() else {
+            return;
+        };
+
+        if mouse_event.get_button_index() == godot::global::MouseButton::LEFT
+            && self.editor_has_focus()
+        {
+            if mouse_event.is_pressed() {
+                self.mouse_dragging = true;
+                self.mouse_selection_syncing = false;
+                if let Some(ref mut editor) = self.current_editor {
+                    editor.set_selecting_enabled(true);
+                }
+            } else if self.mouse_dragging {
+                self.mouse_dragging = false;
+                self.base_mut()
+                    .call_deferred("sync_mouse_selection_to_neovim", &[]);
+            }
+        }
+    }
+
+    /// Handle mode-specific input (insert/replace/command/search and pending ops).
+    /// Called by GDScript when process_key_event returns mode_handler=true.
+    #[func]
+    fn handle_mode_input(&mut self, event: Gd<godot::classes::InputEventKey>) {
+        // Command-line mode
+        if self.command_mode {
+            self.handle_command_mode_input(&event);
+            return;
+        }
+
+        // Search mode
+        if self.search_mode {
+            self.handle_search_mode_input(&event);
+            return;
+        }
+
+        // Pending operations
+        if self.handle_pending_char_op(&event) {
+            return;
+        }
+        if self.handle_pending_mark_op(&event) {
+            return;
+        }
+        if self.handle_pending_macro_op(&event) {
+            return;
+        }
+        if self.handle_pending_register(&event) {
+            return;
+        }
+
+        // Insert mode
+        if self.is_insert_mode() {
+            self.handle_insert_mode_input(&event);
+            return;
+        }
+
+        // Replace mode
+        if self.is_replace_mode() {
+            self.handle_replace_mode_input(&event);
+        }
+    }
+
+    /// Process a key event and return dispatch information for GDScript.
+    /// Returns a Dictionary with:
+    /// - "needs_dispatch": bool - whether GDScript should look up the keymap
+    /// - "mode": String - current vim mode ("n", "v", "V", etc.)
+    /// - "resolved_key": String - resolved key in Neovim notation ("gd", "<C-f>", etc.)
+    /// - "mode_handler": bool - whether to call handle_mode_input() instead
+    /// - "pass_through": bool - whether to let Godot handle the key (e.g., Ctrl+/)
+    #[func]
+    fn process_key_event(&mut self, event: Gd<godot::classes::InputEventKey>) -> VarDictionary {
+        self.process_key_event_impl(&event)
+    }
+
+    /// Get Neovim's current keymaps for a mode via RPC.
+    /// Returns a Dictionary of { lhs: rhs } mappings.
+    /// Only contains user-defined mappings (not built-in Neovim defaults).
+    /// Requires Neovim to be connected; returns empty dict otherwise.
+    #[func]
+    fn get_neovim_keymaps(&self, mode: GString) -> VarDictionary {
+        self.get_neovim_keymaps_impl(&mode.to_string())
     }
 
     // =========================================================================
