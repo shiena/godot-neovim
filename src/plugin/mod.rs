@@ -355,158 +355,41 @@ pub struct GodotNeovimPlugin {
     /// Number of pending keys without response
     #[init(val = 0)]
     pending_key_count: u32,
+    /// Whether the plugin has been activated via set_plugin_active(true)
+    /// GDExtension plugins are auto-loaded by Godot regardless of the addon enabled state,
+    /// so we use this flag to defer initialization until plugin.gd calls set_plugin_active.
+    #[init(val = false)]
+    plugin_active: bool,
 }
 
 #[godot_api]
 impl IEditorPlugin for GodotNeovimPlugin {
     fn enter_tree(&mut self) {
-        crate::verbose_print!("[godot-neovim] v{} loaded", VERSION);
+        crate::verbose_print!(
+            "[godot-neovim] v{} loaded (waiting for activation via plugin.gd)",
+            VERSION
+        );
 
-        // Add to group for GDScript discovery
+        // Add to group so plugin.gd can discover this instance and call set_plugin_active.
+        // GDExtension EditorPlugin classes are auto-loaded by Godot regardless of the addon
+        // enabled state, so we must not initialize here. Actual initialization happens in
+        // activate_plugin_impl(), called from set_plugin_active(true) by plugin.gd.
         self.base_mut().add_to_group("godot_neovim");
-
-        // Initialize settings first
-        settings::initialize_settings();
-
-        // Validate Neovim path
-        let validation = settings::validate_current_path();
-        if !validation.is_valid() {
-            godot_warn!("[godot-neovim] Neovim validation failed, plugin may not work correctly");
-        }
-
-        // Get addons path for Lua plugin
-        let addons_path = ProjectSettings::singleton()
-            .globalize_path("res://addons/godot-neovim")
-            .to_string();
-
-        // Initialize Neovim client for ScriptEditor
-        match NeovimClient::new() {
-            Ok(mut client) => {
-                if let Err(e) = client.start(Some(&addons_path)) {
-                    godot_error!(
-                        "[godot-neovim] Failed to start Neovim for ScriptEditor: {}",
-                        e
-                    );
-                    return;
-                }
-                self.script_neovim = Some(Mutex::new(client));
-                crate::verbose_print!("[godot-neovim] ScriptEditor Neovim initialized");
-            }
-            Err(e) => {
-                godot_error!(
-                    "[godot-neovim] Failed to create Neovim client for ScriptEditor: {}",
-                    e
-                );
-                return;
-            }
-        }
-
-        // Initialize Neovim client for ShaderEditor (separate instance)
-        match NeovimClient::new() {
-            Ok(mut client) => {
-                if let Err(e) = client.start(Some(&addons_path)) {
-                    godot_error!(
-                        "[godot-neovim] Failed to start Neovim for ShaderEditor: {}",
-                        e
-                    );
-                    // Continue with ScriptEditor only
-                } else {
-                    self.shader_neovim = Some(Mutex::new(client));
-                    crate::verbose_print!("[godot-neovim] ShaderEditor Neovim initialized");
-                }
-            }
-            Err(e) => {
-                godot_warn!(
-                    "[godot-neovim] Failed to create Neovim client for ShaderEditor: {}",
-                    e
-                );
-                // Continue with ScriptEditor only
-            }
-        }
-
-        // Create LSP client only if use_thread is enabled in editor settings
-        // (LSP server won't respond without threading enabled)
-        let use_thread = EditorInterface::singleton()
-            .get_editor_settings()
-            .map(|settings| {
-                settings
-                    .get_setting("network/language_server/use_thread")
-                    .try_to::<bool>()
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
-
-        if use_thread {
-            let lsp_client = Arc::new(GodotLspClient::new());
-            self.godot_lsp = Some(lsp_client);
-            self.lsp_connected = true;
-            crate::verbose_print!("[godot-neovim] LSP client initialized (use_thread=true)");
-        } else {
-            crate::verbose_print!("[godot-neovim] LSP disabled (use_thread=false)");
-        }
-
-        // Create mode indicator label and recording indicator
-        self.create_mode_label();
-        self.create_recording_label();
-
-        // Connect to script editor signals
-        self.connect_script_editor_signals();
-
-        // Connect to settings changed signal
-        self.connect_settings_signals();
-
-        // Try to find existing CodeEdit (indicates hot reload if found)
-        self.find_current_code_edit();
-        if self.current_editor.is_some() {
-            crate::verbose_print!(
-                "[godot-neovim] Found existing CodeEdit - triggering full reinitialization (hot reload)"
-            );
-            // Trigger full reinitialization via deferred call
-            // This uses the same flow as on_script_changed for consistent behavior
-            self.script_changed_pending.set(true);
-        }
-
-        // Enable process() to be called every frame for checking redraw events
-        self.base_mut().set_process(true);
-
-        crate::verbose_print!("[godot-neovim] Plugin initialized successfully");
     }
 
     fn exit_tree(&mut self) {
         crate::verbose_print!("[godot-neovim] Plugin exiting tree");
-
-        // Cleanup mode labels (check if still valid before freeing)
-        if let Some(mut label) = self.mode_label.take() {
-            if label.is_instance_valid() {
-                label.queue_free();
-            }
+        if self.plugin_active {
+            self.deactivate_plugin_impl();
         }
-        if let Some(mut label) = self.shader_mode_label.take() {
-            if label.is_instance_valid() {
-                label.queue_free();
-            }
-        }
-
-        // Disconnect from gui_input signal
-        self.disconnect_gui_input_signal();
-
-        // Clear current editor reference
-        self.current_editor = None;
-
-        // Disconnect and clear LSP client
-        if let Some(ref lsp) = self.godot_lsp {
-            lsp.disconnect();
-        }
-        self.godot_lsp = None;
-
-        // Neovim clients will be stopped when dropped (with timeout)
-        self.script_neovim = None;
-        self.shader_neovim = None;
-
         crate::verbose_print!("[godot-neovim] Plugin exit complete");
     }
 
     fn process(&mut self, _delta: f64) {
+        if !self.plugin_active {
+            return;
+        }
+
         // Event-driven reset for closing_all_tabs flag
         // Only reset when ALL scripts are closed (not when cancelled)
         if self.closing_all_tabs {
@@ -655,6 +538,10 @@ impl IEditorPlugin for GodotNeovimPlugin {
     }
 
     fn input(&mut self, event: Gd<godot::classes::InputEvent>) {
+        if !self.plugin_active {
+            return;
+        }
+
         // Reset closing_all_tabs flag on user input (after :qa cancel)
         // This reconnects to the current script after dialog processing completes
         if self.closing_all_tabs {
@@ -786,6 +673,20 @@ impl GodotNeovimPlugin {
     /// Can be used by GDScript to implement custom key sequence display
     #[signal]
     fn key_sent(key: GString);
+
+    /// Activate or deactivate the plugin.
+    /// Called by plugin.gd's _enter_tree/_exit_tree/_disable_plugin to control the lifecycle.
+    /// This is needed because GDExtension EditorPlugin classes are auto-loaded by Godot
+    /// regardless of the addon's enabled/disabled state in Project Settings > Plugins.
+    #[func]
+    fn set_plugin_active(&mut self, active: bool) {
+        if active && !self.plugin_active {
+            self.plugin_active = true;
+            self.activate_plugin_impl();
+        } else if !active && self.plugin_active {
+            self.deactivate_plugin_impl();
+        }
+    }
 
     #[func]
     fn on_editor_resized(&mut self) {
@@ -1965,6 +1866,173 @@ impl GodotNeovimPlugin {
     /// Note: This borrows self, so you cannot mutably borrow other fields while holding the result
     pub(super) fn get_current_neovim(&self) -> Option<&Mutex<NeovimClient>> {
         self.neovim_for(self.current_editor_type)
+    }
+
+    /// Initialize the plugin. Called by plugin.gd via set_plugin_active(true).
+    /// Separated from enter_tree() because GDExtension plugins are auto-loaded by Godot
+    /// regardless of the addon enabled/disabled state in Project Settings.
+    fn activate_plugin_impl(&mut self) {
+        crate::verbose_print!("[godot-neovim] v{} activating", VERSION);
+
+        // Initialize settings first
+        settings::initialize_settings();
+
+        // Validate Neovim path
+        let validation = settings::validate_current_path();
+        if !validation.is_valid() {
+            godot_warn!("[godot-neovim] Neovim validation failed, plugin may not work correctly");
+        }
+
+        // Get addons path for Lua plugin
+        let addons_path = ProjectSettings::singleton()
+            .globalize_path("res://addons/godot-neovim")
+            .to_string();
+
+        // Initialize Neovim client for ScriptEditor
+        match NeovimClient::new() {
+            Ok(mut client) => {
+                if let Err(e) = client.start(Some(&addons_path)) {
+                    godot_error!(
+                        "[godot-neovim] Failed to start Neovim for ScriptEditor: {}",
+                        e
+                    );
+                    return;
+                }
+                self.script_neovim = Some(Mutex::new(client));
+                crate::verbose_print!("[godot-neovim] ScriptEditor Neovim initialized");
+            }
+            Err(e) => {
+                godot_error!(
+                    "[godot-neovim] Failed to create Neovim client for ScriptEditor: {}",
+                    e
+                );
+                return;
+            }
+        }
+
+        // Initialize Neovim client for ShaderEditor (separate instance)
+        match NeovimClient::new() {
+            Ok(mut client) => {
+                if let Err(e) = client.start(Some(&addons_path)) {
+                    godot_error!(
+                        "[godot-neovim] Failed to start Neovim for ShaderEditor: {}",
+                        e
+                    );
+                    // Continue with ScriptEditor only
+                } else {
+                    self.shader_neovim = Some(Mutex::new(client));
+                    crate::verbose_print!("[godot-neovim] ShaderEditor Neovim initialized");
+                }
+            }
+            Err(e) => {
+                godot_warn!(
+                    "[godot-neovim] Failed to create Neovim client for ShaderEditor: {}",
+                    e
+                );
+                // Continue with ScriptEditor only
+            }
+        }
+
+        // Create LSP client only if use_thread is enabled in editor settings
+        // (LSP server won't respond without threading enabled)
+        let use_thread = EditorInterface::singleton()
+            .get_editor_settings()
+            .map(|settings| {
+                settings
+                    .get_setting("network/language_server/use_thread")
+                    .try_to::<bool>()
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false);
+
+        if use_thread {
+            let lsp_client = Arc::new(GodotLspClient::new());
+            self.godot_lsp = Some(lsp_client);
+            self.lsp_connected = true;
+            crate::verbose_print!("[godot-neovim] LSP client initialized (use_thread=true)");
+        } else {
+            crate::verbose_print!("[godot-neovim] LSP disabled (use_thread=false)");
+        }
+
+        // Create mode indicator label and recording indicator
+        self.create_mode_label();
+        self.create_recording_label();
+
+        // Connect to script editor signals
+        self.connect_script_editor_signals();
+
+        // Connect to settings changed signal
+        self.connect_settings_signals();
+
+        // Try to find existing CodeEdit (indicates hot reload if found)
+        self.find_current_code_edit();
+        if self.current_editor.is_some() {
+            crate::verbose_print!(
+                "[godot-neovim] Found existing CodeEdit - triggering full reinitialization (hot reload)"
+            );
+            // Trigger full reinitialization via deferred call
+            // This uses the same flow as on_script_changed for consistent behavior
+            self.script_changed_pending.set(true);
+        }
+
+        // Enable process() to be called every frame for checking redraw events
+        self.base_mut().set_process(true);
+
+        crate::verbose_print!("[godot-neovim] Plugin activated successfully");
+    }
+
+    /// Clean up the plugin. Called by plugin.gd via set_plugin_active(false) or from exit_tree().
+    fn deactivate_plugin_impl(&mut self) {
+        crate::verbose_print!("[godot-neovim] Plugin deactivating");
+
+        // Disable process() first
+        self.base_mut().set_process(false);
+
+        // Cleanup mode labels (check if still valid before freeing)
+        if let Some(mut label) = self.mode_label.take() {
+            if label.is_instance_valid() {
+                label.queue_free();
+            }
+        }
+        if let Some(mut label) = self.shader_mode_label.take() {
+            if label.is_instance_valid() {
+                label.queue_free();
+            }
+        }
+        if let Some(mut label) = self.recording_label.take() {
+            if label.is_instance_valid() {
+                label.queue_free();
+            }
+        }
+        if let Some(mut label) = self.shader_recording_label.take() {
+            if label.is_instance_valid() {
+                label.queue_free();
+            }
+        }
+
+        // Restore standard line caret before disconnecting
+        if let Some(ref mut editor) = self.current_editor {
+            editor.set_caret_type(godot::classes::text_edit::CaretType::LINE);
+        }
+
+        // Disconnect from gui_input signal
+        self.disconnect_gui_input_signal();
+
+        // Clear current editor reference
+        self.current_editor = None;
+
+        // Disconnect and clear LSP client
+        if let Some(ref lsp) = self.godot_lsp {
+            lsp.disconnect();
+        }
+        self.godot_lsp = None;
+
+        // Neovim clients will be stopped when dropped (with timeout)
+        self.script_neovim = None;
+        self.shader_neovim = None;
+
+        self.plugin_active = false;
+        crate::verbose_print!("[godot-neovim] Plugin deactivated");
     }
 }
 

@@ -179,11 +179,15 @@ impl GodotNeovimPlugin {
         if let Some(mut script_editor) = editor.get_script_editor() {
             // Connect to editor script changed signal
             let callable = self.base().callable("on_script_changed");
-            script_editor.connect("editor_script_changed", &callable);
+            if !script_editor.is_connected("editor_script_changed", &callable) {
+                script_editor.connect("editor_script_changed", &callable);
+            }
 
             // Connect to script close signal (for Neovim buffer cleanup)
             let close_callable = self.base().callable("on_script_close");
-            script_editor.connect("script_close", &close_callable);
+            if !script_editor.is_connected("script_close", &close_callable) {
+                script_editor.connect("script_close", &close_callable);
+            }
         }
     }
 
@@ -193,7 +197,9 @@ impl GodotNeovimPlugin {
         if let Some(mut editor_settings) = editor.get_editor_settings() {
             // Connect to settings changed signal
             let callable = self.base().callable("on_settings_changed");
-            editor_settings.connect("settings_changed", &callable);
+            if !editor_settings.is_connected("settings_changed", &callable) {
+                editor_settings.connect("settings_changed", &callable);
+            }
         }
     }
 
