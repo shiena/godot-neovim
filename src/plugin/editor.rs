@@ -306,7 +306,7 @@ impl GodotNeovimPlugin {
         // This handles the case where the editor is focused but buffer wasn't synced
         // (e.g., on startup when multiple on_script_changed signals fire)
         if self.current_editor.is_some() && self.current_editor_type == EditorType::Script {
-            if let Some(mut script_editor) = editor.get_script_editor() {
+            if let Some(script_editor) = editor.get_script_editor() {
                 // Get actual current script path from ScriptEditor
                 // Also track whether it's a TextFile (get_current_script returns None)
                 let current_script = script_editor.get_current_script();
@@ -505,7 +505,7 @@ impl GodotNeovimPlugin {
     /// returning the wrong editor when multiple editors are open (issue #40)
     pub(super) fn find_visible_code_edit_safe(&self, node: Gd<Control>) -> Option<Gd<CodeEdit>> {
         let editor = EditorInterface::singleton();
-        let mut script_editor = editor.get_script_editor()?;
+        let script_editor = editor.get_script_editor()?;
         let current_script = script_editor.get_current_script()?;
         let expected_path = current_script.get_path().to_string();
 
@@ -619,7 +619,7 @@ impl GodotNeovimPlugin {
 
                         // Look for ItemList (shader_list)
                         if child_class == "ItemList" {
-                            if let Ok(mut item_list) = child.try_cast::<ItemList>() {
+                            if let Ok(item_list) = child.try_cast::<ItemList>() {
                                 // Get the selected item index
                                 let selected_items = item_list.get_selected_items();
                                 crate::verbose_print!(
@@ -942,7 +942,7 @@ impl GodotNeovimPlugin {
             None
         }
 
-        if let Some(mut item_list) = find_item_list(&node) {
+        if let Some(item_list) = find_item_list(&node) {
             // Get selected items (should be the current script/file)
             let selected = item_list.get_selected_items();
             if !selected.is_empty() {

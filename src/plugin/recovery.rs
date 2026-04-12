@@ -75,7 +75,7 @@ impl GodotNeovimPlugin {
     /// Save all open scripts via Godot's ResourceSaver
     pub(super) fn save_all_open_scripts(&mut self) {
         let editor = EditorInterface::singleton();
-        let Some(mut script_editor) = editor.get_script_editor() else {
+        let Some(script_editor) = editor.get_script_editor() else {
             crate::verbose_print!("[godot-neovim] Recovery: No script editor found");
             return;
         };

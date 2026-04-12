@@ -42,7 +42,7 @@ impl GodotNeovimPlugin {
         }
 
         let mut editor = EditorInterface::singleton();
-        let Some(mut script_editor) = editor.get_script_editor() else {
+        let Some(script_editor) = editor.get_script_editor() else {
             return;
         };
 
@@ -141,11 +141,11 @@ impl GodotNeovimPlugin {
                     // Also update the ItemList selection (shader_list)
                     // ItemList is a sibling of TabContainer in HSplitContainer
                     if let Some(parent) = node.get_parent() {
-                        if parent.get_class().to_string() == "HSplitContainer" {
+                        if parent.get_class() == "HSplitContainer" {
                             let child_count = parent.get_child_count();
                             for i in 0..child_count {
                                 if let Some(mut child) = parent.get_child(i) {
-                                    if child.get_class().to_string() == "ItemList" {
+                                    if child.get_class() == "ItemList" {
                                         // Update ItemList selection to match the new tab
                                         child.call("select", &[new_idx.to_variant()]);
                                         crate::verbose_print!(
@@ -236,7 +236,7 @@ impl GodotNeovimPlugin {
     /// Called when Neovim switches buffer (e.g., via Ctrl+O/Ctrl+I jump)
     pub(crate) fn sync_godot_script_tab(&mut self, neovim_path: &str) {
         let mut editor = EditorInterface::singleton();
-        let Some(mut script_editor) = editor.get_script_editor() else {
+        let Some(script_editor) = editor.get_script_editor() else {
             return;
         };
 

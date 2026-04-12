@@ -36,8 +36,8 @@ impl GodotNeovimPlugin {
         self.mark_input_handled();
         let mut dict = VarDictionary::new();
         dict.set(KEY_NEEDS_DISPATCH, true);
-        dict.set(KEY_MODE, GString::from(&self.current_mode));
-        dict.set(KEY_RESOLVED_KEY, GString::from(resolved_key));
+        dict.set(KEY_MODE, &GString::from(&self.current_mode));
+        dict.set(KEY_RESOLVED_KEY, &GString::from(resolved_key));
         dict
     }
 
@@ -1004,7 +1004,7 @@ impl GodotNeovimPlugin {
             for (k, v) in entries {
                 if let (rmpv::Value::String(lhs), rmpv::Value::String(rhs)) = (k, v) {
                     if let (Some(lhs_str), Some(rhs_str)) = (lhs.as_str(), rhs.as_str()) {
-                        dict.set(GString::from(lhs_str), GString::from(rhs_str));
+                        dict.set(&GString::from(lhs_str), &GString::from(rhs_str));
                     }
                 }
             }
