@@ -222,22 +222,22 @@ impl GodotNeovimPlugin {
         };
 
         // Try to get the script path
-        let file_name =
-            if let Some(mut script_edit) = EditorInterface::singleton().get_script_editor() {
-                if let Some(current_script) = script_edit.get_current_script() {
-                    let path = current_script.get_path().to_string();
-                    if path.is_empty() {
-                        "[New File]".to_string()
-                    } else {
-                        // Extract just the filename from path
-                        path.split('/').next_back().unwrap_or(&path).to_string()
-                    }
+        let file_name = if let Some(script_edit) = EditorInterface::singleton().get_script_editor()
+        {
+            if let Some(current_script) = script_edit.get_current_script() {
+                let path = current_script.get_path().to_string();
+                if path.is_empty() {
+                    "[New File]".to_string()
                 } else {
-                    "[No Script]".to_string()
+                    // Extract just the filename from path
+                    path.split('/').next_back().unwrap_or(&path).to_string()
                 }
             } else {
-                "[Unknown]".to_string()
-            };
+                "[No Script]".to_string()
+            }
+        } else {
+            "[Unknown]".to_string()
+        };
 
         let msg = format!(
             "\"{}\" line {} of {} --{}%--",

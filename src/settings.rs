@@ -7,6 +7,9 @@ const SETTING_NEOVIM_PATH: &str = "godot_neovim/neovim_executable_path";
 const SETTING_NEOVIM_CLEAN: &str = "godot_neovim/neovim_clean";
 const SETTING_TIMEOUTLEN: &str = "godot_neovim/timeoutlen";
 
+const PROPERTY_HINT_RANGE: i32 = 1;
+const PROPERTY_HINT_GLOBAL_FILE: i32 = 23;
+
 /// Default timeout for multi-key sequences (matches Neovim's default)
 pub const DEFAULT_TIMEOUTLEN_MS: i64 = 1000;
 
@@ -44,12 +47,11 @@ pub fn initialize_settings() {
     settings.set_initial_value(SETTING_NEOVIM_PATH, &Variant::from(default_path), false);
 
     // Add property info for better UI
-    #[allow(deprecated)]
-    let mut property_info = Dictionary::new();
+    let mut property_info = VarDictionary::new();
     property_info.set("name", SETTING_NEOVIM_PATH);
     property_info.set("type", VariantType::STRING.ord());
-    property_info.set("hint", godot::global::PropertyHint::GLOBAL_FILE.ord());
-    property_info.set("hint_string", get_file_filter());
+    property_info.set("hint", PROPERTY_HINT_GLOBAL_FILE);
+    property_info.set("hint_string", &get_file_filter());
 
     settings.add_property_info(&property_info);
 
@@ -63,8 +65,7 @@ pub fn initialize_settings() {
     settings.set_initial_value(SETTING_NEOVIM_CLEAN, &Variant::from(true), false);
 
     // Add property info for neovim_clean (checkbox)
-    #[allow(deprecated)]
-    let mut clean_info = Dictionary::new();
+    let mut clean_info = VarDictionary::new();
     clean_info.set("name", SETTING_NEOVIM_CLEAN);
     clean_info.set("type", VariantType::BOOL.ord());
 
@@ -83,11 +84,10 @@ pub fn initialize_settings() {
     );
 
     // Add property info for timeoutlen (integer with range)
-    #[allow(deprecated)]
-    let mut timeoutlen_info = Dictionary::new();
+    let mut timeoutlen_info = VarDictionary::new();
     timeoutlen_info.set("name", SETTING_TIMEOUTLEN);
     timeoutlen_info.set("type", VariantType::INT.ord());
-    timeoutlen_info.set("hint", godot::global::PropertyHint::RANGE.ord());
+    timeoutlen_info.set("hint", PROPERTY_HINT_RANGE);
     timeoutlen_info.set("hint_string", "0,10000,100"); // min, max, step
 
     settings.add_property_info(&timeoutlen_info);

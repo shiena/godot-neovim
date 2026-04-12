@@ -1163,7 +1163,7 @@ impl GodotNeovimPlugin {
         } else {
             // Verify we're on the expected script before syncing (ScriptEditor only)
             let editor = EditorInterface::singleton();
-            let Some(mut script_editor) = editor.get_script_editor() else {
+            let Some(script_editor) = editor.get_script_editor() else {
                 crate::verbose_print!("[godot-neovim] No script editor found");
                 return;
             };

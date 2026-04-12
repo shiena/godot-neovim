@@ -11,11 +11,11 @@ repository = "https://github.com/shiena/godot-neovim"
 crate-type = ["cdylib"]
 
 [dependencies]
-godot = "0.4.5"
+godot = { version = "0.5", features = ["api-4-4"] }
 nvim-rs = { version = "0.9", features = ["use_tokio"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.51", features = ["full"] }
 futures = "0.3"
-rmpv = "1.0"
+rmpv = "1.3"
 async-trait = "0.1"
 lsp-types = "0.97"
 serde = { version = "1.0", features = ["derive"] }

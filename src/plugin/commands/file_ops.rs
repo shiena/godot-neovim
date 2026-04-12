@@ -577,7 +577,7 @@ impl GodotNeovimPlugin {
             // Also update the Script resource to prevent Godot from
             // caching the modified content when reopening
             let editor = EditorInterface::singleton();
-            if let Some(mut script_editor) = editor.get_script_editor() {
+            if let Some(script_editor) = editor.get_script_editor() {
                 if let Some(mut current_script) = script_editor.get_current_script() {
                     current_script.set_source_code(&text);
                     crate::verbose_print!(
@@ -703,7 +703,7 @@ impl GodotNeovimPlugin {
             // Check if this is files_split (has ItemList child)
             let has_item_list = (0..node.get_child_count()).any(|i| {
                 node.get_child(i)
-                    .is_some_and(|c| c.get_class().to_string() == "ItemList")
+                    .is_some_and(|c| c.get_class() == "ItemList")
             });
 
             if has_item_list {
@@ -791,7 +791,7 @@ impl GodotNeovimPlugin {
             let child_count = node.get_child_count();
             for i in 0..child_count {
                 if let Some(child) = node.get_child(i) {
-                    if child.get_class().to_string() == "ItemList" {
+                    if child.get_class() == "ItemList" {
                         if let Ok(item_list) = child.try_cast::<ItemList>() {
                             // Collect all shader paths from ItemList tooltips
                             let item_count = item_list.get_item_count();
