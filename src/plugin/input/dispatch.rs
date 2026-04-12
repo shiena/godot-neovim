@@ -136,6 +136,13 @@ impl GodotNeovimPlugin {
             return result;
         }
 
+        // ----- Dispatchable single keys (mapped to GDScript actions) -----
+        // Keys like /, ?, :, n, N, *, #, u, K open Godot-side UI or call LSP,
+        // and must go through the keymap dispatch (not sent directly to Neovim).
+        if let Some(resolved) = self.resolve_dispatchable_single_key(key_event) {
+            return self.dispatch_key(&resolved);
+        }
+
         // ----- Visual mode type tracking -----
         if keycode == Key::V && !key_event.is_ctrl_pressed() {
             if key_event.is_shift_pressed() {
@@ -217,6 +224,65 @@ impl GodotNeovimPlugin {
             }
             _ => None,
         }
+    }
+
+    // =====================================================================
+    // Helper: Resolve dispatchable single keys (/, ?, :, n, N, *, #, u, K)
+    // These open Godot-side UI (search, command line) or call LSP (goto def,
+    // documentation), so they must go through GDScript keymap dispatch rather
+    // than being sent directly to Neovim.
+    // =====================================================================
+    fn resolve_dispatchable_single_key(
+        &self,
+        key_event: &Gd<godot::classes::InputEventKey>,
+    ) -> Option<String> {
+        let keycode = key_event.get_keycode();
+        let unicode_char = char::from_u32(key_event.get_unicode());
+        let ctrl = key_event.is_ctrl_pressed();
+        let shift = key_event.is_shift_pressed();
+
+        if ctrl {
+            return None;
+        }
+
+        // '/' - forward search
+        if unicode_char == Some('/') {
+            return Some("/".to_string());
+        }
+        // '?' - backward search
+        if unicode_char == Some('?') {
+            return Some("?".to_string());
+        }
+        // ':' - command line
+        if unicode_char == Some(':') {
+            return Some(":".to_string());
+        }
+        // '*' - search word forward
+        if unicode_char == Some('*') {
+            return Some("*".to_string());
+        }
+        // '#' - search word backward
+        if unicode_char == Some('#') {
+            return Some("#".to_string());
+        }
+        // 'n' - search next (not Shift)
+        if keycode == Key::N && !shift {
+            return Some("n".to_string());
+        }
+        // 'N' - search previous (Shift+N)
+        if keycode == Key::N && shift {
+            return Some("N".to_string());
+        }
+        // 'u' - undo (not Shift, not after 'g' prefix which is gu = lowercase operator)
+        if keycode == Key::U && !shift && self.last_key != "g" {
+            return Some("u".to_string());
+        }
+        // 'K' - documentation (Shift+K, not after 'g' prefix which is gK)
+        if keycode == Key::K && shift && self.last_key != "g" {
+            return Some("K".to_string());
+        }
+
+        None
     }
 
     // =====================================================================
