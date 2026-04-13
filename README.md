@@ -199,6 +199,10 @@ When this setting is disabled, `gd` will show a message prompting you to enable 
 
 The **Neovim Keymaps** dock panel allows you to customize key bindings without recompiling the plugin. The panel appears in the right dock area (alongside Inspector, Node, etc.) when the plugin is active.
 
+<p align="center">
+  <img src=".github/media/keymaps.png" alt="Neovim Keymaps panel" width="400">
+</p>
+
 **Features:**
 - View all current key bindings for Normal and Visual modes
 - Edit key bindings by double-clicking the Key column
