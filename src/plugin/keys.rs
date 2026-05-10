@@ -3,9 +3,30 @@
 use super::GodotNeovimPlugin;
 use godot::classes::InputEventKey;
 use godot::global::Key;
+use godot::obj::EngineEnum;
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
+    /// Detect whether the OS has already produced a composed character via Alt
+    /// (e.g. macOS Option+Q → `@` on certain layouts). In that case the user
+    /// wants the produced character inserted as text, not `<A-x>` sent to Neovim.
+    pub(super) fn is_alt_composed_unicode(&self, event: &Gd<InputEventKey>) -> bool {
+        if !event.is_alt_pressed() || event.is_ctrl_pressed() {
+            return false;
+        }
+        let unicode = event.get_unicode();
+        if unicode == 0 {
+            return false;
+        }
+        let Some(uc) = char::from_u32(unicode) else {
+            return false;
+        };
+        let Some(kc) = char::from_u32(event.get_keycode().ord() as u32) else {
+            return false;
+        };
+        kc.to_ascii_lowercase() != uc.to_ascii_lowercase()
+    }
+
     /// Convert Godot key event to Neovim key string
     pub(super) fn key_event_to_nvim_string(&self, event: &Gd<InputEventKey>) -> Option<String> {
         let keycode = event.get_keycode();
