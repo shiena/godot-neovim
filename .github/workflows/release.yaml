@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       commit_sha: ${{ steps.commit.outputs.sha }}
+      version: ${{ steps.normalize.outputs.version }}
 
     steps:
       - name: Checkout
@@ -23,15 +24,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Normalize version
+        id: normalize
+        run: |
+          # Normalize input: ensure single 'v' prefix (1.0.0 or v1.0.0 -> v1.0.0)
+          VERSION="${{ inputs.version }}"
+          VERSION="v${VERSION#v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Normalized version: ${VERSION}"
+
       - name: Validate version
         run: |
-          INPUT_VERSION="${{ inputs.version }}"
+          INPUT_VERSION="${{ steps.normalize.outputs.version }}"
           # Strip leading 'v' for comparison
           INPUT_VERSION="${INPUT_VERSION#v}"
 
           # Check if tag already exists (prevents duplicate release)
-          if git rev-parse "refs/tags/${{ inputs.version }}" >/dev/null 2>&1; then
-            echo "::error::Tag ${{ inputs.version }} already exists. Delete it first to re-release."
+          if git rev-parse "refs/tags/${{ steps.normalize.outputs.version }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ steps.normalize.outputs.version }} already exists. Delete it first to re-release."
             exit 1
           fi
 
@@ -57,8 +67,8 @@ jobs:
 
       - name: Update versions
         run: |
-          # Strip leading 'v' from version if present (v0.1.0 -> 0.1.0)
-          VERSION="${{ inputs.version }}"
+          # Strip leading 'v' from normalized version (v0.1.0 -> 0.1.0) for plugin.cfg / Cargo.toml
+          VERSION="${{ steps.normalize.outputs.version }}"
           VERSION="${VERSION#v}"
 
           # Update plugin.cfg
@@ -80,7 +90,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No version changes needed (version already set)"
           else
-            git commit -m "chore: bump version to ${{ inputs.version }}"
+            git commit -m "chore: bump version to ${{ steps.normalize.outputs.version }}"
           fi
           echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
@@ -174,7 +184,7 @@ jobs:
           path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
   release:
-    needs: [build-linux-windows, build-macos]
+    needs: [prepare, build-linux-windows, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -203,13 +213,13 @@ jobs:
           if git diff --cached --quiet; then
             echo "No version changes needed (version already set)"
           else
-            git commit -m "chore: bump version to ${{ inputs.version }}"
+            git commit -m "chore: bump version to ${{ needs.prepare.outputs.version }}"
             git push origin main
           fi
 
           # Create and push tag for git-cliff
-          git tag ${{ inputs.version }}
-          git push origin ${{ inputs.version }}
+          git tag ${{ needs.prepare.outputs.version }}
+          git push origin ${{ needs.prepare.outputs.version }}
 
       - name: Prepare release archive
         run: |
@@ -238,7 +248,7 @@ jobs:
           # Only include godot-neovim addon (exclude optional addons like godot-neovim-key-display)
           mkdir -p godot-neovim/addons
           cp -r addons/godot-neovim godot-neovim/addons/
-          zip -r godot-neovim-${{ inputs.version }}.zip godot-neovim
+          zip -r godot-neovim-${{ needs.prepare.outputs.version }}.zip godot-neovim
 
       - name: Generate changelog
         uses: orhun/git-cliff-action@v4
@@ -253,7 +263,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create ${{ inputs.version }} \
-            --title "Release ${{ inputs.version }}" \
+          gh release create ${{ needs.prepare.outputs.version }} \
+            --title "Release ${{ needs.prepare.outputs.version }}" \
             --notes-file CHANGELOG.md \
-            godot-neovim-${{ inputs.version }}.zip
+            godot-neovim-${{ needs.prepare.outputs.version }}.zip
