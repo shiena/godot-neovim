@@ -54,9 +54,10 @@ impl GodotNeovimPlugin {
         // These should NOT be sent to Neovim - let Godot buffer them instead
         let ctrl = key_event.is_ctrl_pressed();
         let alt = key_event.is_alt_pressed();
-        // macOS Option key composes characters (e.g. Option+Q → @): the OS
-        // produces the composed unicode while still flagging Alt. Treat that
-        // as plain text input so Godot inserts the composed character.
+        // macOS Option and Windows AltGr compose characters (e.g. Option+Q →
+        // @, AltGr+Q → @ on German layout): the OS produces the composed
+        // unicode while still flagging Alt. Treat that as plain text input
+        // so Godot inserts the composed character.
         if (ctrl || alt) && !self.is_alt_composed_unicode(key_event) {
             let nvim_key = self.key_event_to_nvim_notation(key_event);
             // Only send if it's an actual Vim command notation (starts with <)

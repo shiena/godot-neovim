@@ -8,10 +8,15 @@ use godot::prelude::*;
 
 impl GodotNeovimPlugin {
     /// Detect whether the OS has already produced a composed character via Alt
-    /// (e.g. macOS Option+Q → `@` on certain layouts). In that case the user
-    /// wants the produced character inserted as text, not `<A-x>` sent to Neovim.
+    /// (e.g. macOS Option+Q → `@`, or AltGr+Q → `@` on Windows German layout).
+    /// In that case the user wants the produced character inserted as text,
+    /// not `<A-x>` / `<C-A-x>` sent to Neovim.
+    ///
+    /// Note: Windows reports AltGr as Ctrl+Alt simultaneously, so we don't
+    /// exclude ctrl here. IME like CorvusSKK reports composed characters with
+    /// only ctrl set (no alt), so requiring alt avoids interfering with them.
     pub(super) fn is_alt_composed_unicode(&self, event: &Gd<InputEventKey>) -> bool {
-        if !event.is_alt_pressed() || event.is_ctrl_pressed() {
+        if !event.is_alt_pressed() {
             return false;
         }
         let unicode = event.get_unicode();
