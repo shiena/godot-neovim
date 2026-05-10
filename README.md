@@ -544,6 +544,15 @@ Insert mode uses Godot's native input system to support auto-completion and othe
 - **Dot repeat**: `.` does not repeat `Ctrl+/`
 - **Undo**: Uses Godot's undo system, not Neovim's `u`
 
+### Alt Key Composition (Option / AltGr)
+
+When the OS produces a composed character via the Alt modifier (e.g. macOS Option+Q → `@`, Windows AltGr+Q → `@` on German layout), the plugin inserts the composed character as plain text instead of sending `<A-x>` / `<C-A-x>` to Neovim. This makes layouts that rely on Alt for character composition usable in Insert and Replace modes.
+
+As a side effect, the following Vim mappings are unreachable on those layouts:
+
+- **macOS**: Any `<A-letter>` mapping where Option+letter produces a character on the active layout. Configure macOS to "Use Option as Meta key" in your terminal/editor or switch to a layout that does not compose to use these mappings.
+- **Windows (AltGr layouts, e.g. German/French/Spanish)**: `<C-A-letter>` mappings on keys that AltGr composes. Windows reports AltGr as Ctrl+Alt simultaneously at the OS level, so AltGr+Q and Ctrl+Alt+Q are indistinguishable from any application. Use a different modifier combination or disable AltGr to use these mappings.
+
 ### Known Issues
 
 | Issue | Workaround |
