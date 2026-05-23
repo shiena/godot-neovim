@@ -59,6 +59,28 @@ impl GodotNeovimPlugin {
         // unicode while still flagging Alt. Treat that as plain text input
         // so Godot inserts the composed character.
         if (ctrl || alt) && !self.is_alt_composed_unicode(key_event) {
+            // Let Ctrl/Shift+special keys (Backspace, Delete, arrows, Home, End)
+            // pass through to Godot in insert mode. Godot's CodeEdit handles these
+            // natively (e.g., Ctrl+Backspace = delete word, Ctrl+Delete = delete word
+            // forward, Ctrl+Left/Right = word navigation, Shift+arrows = selection).
+            // Sending these to Neovim causes buffer desync since Neovim edits its own
+            // buffer while Godot owns the text in insert mode.
+            let keycode = key_event.get_keycode();
+            let is_special_nav_key = matches!(
+                keycode,
+                Key::BACKSPACE
+                    | Key::DELETE
+                    | Key::LEFT
+                    | Key::RIGHT
+                    | Key::UP
+                    | Key::DOWN
+                    | Key::HOME
+                    | Key::END
+            );
+            if is_special_nav_key {
+                return;
+            }
+
             let nvim_key = self.key_event_to_nvim_notation(key_event);
             // Only send if it's an actual Vim command notation (starts with <)
             // Plain characters (including CJK) should be handled by Godot
