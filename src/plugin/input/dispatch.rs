@@ -1012,4 +1012,196 @@ impl GodotNeovimPlugin {
 
         dict
     }
+
+    // =====================================================================
+    // Insert mode dispatcher
+    // =====================================================================
+    //
+    // Routes insert-mode key events through the same dispatch primitives used
+    // by normal/visual mode. The decision tree is:
+    //
+    //   1. Esc / Ctrl+[ / Ctrl+B            → handled internally (mode exit)
+    //   2. AltGr composed unicode (Option+Q → @, etc.)
+    //                                       → pass through to Godot as text
+    //   3. Ctrl/Alt + nav/delete keys       → pass through to Godot
+    //      (BS, Del, arrows, Home, End, PageUp/Down)
+    //      Neovim has no insert-mode binding for these; Godot's CodeEdit
+    //      handles them natively (e.g., Ctrl+BS = delete word). Godot's edits
+    //      sync to Neovim on the next Esc via sync_buffer_to_neovim_keep_undo.
+    //   4. Ctrl/Alt + other key             → dispatch to GDScript keymap
+    //      Default action_send_keys forwards to Neovim (e.g., <C-w>=delword).
+    //   5. Plain chars / unmodified specials → pass through (with macro record)
+    //
+    // Pass-through keys (case 3) are decided in Rust because the GDScript
+    // dispatch is call_deferred — by the time GDScript runs, input() has
+    // already returned and set_input_as_handled() can no longer be skipped.
+    // This mirrors the Ctrl+/ pattern at line 70.
+    pub(in crate::plugin) fn process_insert_key_event_impl(
+        &mut self,
+        key_event: &Gd<godot::classes::InputEventKey>,
+    ) -> VarDictionary {
+        let keycode = key_event.get_keycode();
+        let ctrl = key_event.is_ctrl_pressed();
+        let alt = key_event.is_alt_pressed();
+
+        // ----- 1a. Escape / Ctrl+[ : exit insert mode -----
+        if keycode == Key::ESCAPE || (ctrl && keycode == Key::BRACKETLEFT) {
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("<Esc>".to_string());
+            }
+            self.send_escape();
+            return self.dispatch_handled();
+        }
+
+        // ----- 1b. Ctrl+B : exit insert and enter visual block -----
+        if ctrl && keycode == Key::B {
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("<Esc>".to_string());
+                self.macro_buffer.push("<C-v>".to_string());
+            }
+            self.send_escape();
+            let completed = self.send_keys("<C-v>");
+            if completed {
+                self.clear_last_key();
+            }
+            return self.dispatch_handled();
+        }
+
+        // ----- 2. AltGr / Option composed unicode : insert as text -----
+        if (ctrl || alt) && self.is_alt_composed_unicode(key_event) {
+            self.record_plain_insert_key(key_event);
+            return self.dispatch_pass_through();
+        }
+
+        // ----- 3 & 4. Ctrl/Alt modified keys -----
+        if ctrl || alt {
+            // 3. Nav/delete special keys: pass through to Godot's CodeEdit.
+            if Self::is_insert_passthrough_key(keycode) {
+                return self.dispatch_pass_through();
+            }
+            // 4. Other Ctrl/Alt keys: convert to Neovim notation and dispatch.
+            let nvim_key = self.key_event_to_nvim_notation(key_event);
+            if nvim_key.is_empty() || !nvim_key.starts_with('<') {
+                // Unrecognized modifier combination — treat as no-op to avoid
+                // sending raw chars to Neovim (matches prior insert.rs behavior).
+                return self.dispatch_handled();
+            }
+            return self.dispatch_key(&nvim_key);
+        }
+
+        // ----- 5. Plain chars / unmodified specials : Godot handles -----
+        self.record_plain_insert_key(key_event);
+        self.dispatch_pass_through()
+    }
+
+    // =====================================================================
+    // Replace mode dispatcher
+    // =====================================================================
+    //
+    // Same routing as insert mode, plus: for plain character input, simulate
+    // overwrite by deleting the character under the cursor before letting
+    // Godot insert. The overwrite must happen synchronously inside input() so
+    // Godot sees the correct buffer state when it processes the keypress.
+    pub(in crate::plugin) fn process_replace_key_event_impl(
+        &mut self,
+        key_event: &Gd<godot::classes::InputEventKey>,
+    ) -> VarDictionary {
+        let keycode = key_event.get_keycode();
+        let ctrl = key_event.is_ctrl_pressed();
+        let alt = key_event.is_alt_pressed();
+
+        if keycode == Key::ESCAPE || (ctrl && keycode == Key::BRACKETLEFT) {
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("<Esc>".to_string());
+            }
+            self.send_escape();
+            return self.dispatch_handled();
+        }
+
+        if (ctrl || alt) && self.is_alt_composed_unicode(key_event) {
+            self.record_plain_replace_key(key_event);
+            self.apply_replace_overwrite(key_event);
+            return self.dispatch_pass_through();
+        }
+
+        if ctrl || alt {
+            if Self::is_insert_passthrough_key(keycode) {
+                return self.dispatch_pass_through();
+            }
+            let nvim_key = self.key_event_to_nvim_notation(key_event);
+            if nvim_key.is_empty() || !nvim_key.starts_with('<') {
+                return self.dispatch_handled();
+            }
+            return self.dispatch_key(&nvim_key);
+        }
+
+        // Plain key input — overwrite then pass through for Godot to insert.
+        self.record_plain_replace_key(key_event);
+        self.apply_replace_overwrite(key_event);
+        self.dispatch_pass_through()
+    }
+
+    /// Keys that Neovim insert mode does not define and Godot's CodeEdit
+    /// handles natively (word deletion, word navigation, line/page nav, etc.).
+    fn is_insert_passthrough_key(keycode: Key) -> bool {
+        matches!(
+            keycode,
+            Key::BACKSPACE
+                | Key::DELETE
+                | Key::LEFT
+                | Key::RIGHT
+                | Key::UP
+                | Key::DOWN
+                | Key::HOME
+                | Key::END
+                | Key::PAGEUP
+                | Key::PAGEDOWN
+        )
+    }
+
+    /// Record an unmodified insert-mode key to the macro buffer.
+    fn record_plain_insert_key(&mut self, key_event: &Gd<godot::classes::InputEventKey>) {
+        if self.recording_macro.is_none() || self.playing_macro {
+            return;
+        }
+        match key_event.get_keycode() {
+            Key::BACKSPACE => self.macro_buffer.push("<BS>".to_string()),
+            Key::ENTER => self.macro_buffer.push("<CR>".to_string()),
+            Key::DELETE => self.macro_buffer.push("<Del>".to_string()),
+            Key::TAB => self.macro_buffer.push("<Tab>".to_string()),
+            _ => {
+                let unicode = key_event.get_unicode();
+                if unicode > 0 {
+                    if let Some(c) = char::from_u32(unicode) {
+                        self.macro_buffer.push(c.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Record an unmodified replace-mode key to the macro buffer.
+    fn record_plain_replace_key(&mut self, key_event: &Gd<godot::classes::InputEventKey>) {
+        // Same recording rules as insert mode.
+        self.record_plain_insert_key(key_event);
+    }
+
+    /// Simulate replace-mode overwrite: delete the char under the cursor so
+    /// that Godot's subsequent insert appears to replace it.
+    fn apply_replace_overwrite(&mut self, key_event: &Gd<godot::classes::InputEventKey>) {
+        let unicode = key_event.get_unicode();
+        if unicode == 0 {
+            return;
+        }
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+        let line = editor.get_caret_line();
+        let col = editor.get_caret_column();
+        let line_text: String = editor.get_line(line).to_string();
+        if (col as usize) < line_text.chars().count() {
+            editor.select(line, col, line, col + 1);
+            editor.delete_selection();
+        }
+    }
 }

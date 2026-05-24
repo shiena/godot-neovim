@@ -16,11 +16,22 @@ var import_button: Button
 var tree: Tree
 var status_label: Label
 
-## Current mode being displayed ("n" or "v")
+## Current mode being displayed ("n", "v", "i", or "R")
 var current_display_mode: String = "n"
 
-## Tracked changes: { "n": { "set": {}, "removed": [] }, "v": { "set": {}, "removed": [] } }
+## Tracked changes: { "n": { "set": {}, "removed": [] }, "v": ..., "i": ..., "R": ... }
 var changes: Dictionary = {}
+
+## Mode codes in the same order as mode_button items.
+const MODE_CODES: PackedStringArray = ["n", "v", "i", "R"]
+
+## Display label for each mode (UI-friendly, shown in status messages).
+const MODE_LABELS := {
+	"n": "Normal",
+	"v": "Visual",
+	"i": "Insert",
+	"R": "Replace",
+}
 
 
 ## Initialize the editor with plugin and input handler references.
@@ -38,10 +49,9 @@ func _ready() -> void:
 
 
 func _init_changes() -> void:
-	changes = {
-		"n": {"set": {}, "removed": []},
-		"v": {"set": {}, "removed": []},
-	}
+	changes = {}
+	for code in MODE_CODES:
+		changes[code] = {"set": {}, "removed": []}
 
 
 func _build_ui() -> void:
@@ -54,8 +64,8 @@ func _build_ui() -> void:
 	vbox.add_child(toolbar)
 
 	mode_button = OptionButton.new()
-	mode_button.add_item("Normal", 0)
-	mode_button.add_item("Visual", 1)
+	for i in MODE_CODES.size():
+		mode_button.add_item(MODE_LABELS[MODE_CODES[i]], i)
 	mode_button.item_selected.connect(_on_mode_selected)
 	toolbar.add_child(mode_button)
 
@@ -94,7 +104,10 @@ func _build_ui() -> void:
 
 
 func _on_mode_selected(index: int) -> void:
-	current_display_mode = "n" if index == 0 else "v"
+	if index >= 0 and index < MODE_CODES.size():
+		current_display_mode = MODE_CODES[index]
+	else:
+		current_display_mode = "n"
 	_refresh_tree()
 
 
@@ -102,7 +115,7 @@ func _on_reset_pressed() -> void:
 	changes[current_display_mode] = {"set": {}, "removed": []}
 	_save_and_apply()
 	_refresh_tree()
-	status_label.text = "Reset %s mode to defaults" % ("Normal" if current_display_mode == "n" else "Visual")
+	status_label.text = "Reset %s mode to defaults" % MODE_LABELS.get(current_display_mode, current_display_mode)
 
 
 func _on_import_pressed() -> void:
@@ -126,7 +139,7 @@ func _on_import_pressed() -> void:
 
 	var label := Label.new()
 	label.text = "Select keymaps to import (%s mode, %d found):" % [
-		"Normal" if mode == "n" else "Visual", nvim_maps.size()
+		MODE_LABELS.get(mode, mode), nvim_maps.size()
 	]
 	vbox.add_child(label)
 
@@ -237,17 +250,13 @@ func _on_tree_item_edited() -> void:
 	# Check for duplicate key (skip if unchanged)
 	if new_text != old_key and _is_key_duplicate(new_text, old_key):
 		status_label.text = "Key '%s' is already mapped in %s mode" % [
-			new_text, "Normal" if current_display_mode == "n" else "Visual"
+			new_text, MODE_LABELS.get(current_display_mode, current_display_mode)
 		]
 		_refresh_tree()
 		return
 
 	# Key column edited - look up action from current data
-	var default_map: Dictionary
-	if current_display_mode == "n":
-		default_map = GodotNeovimDefaultKeymaps.get_normal_keymap()
-	else:
-		default_map = GodotNeovimDefaultKeymaps.get_visual_keymap()
+	var default_map: Dictionary = _get_default_keymap_for_current_mode()
 
 	var action: String = set_dict.get(old_key, default_map.get(old_key, "action_send_keys"))
 
@@ -270,11 +279,7 @@ func _refresh_tree() -> void:
 	var root := tree.create_item()
 
 	# Build effective keymap: start with defaults, apply changes
-	var default_map: Dictionary
-	if current_display_mode == "n":
-		default_map = GodotNeovimDefaultKeymaps.get_normal_keymap()
-	else:
-		default_map = GodotNeovimDefaultKeymaps.get_visual_keymap()
+	var default_map: Dictionary = _get_default_keymap_for_current_mode()
 
 	var mode_changes: Dictionary = changes[current_display_mode]
 	var set_dict: Dictionary = mode_changes["set"]
@@ -310,6 +315,21 @@ func _refresh_tree() -> void:
 		if info["custom"]:
 			item.set_text(2, "*")
 		item.set_selectable(2, false)
+
+
+## Look up the default keymap for the mode currently shown in the editor.
+func _get_default_keymap_for_current_mode() -> Dictionary:
+	match current_display_mode:
+		"n":
+			return GodotNeovimDefaultKeymaps.get_normal_keymap()
+		"v":
+			return GodotNeovimDefaultKeymaps.get_visual_keymap()
+		"i":
+			return GodotNeovimDefaultKeymaps.get_insert_keymap()
+		"R":
+			return GodotNeovimDefaultKeymaps.get_replace_keymap()
+		_:
+			return GodotNeovimDefaultKeymaps.get_normal_keymap()
 
 
 ## Convert internal action name to display name.
@@ -399,11 +419,7 @@ static func _validate_key(key: String) -> String:
 ## [param new_key] The key to check for duplicates.
 ## [param old_key] The key being replaced (excluded from duplicate check).
 func _is_key_duplicate(new_key: String, old_key: String) -> bool:
-	var default_map: Dictionary
-	if current_display_mode == "n":
-		default_map = GodotNeovimDefaultKeymaps.get_normal_keymap()
-	else:
-		default_map = GodotNeovimDefaultKeymaps.get_visual_keymap()
+	var default_map: Dictionary = _get_default_keymap_for_current_mode()
 
 	var mode_changes: Dictionary = changes[current_display_mode]
 	var set_dict: Dictionary = mode_changes["set"]

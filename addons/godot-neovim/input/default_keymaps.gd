@@ -119,3 +119,52 @@ static func get_visual_keymap() -> Dictionary:
 		"gj": "action_display_line_down",
 		"gk": "action_display_line_up",
 	}
+
+
+## Insert mode keymap.
+## In insert mode the Rust dispatcher only routes Ctrl/Alt + letter keys here
+## (process_insert_key_event_impl). Plain characters and unmodified specials
+## are handled by Godot directly, and Ctrl/Alt + nav/delete keys (BS, Del,
+## arrows, Home, End, PageUp/Down) are passed through to Godot's CodeEdit
+## natively — those are NOT customizable from this map.
+##
+## Entries below define Vim's standard insert-mode commands; unmapped keys
+## fall through to action_send_keys which forwards them to Neovim verbatim.
+static func get_insert_keymap() -> Dictionary:
+	return {
+		# Word/line deletion (Vim insert mode)
+		"<C-w>": "action_send_keys",
+		"<C-u>": "action_send_keys",
+		"<C-h>": "action_send_keys",
+
+		# Insertion helpers
+		"<C-r>": "action_send_keys",
+		"<C-o>": "action_send_keys",
+		"<C-v>": "action_send_keys",
+		"<C-k>": "action_send_keys",
+		"<C-a>": "action_send_keys",
+		"<C-y>": "action_send_keys",
+		"<C-e>": "action_send_keys",
+
+		# Indent / unindent
+		"<C-t>": "action_send_keys",
+		"<C-d>": "action_send_keys",
+
+		# Completion popup navigation
+		"<C-n>": "action_send_keys",
+		"<C-p>": "action_send_keys",
+	}
+
+
+## Replace mode keymap.
+## Same routing rules as insert mode (see get_insert_keymap()).
+static func get_replace_keymap() -> Dictionary:
+	return {
+		# Replace mode borrows most insert-mode bindings.
+		"<C-w>": "action_send_keys",
+		"<C-u>": "action_send_keys",
+		"<C-h>": "action_send_keys",
+		"<C-r>": "action_send_keys",
+		"<C-o>": "action_send_keys",
+		"<C-v>": "action_send_keys",
+	}

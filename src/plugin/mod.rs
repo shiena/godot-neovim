@@ -663,13 +663,24 @@ impl IEditorPlugin for GodotNeovimPlugin {
 
         // Handle insert mode
         if self.is_insert_mode() {
-            self.handle_insert_mode_input(&key_event);
+            if self.input_handler.is_some() {
+                let result = self.process_insert_key_event_impl(&key_event);
+                self.forward_dispatch_to_gdscript(result);
+            } else {
+                // Fallback: built-in Rust handling
+                self.handle_insert_mode_input(&key_event);
+            }
             return;
         }
 
         // Handle replace mode
         if self.is_replace_mode() {
-            self.handle_replace_mode_input(&key_event);
+            if self.input_handler.is_some() {
+                let result = self.process_replace_key_event_impl(&key_event);
+                self.forward_dispatch_to_gdscript(result);
+            } else {
+                self.handle_replace_mode_input(&key_event);
+            }
             return;
         }
 
@@ -678,15 +689,23 @@ impl IEditorPlugin for GodotNeovimPlugin {
             // GDScript dispatch path: process key in Rust, defer keymap lookup to GDScript.
             // Cannot call GDScript Callable directly here (re-entrant &mut self borrow).
             let result = self.process_key_event_impl(&key_event);
-            if result.get_or_nil("needs_dispatch").to::<bool>() {
-                let resolved_key = result.get_or_nil("resolved_key");
-                let mode = result.get_or_nil("mode");
-                self.base_mut()
-                    .call_deferred("_dispatch_key_to_gdscript", &[resolved_key, mode]);
-            }
+            self.forward_dispatch_to_gdscript(result);
         } else {
             // Fallback: built-in Rust handling
             self.handle_normal_mode_input(&key_event);
+        }
+    }
+}
+
+impl GodotNeovimPlugin {
+    /// If a process_*_key_event_impl result requests GDScript dispatch,
+    /// schedule the call via call_deferred (avoids re-entrant &mut self borrow).
+    fn forward_dispatch_to_gdscript(&mut self, result: VarDictionary) {
+        if result.get_or_nil("needs_dispatch").to::<bool>() {
+            let resolved_key = result.get_or_nil("resolved_key");
+            let mode = result.get_or_nil("mode");
+            self.base_mut()
+                .call_deferred("_dispatch_key_to_gdscript", &[resolved_key, mode]);
         }
     }
 }
