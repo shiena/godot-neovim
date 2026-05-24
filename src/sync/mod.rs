@@ -188,6 +188,27 @@ impl SyncManager {
     pub fn end_nvim_change(&mut self) {
         self.changed_by_nvim = false;
     }
+
+    /// Read the changed_by_nvim flag. Used by Godot→Neovim sync paths
+    /// (e.g., text_changed handler in insert mode) to skip pushing changes
+    /// that originated from Neovim itself.
+    pub fn is_changed_by_nvim(&self) -> bool {
+        self.changed_by_nvim
+    }
+
+    /// Register an outgoing change tick so the resulting buf_lines echo is
+    /// recognized and dropped by `on_nvim_buf_lines`. Stored as a sentinel
+    /// — the DocumentChange contents are unused.
+    pub fn push_pending(&mut self, tick: i64) {
+        self.pending_changes.insert(
+            tick,
+            DocumentChange {
+                first_line: 0,
+                last_line: 0,
+                new_lines: vec![],
+            },
+        );
+    }
 }
 
 impl Default for SyncManager {

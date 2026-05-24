@@ -288,6 +288,73 @@ impl GodotNeovimPlugin {
         }
     }
 
+    /// Lightweight Godot → Neovim sync used during insert/replace mode.
+    ///
+    /// Pushes the current Godot buffer + cursor to Neovim without resetting
+    /// the sync manager or re-attaching (unlike `sync_buffer_to_neovim_keep_undo`,
+    /// which is the heavier ESC-time variant). The resulting changedtick is
+    /// registered in `pending_changes` so the buf_lines echo from our own
+    /// `nvim_buf_set_lines` is dropped instead of being re-applied to Godot.
+    ///
+    /// Called from two places:
+    ///   1. `on_text_changed_for_insert_sync` — every Godot text edit in insert/
+    ///      replace mode.
+    ///   2. `process_insert_key_event_impl` / `process_replace_key_event_impl`
+    ///      — just before forwarding a Ctrl/Alt+letter key to Neovim, so
+    ///      commands like `<C-w>` operate on the freshest buffer state.
+    pub(super) fn sync_buffer_to_neovim_during_insert(&mut self) {
+        // Skip if the buffer isn't initialized yet (e.g., before first attach).
+        if self.sync_manager.get_line_count() == 0 {
+            return;
+        }
+
+        // Gather buffer text from Godot.
+        let text = {
+            let Some(ref editor) = self.current_editor else {
+                return;
+            };
+            editor.get_text().to_string()
+        };
+        let lines: Vec<String> = text
+            .split('\n')
+            .map(|s| s.trim_end_matches('\r').to_string())
+            .collect();
+        let line_count = lines.len() as i32;
+
+        // Push to Neovim.
+        let neovim_ref = match self.current_editor_type {
+            super::EditorType::Shader => self.shader_neovim.as_ref(),
+            _ => self.script_neovim.as_ref(),
+        };
+        let Some(neovim) = neovim_ref else {
+            return;
+        };
+        let Ok(client) = neovim.try_lock() else {
+            // Lock contention is acceptable here — the next text_changed or
+            // Ctrl key dispatch will re-attempt the sync.
+            return;
+        };
+        let update_result = client.buffer_update(lines);
+        drop(client);
+
+        match update_result {
+            Ok(tick) => {
+                // Register the tick so the resulting buf_lines echo is ignored.
+                self.sync_manager.push_pending(tick);
+                self.sync_manager.set_line_count(line_count);
+                crate::verbose_print!("[godot-neovim] Insert-mode sync to Neovim (tick={})", tick);
+            }
+            Err(e) => {
+                crate::verbose_print!("[godot-neovim] Insert-mode sync failed: {}", e);
+            }
+        }
+
+        // Cursor position must follow so subsequent commands (<C-w>, <C-r>) act
+        // at the right place. `on_caret_changed` skips this in insert mode to
+        // avoid loops, so we push explicitly here.
+        self.sync_cursor_to_neovim();
+    }
+
     /// Convert character column to byte column for a given line
     /// Godot uses character positions, Neovim uses byte positions
     /// For multi-byte characters (e.g., Japanese), this conversion is essential

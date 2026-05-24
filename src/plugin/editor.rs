@@ -341,6 +341,7 @@ impl GodotNeovimPlugin {
         // Connect signals and reset state if editor was found
         if self.current_editor.is_some() {
             self.connect_caret_changed_signal();
+            self.connect_text_changed_signal();
             self.connect_resized_signal();
             self.update_float_window_connection();
 
@@ -781,6 +782,7 @@ impl GodotNeovimPlugin {
                 }
 
                 self.connect_caret_changed_signal();
+                self.connect_text_changed_signal();
                 self.connect_resized_signal();
                 self.update_float_window_connection();
                 return true;
@@ -806,6 +808,7 @@ impl GodotNeovimPlugin {
                     self.current_editor = Some(focused_code_edit);
                     self.current_editor_type = EditorType::Script;
                     self.connect_caret_changed_signal();
+                    self.connect_text_changed_signal();
                     self.connect_resized_signal();
                     self.reposition_mode_label();
 
@@ -831,6 +834,7 @@ impl GodotNeovimPlugin {
                     self.current_editor_type = EditorType::Unknown;
                     self.current_script_path = format!("godot-neovim://external/{}", instance_id);
                     self.connect_caret_changed_signal();
+                    self.connect_text_changed_signal();
                     self.connect_resized_signal();
                     self.handle_script_changed();
                 }

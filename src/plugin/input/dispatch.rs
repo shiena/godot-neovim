@@ -1044,6 +1044,11 @@ impl GodotNeovimPlugin {
         let ctrl = key_event.is_ctrl_pressed();
         let alt = key_event.is_alt_pressed();
 
+        // ----- 0. Pending <C-r>{register} : consume next key as register name -----
+        if self.pending_insert_register {
+            return self.handle_pending_insert_register(key_event);
+        }
+
         // ----- 1a. Escape / Ctrl+[ : exit insert mode -----
         if keycode == Key::ESCAPE || (ctrl && keycode == Key::BRACKETLEFT) {
             if self.recording_macro.is_some() && !self.playing_macro {
@@ -1067,6 +1072,19 @@ impl GodotNeovimPlugin {
             return self.dispatch_handled();
         }
 
+        // ----- 1c. Ctrl+R : begin register-paste pending state -----
+        // We intercept BEFORE dispatching so the next key (the register name)
+        // can be captured by Rust and combined with <C-r> as one atomic
+        // send_keys call. Otherwise Godot would insert the register-name char
+        // into its buffer as plain text while Neovim was still waiting.
+        if ctrl && keycode == Key::R {
+            // Make sure Neovim has the latest Godot buffer/cursor so the
+            // following paste lands at the right place.
+            self.sync_buffer_to_neovim_during_insert();
+            self.pending_insert_register = true;
+            return self.dispatch_handled();
+        }
+
         // ----- 2. AltGr / Option composed unicode : insert as text -----
         if (ctrl || alt) && self.is_alt_composed_unicode(key_event) {
             self.record_plain_insert_key(key_event);
@@ -1080,18 +1098,55 @@ impl GodotNeovimPlugin {
                 return self.dispatch_pass_through();
             }
             // 4. Other Ctrl/Alt keys: convert to Neovim notation and dispatch.
+            //    Sync Godot's edits to Neovim first so commands like <C-w> or
+            //    <C-u> operate on the correct buffer (Neovim does not see the
+            //    chars the user typed in Godot otherwise).
             let nvim_key = self.key_event_to_nvim_notation(key_event);
             if nvim_key.is_empty() || !nvim_key.starts_with('<') {
                 // Unrecognized modifier combination — treat as no-op to avoid
                 // sending raw chars to Neovim (matches prior insert.rs behavior).
                 return self.dispatch_handled();
             }
+            self.sync_buffer_to_neovim_during_insert();
             return self.dispatch_key(&nvim_key);
         }
 
         // ----- 5. Plain chars / unmodified specials : Godot handles -----
         self.record_plain_insert_key(key_event);
         self.dispatch_pass_through()
+    }
+
+    /// Capture the register-name key that follows `<C-r>` in insert/replace
+    /// mode and send `<C-r>{reg}` to Neovim as a single sequence. Esc cancels.
+    /// Variants `<C-r><C-r>`, `<C-r><C-o>`, `<C-r><C-p>` are not handled — the
+    /// pending state clears and the second key is treated as the register.
+    fn handle_pending_insert_register(
+        &mut self,
+        key_event: &Gd<godot::classes::InputEventKey>,
+    ) -> VarDictionary {
+        let keycode = key_event.get_keycode();
+
+        // Esc cancels (no `<C-r>` was sent yet — just drop the pending state).
+        if keycode == Key::ESCAPE {
+            self.pending_insert_register = false;
+            return self.dispatch_handled();
+        }
+
+        let register_key = self.key_event_to_nvim_notation(key_event);
+        self.pending_insert_register = false;
+
+        if register_key.is_empty() {
+            // Modifier-only press or unrecognized — drop silently.
+            return self.dispatch_handled();
+        }
+
+        let full = format!("<C-r>{}", register_key);
+        if self.recording_macro.is_some() && !self.playing_macro {
+            self.macro_buffer.push(full.clone());
+        }
+        self.send_keys(&full);
+
+        self.dispatch_handled()
     }
 
     // =====================================================================
@@ -1110,11 +1165,21 @@ impl GodotNeovimPlugin {
         let ctrl = key_event.is_ctrl_pressed();
         let alt = key_event.is_alt_pressed();
 
+        if self.pending_insert_register {
+            return self.handle_pending_insert_register(key_event);
+        }
+
         if keycode == Key::ESCAPE || (ctrl && keycode == Key::BRACKETLEFT) {
             if self.recording_macro.is_some() && !self.playing_macro {
                 self.macro_buffer.push("<Esc>".to_string());
             }
             self.send_escape();
+            return self.dispatch_handled();
+        }
+
+        if ctrl && keycode == Key::R {
+            self.sync_buffer_to_neovim_during_insert();
+            self.pending_insert_register = true;
             return self.dispatch_handled();
         }
 
@@ -1132,6 +1197,7 @@ impl GodotNeovimPlugin {
             if nvim_key.is_empty() || !nvim_key.starts_with('<') {
                 return self.dispatch_handled();
             }
+            self.sync_buffer_to_neovim_during_insert();
             return self.dispatch_key(&nvim_key);
         }
 

@@ -222,6 +222,13 @@ pub struct GodotNeovimPlugin {
     /// Pending macro operation: Some('q') for record, Some('@') for play
     #[init(val = None)]
     pending_macro_op: Option<char>,
+    /// Set to true after `<C-r>` in insert/replace mode while waiting for
+    /// the register-name keystroke. The next key event is captured by the
+    /// pending handler and sent as `<C-r>{reg}` atomically — preventing the
+    /// register-name char from being inserted into Godot's buffer as text.
+    /// Mirrors the normal-mode `selected_register` pattern.
+    #[init(val = false)]
+    pending_insert_register: bool,
     /// Named registers storage: char -> content
     #[init(val = HashMap::new())]
     registers: HashMap<char, String>,
@@ -863,6 +870,29 @@ impl GodotNeovimPlugin {
         self.sync_cursor_to_neovim();
 
         crate::verbose_print!("[godot-neovim] Synced buffer after toggle comment");
+    }
+
+    /// Pushed Godot edits to Neovim during insert/replace mode.
+    ///
+    /// Connected to CodeEdit's `text_changed` signal. Without this, Neovim
+    /// would see only the buffer state from when insert mode was entered, so
+    /// commands like `<C-w>` or `<C-r>` would operate on stale text and the
+    /// ESC sync would discard any Neovim-side changes.
+    ///
+    /// Skips when:
+    /// - Not in insert/replace mode (nothing to sync — normal mode already
+    ///   uses Neovim as master).
+    /// - The change came from Neovim itself (`changed_by_nvim` flag), to
+    ///   avoid an echo loop with `apply_nvim_change`.
+    #[func]
+    fn on_text_changed_for_insert_sync(&mut self) {
+        if !self.is_insert_mode() && !self.is_replace_mode() {
+            return;
+        }
+        if self.sync_manager.is_changed_by_nvim() {
+            return;
+        }
+        self.sync_buffer_to_neovim_during_insert();
     }
 
     /// Sync mouse selection to Neovim on mouse release
@@ -2178,6 +2208,7 @@ impl GodotNeovimPlugin {
 
         // Disconnect from gui_input signal
         self.disconnect_gui_input_signal();
+        self.disconnect_text_changed_signal();
 
         // Clear current editor reference
         self.current_editor = None;
