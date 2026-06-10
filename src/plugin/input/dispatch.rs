@@ -1,8 +1,10 @@
-//! GDScript dispatch: process_key_event implementation
+//! Key resolution state machine: process_key_event implementation
 //!
-//! Translates the normal.rs state machine into a dispatch-friendly form.
-//! Instead of directly calling action_*_impl(), returns a VarDictionary
-//! telling GDScript what key was resolved and whether to dispatch it.
+//! The single input path for normal/visual/insert/replace modes. Multi-key
+//! sequences (prefixes, registers, counts) are resolved here; keys that need
+//! a Godot-side action are returned in a VarDictionary so the caller can
+//! resolve them against a keymap — the GDScript handler when registered
+//! (customizable via default_keymaps.gd), or input/builtin.rs otherwise.
 
 use super::super::GodotNeovimPlugin;
 use godot::classes::Input;

@@ -1,7 +1,6 @@
 //! Buffer/tab navigation: :bn, :bp, gt, gT, :{n}
 
 use super::super::{EditorType, GodotNeovimPlugin};
-use super::simulate_ctrl_f;
 use godot::classes::{CodeEdit, EditorInterface, TabBar};
 use godot::prelude::*;
 
@@ -212,14 +211,6 @@ impl GodotNeovimPlugin {
         }
 
         crate::verbose_print!("[godot-neovim] switch_shader_tab: TabBar/TabContainer not found");
-    }
-
-    /// Start backward search (? command) - opens Godot's search dialog
-    pub(in crate::plugin) fn start_search_backward(&self) {
-        simulate_ctrl_f();
-        crate::verbose_print!(
-            "[godot-neovim] ?: Opening search dialog (use Find Previous for backward search)"
-        );
     }
 
     /// :bn / :bnext - Go to next buffer (script tab)

@@ -7,7 +7,7 @@
 ## - Single chars: "a", "A", "0", "$", etc.
 ## - Control: "<C-a>", "<C-f>", etc.
 ## - Special: "<CR>", "<Esc>", "<Tab>", etc.
-## - Sequences: "gg", "gd", "zo", "ZZ", etc.
+## - Sequences: "gg", "gd", "ZZ", etc.
 class_name GodotNeovimDefaultKeymaps
 
 
@@ -75,12 +75,9 @@ static func get_normal_keymap() -> Dictionary:
 		"g$": "action_display_line_end",
 		"g^": "action_display_line_first_non_blank",
 
-		# --- z-prefix commands (resolved as sequences) ---
-		"zo": "action_fold_open",
-		"zc": "action_fold_close",
-		"za": "action_fold_toggle",
-		"zR": "action_fold_open_all",
-		"zM": "action_fold_close_all",
+		# NOTE: z-prefix commands (zo/zc/za/zR/zM folds, zz/zt/zb scrolls) are
+		# intercepted in Rust (handle_scroll_command) before keymap dispatch,
+		# so they cannot be remapped here.
 
 		# --- Z-prefix commands (resolved as sequences) ---
 		"ZZ": "action_save_and_close",

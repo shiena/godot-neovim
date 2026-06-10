@@ -47,8 +47,3 @@ pub(super) fn simulate_ctrl_s() {
 pub(super) fn simulate_ctrl_w() {
     simulate_key_press(Key::W, true, false, false);
 }
-
-/// Simulate Ctrl+F to open the search dialog
-pub(super) fn simulate_ctrl_f() {
-    simulate_key_press(Key::F, true, false, false);
-}

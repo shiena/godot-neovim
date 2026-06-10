@@ -670,49 +670,42 @@ impl IEditorPlugin for GodotNeovimPlugin {
 
         // Handle insert mode
         if self.is_insert_mode() {
-            if self.input_handler.is_some() {
-                let result = self.process_insert_key_event_impl(&key_event);
-                self.forward_dispatch_to_gdscript(result);
-            } else {
-                // Fallback: built-in Rust handling
-                self.handle_insert_mode_input(&key_event);
-            }
+            let result = self.process_insert_key_event_impl(&key_event);
+            self.handle_dispatch_result(result);
             return;
         }
 
         // Handle replace mode
         if self.is_replace_mode() {
-            if self.input_handler.is_some() {
-                let result = self.process_replace_key_event_impl(&key_event);
-                self.forward_dispatch_to_gdscript(result);
-            } else {
-                self.handle_replace_mode_input(&key_event);
-            }
+            let result = self.process_replace_key_event_impl(&key_event);
+            self.handle_dispatch_result(result);
             return;
         }
 
         // Handle normal/visual mode input
-        if self.input_handler.is_some() {
-            // GDScript dispatch path: process key in Rust, defer keymap lookup to GDScript.
-            // Cannot call GDScript Callable directly here (re-entrant &mut self borrow).
-            let result = self.process_key_event_impl(&key_event);
-            self.forward_dispatch_to_gdscript(result);
-        } else {
-            // Fallback: built-in Rust handling
-            self.handle_normal_mode_input(&key_event);
-        }
+        let result = self.process_key_event_impl(&key_event);
+        self.handle_dispatch_result(result);
     }
 }
 
 impl GodotNeovimPlugin {
-    /// If a process_*_key_event_impl result requests GDScript dispatch,
-    /// schedule the call via call_deferred (avoids re-entrant &mut self borrow).
-    fn forward_dispatch_to_gdscript(&mut self, result: VarDictionary) {
-        if result.get_or_nil("needs_dispatch").to::<bool>() {
-            let resolved_key = result.get_or_nil("resolved_key");
-            let mode = result.get_or_nil("mode");
+    /// Execute a process_*_key_event_impl result that requests keymap dispatch.
+    /// With a GDScript handler registered, defer the lookup via call_deferred
+    /// (a direct Callable invocation would re-enter &mut self). Without one,
+    /// resolve against the built-in default keymap (input/builtin.rs).
+    fn handle_dispatch_result(&mut self, result: VarDictionary) {
+        if !result.get_or_nil("needs_dispatch").to::<bool>() {
+            return;
+        }
+        let resolved_key = result.get_or_nil("resolved_key");
+        let mode = result.get_or_nil("mode");
+        if self.input_handler.is_some() {
             self.base_mut()
                 .call_deferred("_dispatch_key_to_gdscript", &[resolved_key, mode]);
+        } else {
+            let mode = mode.to::<GString>().to_string();
+            let key = resolved_key.to::<GString>().to_string();
+            self.dispatch_key_builtin(&mode, &key);
         }
     }
 }
@@ -1492,18 +1485,21 @@ impl GodotNeovimPlugin {
 
         // Handle insert mode
         if self.is_insert_mode() {
-            self.handle_insert_mode_input(&key_event);
+            let result = self.process_insert_key_event_impl(&key_event);
+            self.handle_dispatch_result(result);
             return;
         }
 
         // Handle replace mode
         if self.is_replace_mode() {
-            self.handle_replace_mode_input(&key_event);
+            let result = self.process_replace_key_event_impl(&key_event);
+            self.handle_dispatch_result(result);
             return;
         }
 
         // Handle normal/visual mode input
-        self.handle_normal_mode_input(&key_event);
+        let result = self.process_key_event_impl(&key_event);
+        self.handle_dispatch_result(result);
     }
 
     /// Check if current CodeEdit is in a float window
@@ -1647,13 +1643,15 @@ impl GodotNeovimPlugin {
 
         // Insert mode
         if self.is_insert_mode() {
-            self.handle_insert_mode_input(&event);
+            let result = self.process_insert_key_event_impl(&event);
+            self.handle_dispatch_result(result);
             return;
         }
 
         // Replace mode
         if self.is_replace_mode() {
-            self.handle_replace_mode_input(&event);
+            let result = self.process_replace_key_event_impl(&event);
+            self.handle_dispatch_result(result);
         }
     }
 
@@ -2228,5 +2226,3 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] Plugin deactivated");
     }
 }
-
-// Note: handle_normal_mode_input moved to input/normal.rs

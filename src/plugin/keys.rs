@@ -29,7 +29,7 @@ impl GodotNeovimPlugin {
         let Some(kc) = char::from_u32(event.get_keycode().ord() as u32) else {
             return false;
         };
-        kc.to_ascii_lowercase() != uc.to_ascii_lowercase()
+        !kc.eq_ignore_ascii_case(&uc)
     }
 
     /// Convert Godot key event to Neovim key string
