@@ -1,0 +1,50 @@
+[
+  {
+    "id": 300,
+    "name": "Ctrl+A increments number",
+    "text": "count = 5",
+    "cursor": [0, 8],
+    "keys": ["<C-a>"],
+    "expect_text": "count = 6"
+  },
+  {
+    "id": 301,
+    "name": "Ctrl+X decrements number",
+    "text": "count = 5",
+    "cursor": [0, 8],
+    "keys": ["<C-x>"],
+    "expect_text": "count = 4"
+  },
+  {
+    "id": 302,
+    "name": "5 Ctrl+A adds 5 to number",
+    "text": "num = 10",
+    "cursor": [0, 6],
+    "keys": ["5", "<C-a>"],
+    "expect_text": "num = 15"
+  },
+  {
+    "id": 303,
+    "name": "Ctrl+A on 0 increments to 1",
+    "text": "val = 0",
+    "cursor": [0, 6],
+    "keys": ["<C-a>"],
+    "expect_text": "val = 1"
+  },
+  {
+    "id": 304,
+    "name": "Ctrl+X on 0 decrements to -1",
+    "text": "val = 0",
+    "cursor": [0, 6],
+    "keys": ["<C-x>"],
+    "expect_text": "val = -1"
+  },
+  {
+    "id": 305,
+    "name": "Ctrl+A finds next number on line",
+    "text": "no number then 42",
+    "cursor": [0, 0],
+    "keys": ["<C-a>"],
+    "expect_text": "no number then 43"
+  }
+]

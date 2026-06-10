@@ -1,0 +1,42 @@
+[
+  {
+    "id": 140,
+    "name": "* searches word under cursor forward",
+    "text": "foo bar foo baz foo",
+    "cursor": [0, 0],
+    "keys": ["*"],
+    "expect_cursor": [0, 8]
+  },
+  {
+    "id": 141,
+    "name": "# searches word under cursor backward",
+    "text": "foo bar foo baz foo",
+    "cursor": [0, 16],
+    "keys": ["#"],
+    "expect_cursor": [0, 8]
+  },
+  {
+    "id": 142,
+    "name": "n repeats search forward after *",
+    "text": "foo bar foo baz foo",
+    "cursor": [0, 0],
+    "keys": ["*", "n"],
+    "expect_cursor": [0, 16]
+  },
+  {
+    "id": 143,
+    "name": "N repeats search backward after *",
+    "text": "foo bar foo baz foo",
+    "cursor": [0, 0],
+    "keys": ["*", "n", "N"],
+    "expect_cursor": [0, 8]
+  },
+  {
+    "id": 144,
+    "name": "* on multiline finds next occurrence",
+    "text": "hello\nworld\nhello\nfoo",
+    "cursor": [0, 0],
+    "keys": ["*"],
+    "expect_cursor": [2, 0]
+  }
+]

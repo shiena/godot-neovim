@@ -1,0 +1,45 @@
+[
+  {
+    "id": 40,
+    "name": "ci( changes inside parens",
+    "text": "func test(old)",
+    "cursor": [0, 11],
+    "keys": ["c", "i", "(", "new", "<Esc>"],
+    "expect_text": "func test(new)",
+    "expect_mode": "n"
+  },
+  {
+    "id": 41,
+    "name": "di( deletes inside parens",
+    "text": "func test(old)",
+    "cursor": [0, 11],
+    "keys": ["d", "i", "("],
+    "expect_text": "func test()",
+    "expect_mode": "n"
+  },
+  {
+    "id": 42,
+    "name": "ci\" changes inside double quotes",
+    "text": "var s = \"old\"",
+    "cursor": [0, 9],
+    "keys": ["c", "i", "\"", "new", "<Esc>"],
+    "expect_text": "var s = \"new\"",
+    "expect_mode": "n"
+  },
+  {
+    "id": 43,
+    "name": "diw deletes inner word",
+    "text": "hello world foo",
+    "cursor": [0, 6],
+    "keys": ["d", "i", "w"],
+    "expect_text": "hello  foo"
+  },
+  {
+    "id": 44,
+    "name": "daw deletes a word",
+    "text": "hello world foo",
+    "cursor": [0, 6],
+    "keys": ["d", "a", "w"],
+    "expect_text": "hello foo"
+  }
+]

@@ -1,0 +1,86 @@
+[
+  {
+    "id": 1,
+    "name": "j moves cursor down",
+    "text": "line1\nline2\nline3",
+    "cursor": [0, 0],
+    "keys": ["j"],
+    "expect_cursor": [1, 0],
+    "expect_mode": "n"
+  },
+  {
+    "id": 2,
+    "name": "k moves cursor up",
+    "text": "line1\nline2\nline3",
+    "cursor": [2, 0],
+    "keys": ["k"],
+    "expect_cursor": [1, 0],
+    "expect_mode": "n"
+  },
+  {
+    "id": 3,
+    "name": "l moves cursor right",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["l"],
+    "expect_cursor": [0, 1],
+    "expect_mode": "n"
+  },
+  {
+    "id": 4,
+    "name": "h moves cursor left",
+    "text": "hello",
+    "cursor": [0, 2],
+    "keys": ["h"],
+    "expect_cursor": [0, 1],
+    "expect_mode": "n"
+  },
+  {
+    "id": 5,
+    "name": "gg goes to first line",
+    "text": "line1\nline2\nline3",
+    "cursor": [2, 0],
+    "keys": ["g", "g"],
+    "expect_cursor": [0, 0]
+  },
+  {
+    "id": 6,
+    "name": "G goes to last line",
+    "text": "line1\nline2\nline3",
+    "cursor": [0, 0],
+    "keys": ["G"],
+    "expect_cursor": [2, 0]
+  },
+  {
+    "id": 7,
+    "name": "w moves to next word",
+    "text": "hello world foo",
+    "cursor": [0, 0],
+    "keys": ["w"],
+    "expect_cursor": [0, 6]
+  },
+  {
+    "id": 8,
+    "name": "b moves to previous word",
+    "text": "hello world foo",
+    "cursor": [0, 6],
+    "keys": ["b"],
+    "expect_cursor": [0, 0]
+  },
+  {
+    "id": 9,
+    "name": "0 moves to line start",
+    "text": "hello world",
+    "cursor": [0, 5],
+    "keys": ["0"],
+    "expect_cursor": [0, 0]
+  },
+  {
+    "id": 10,
+    "name": "$ moves to line end",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["$"],
+    "expect_cursor": [0, 10]
+  }
+]

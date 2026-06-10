@@ -1,0 +1,42 @@
+[
+  {
+    "id": 320,
+    "name": "u undoes insert",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["A", " world", "<Esc>", "u"],
+    "expect_text": "hello"
+  },
+  {
+    "id": 321,
+    "name": "Ctrl+R redoes after undo",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["d", "d", "u", "<C-r>"],
+    "expect_text": ""
+  },
+  {
+    "id": 322,
+    "name": "multiple u undoes multiple changes",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["A", "1", "<Esc>", "A", "2", "<Esc>", "u", "u"],
+    "expect_text": "hello"
+  },
+  {
+    "id": 323,
+    "name": "u undoes dd",
+    "text": "line1\nline2\nline3",
+    "cursor": [1, 0],
+    "keys": ["d", "d", "u"],
+    "expect_text": "line1\nline2\nline3"
+  },
+  {
+    "id": 324,
+    "name": "u undoes J (join)",
+    "text": "hello\nworld",
+    "cursor": [0, 0],
+    "keys": ["J", "u"],
+    "expect_text": "hello\nworld"
+  }
+]

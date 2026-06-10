@@ -1,0 +1,134 @@
+[
+  {
+    "id": 180,
+    "name": "dw deletes word",
+    "text": "hello world foo",
+    "cursor": [0, 0],
+    "keys": ["d", "w"],
+    "expect_text": "world foo"
+  },
+  {
+    "id": 181,
+    "name": "d$ deletes to end of line",
+    "text": "hello world",
+    "cursor": [0, 5],
+    "keys": ["d", "$"],
+    "expect_text": "hello"
+  },
+  {
+    "id": 182,
+    "name": "d0 deletes to start of line",
+    "text": "hello world",
+    "cursor": [0, 6],
+    "keys": ["d", "0"],
+    "expect_text": "world"
+  },
+  {
+    "id": 183,
+    "name": "d^ deletes to first non-blank",
+    "text": "    hello",
+    "cursor": [0, 7],
+    "keys": ["d", "^"],
+    "expect_text": "    lo"
+  },
+  {
+    "id": 184,
+    "name": "de deletes to end of word",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["d", "e"],
+    "expect_text": " world"
+  },
+  {
+    "id": 185,
+    "name": "db deletes to beginning of word",
+    "text": "hello world",
+    "cursor": [0, 6],
+    "keys": ["d", "b"],
+    "expect_text": "hello world",
+    "expect_cursor": [0, 6]
+  },
+  {
+    "id": 186,
+    "name": "cw changes word",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["c", "w", "hi", "<Esc>"],
+    "expect_text": "hi world",
+    "expect_mode": "n"
+  },
+  {
+    "id": 187,
+    "name": "c$ changes to end of line",
+    "text": "hello world",
+    "cursor": [0, 5],
+    "keys": ["c", "$", " there", "<Esc>"],
+    "expect_text": "hello there",
+    "expect_mode": "n"
+  },
+  {
+    "id": 188,
+    "name": "yw yanks word, p pastes",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["y", "w", "A", " ", "<Esc>", "p"],
+    "expect_text": "hello world hello"
+  },
+  {
+    "id": 189,
+    "name": "y$ yanks to end, p pastes",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["y", "$", "o", "<Esc>", "p"],
+    "expect_text": "hello world\nhello world"
+  },
+  {
+    "id": 190,
+    "name": "dj deletes current and next line",
+    "text": "line1\nline2\nline3",
+    "cursor": [0, 0],
+    "keys": ["d", "j"],
+    "expect_text": "line3"
+  },
+  {
+    "id": 191,
+    "name": "dk deletes current and previous line",
+    "text": "line1\nline2\nline3",
+    "cursor": [1, 0],
+    "keys": ["d", "k"],
+    "expect_text": "line3"
+  },
+  {
+    "id": 192,
+    "name": "dG deletes to end of file",
+    "text": "line1\nline2\nline3",
+    "cursor": [1, 0],
+    "keys": ["d", "G"],
+    "expect_text": "line1"
+  },
+  {
+    "id": 193,
+    "name": "dgg deletes to start of file",
+    "text": "line1\nline2\nline3",
+    "cursor": [1, 0],
+    "keys": ["d", "g", "g"],
+    "expect_text": "line3"
+  },
+  {
+    "id": 194,
+    "name": "d% deletes to matching bracket",
+    "text": "if (true) {",
+    "cursor": [0, 3],
+    "keys": ["d", "%"],
+    "expect_text": "if  {"
+  },
+  {
+    "id": 195,
+    "name": "c2w changes two words",
+    "text": "one two three",
+    "cursor": [0, 0],
+    "keys": ["c", "2", "w", "hi", "<Esc>"],
+    "expect_text": "hi three",
+    "expect_mode": "n"
+  }
+]

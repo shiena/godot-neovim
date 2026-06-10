@@ -1,0 +1,89 @@
+[
+  {
+    "id": 20,
+    "name": "dd deletes current line",
+    "text": "line1\nline2\nline3",
+    "cursor": [1, 0],
+    "keys": ["d", "d"],
+    "expect_text": "line1\nline3",
+    "expect_cursor": [1, 0]
+  },
+  {
+    "id": 21,
+    "name": "yy + p duplicates line",
+    "text": "hello\nworld",
+    "cursor": [0, 0],
+    "keys": ["y", "y", "p"],
+    "expect_text": "hello\nhello\nworld"
+  },
+  {
+    "id": 22,
+    "name": "x deletes character under cursor",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["x"],
+    "expect_text": "ello",
+    "expect_cursor": [0, 0]
+  },
+  {
+    "id": 23,
+    "name": "o opens new line below",
+    "text": "line1\nline2",
+    "cursor": [0, 0],
+    "keys": ["o", "new", "<Esc>"],
+    "expect_text": "line1\nnew\nline2",
+    "expect_mode": "n"
+  },
+  {
+    "id": 24,
+    "name": "O opens new line above",
+    "text": "line1\nline2",
+    "cursor": [1, 0],
+    "keys": ["O", "new", "<Esc>"],
+    "expect_text": "line1\nnew\nline2",
+    "expect_mode": "n"
+  },
+  {
+    "id": 25,
+    "name": "A appends at end of line",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["A", " world", "<Esc>"],
+    "expect_text": "hello world",
+    "expect_mode": "n"
+  },
+  {
+    "id": 26,
+    "name": "I inserts at beginning of line",
+    "text": "world",
+    "cursor": [0, 3],
+    "keys": ["I", "hello ", "<Esc>"],
+    "expect_text": "hello world",
+    "expect_mode": "n"
+  },
+  {
+    "id": 27,
+    "name": "cc changes entire line",
+    "text": "old line\nkeep",
+    "cursor": [0, 0],
+    "keys": ["c", "c", "new line", "<Esc>"],
+    "expect_text": "new line\nkeep",
+    "expect_mode": "n"
+  },
+  {
+    "id": 28,
+    "name": "u undoes last change",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["x", "u"],
+    "expect_text": "hello"
+  },
+  {
+    "id": 29,
+    "name": "J joins lines",
+    "text": "hello\nworld",
+    "cursor": [0, 0],
+    "keys": ["J"],
+    "expect_text": "hello world"
+  }
+]

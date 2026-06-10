@@ -1,0 +1,74 @@
+[
+  {
+    "id": 200,
+    "name": "3j moves 3 lines down",
+    "text": "line1\nline2\nline3\nline4\nline5",
+    "cursor": [0, 0],
+    "keys": ["3", "j"],
+    "expect_cursor": [3, 0]
+  },
+  {
+    "id": 201,
+    "name": "2k moves 2 lines up",
+    "text": "line1\nline2\nline3\nline4",
+    "cursor": [3, 0],
+    "keys": ["2", "k"],
+    "expect_cursor": [1, 0]
+  },
+  {
+    "id": 202,
+    "name": "3w moves 3 words forward",
+    "text": "one two three four five",
+    "cursor": [0, 0],
+    "keys": ["3", "w"],
+    "expect_cursor": [0, 14]
+  },
+  {
+    "id": 203,
+    "name": "2dd deletes 2 lines",
+    "text": "line1\nline2\nline3\nline4",
+    "cursor": [0, 0],
+    "keys": ["2", "d", "d"],
+    "expect_text": "line3\nline4"
+  },
+  {
+    "id": 204,
+    "name": "3x deletes 3 characters",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["3", "x"],
+    "expect_text": "lo"
+  },
+  {
+    "id": 205,
+    "name": "2yy + p duplicates 2 lines",
+    "text": "line1\nline2\nline3",
+    "cursor": [0, 0],
+    "keys": ["2", "y", "y", "G", "p"],
+    "expect_text": "line1\nline2\nline3\nline1\nline2"
+  },
+  {
+    "id": 206,
+    "name": "5l moves 5 chars right",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["5", "l"],
+    "expect_cursor": [0, 5]
+  },
+  {
+    "id": 207,
+    "name": "10G goes to line 10 (clamped)",
+    "text": "line1\nline2\nline3",
+    "cursor": [0, 0],
+    "keys": ["1", "0", "G"],
+    "expect_cursor": [2, 0]
+  },
+  {
+    "id": 208,
+    "name": "3p pastes 3 times",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["y", "y", "3", "p"],
+    "expect_text": "hello\nhello\nhello\nhello"
+  }
+]

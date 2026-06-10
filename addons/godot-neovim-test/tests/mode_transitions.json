@@ -1,0 +1,106 @@
+[
+  {
+    "id": 420,
+    "name": "i -> Esc returns to normal",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["i", "<Esc>"],
+    "expect_mode": "n"
+  },
+  {
+    "id": 421,
+    "name": "v -> Esc returns to normal",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["v", "<Esc>"],
+    "expect_mode": "n"
+  },
+  {
+    "id": 422,
+    "name": "V -> Esc returns to normal",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["V", "<Esc>"],
+    "expect_mode": "n"
+  },
+  {
+    "id": 423,
+    "name": "R -> Esc returns to normal",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["R", "<Esc>"],
+    "expect_mode": "n"
+  },
+  {
+    "id": 424,
+    "name": "cc enters insert mode",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["c", "c"],
+    "expect_mode": "i"
+  },
+  {
+    "id": 425,
+    "name": "cw enters insert mode",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["c", "w"],
+    "expect_mode": "i"
+  },
+  {
+    "id": 426,
+    "name": "o enters insert mode",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["o"],
+    "expect_mode": "i"
+  },
+  {
+    "id": 427,
+    "name": "O enters insert mode",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["O"],
+    "expect_mode": "i"
+  },
+  {
+    "id": 428,
+    "name": "s enters insert mode",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["s"],
+    "expect_mode": "i"
+  },
+  {
+    "id": 429,
+    "name": "v -> V switches to visual line",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["v", "V"],
+    "expect_mode": "V"
+  },
+  {
+    "id": 430,
+    "name": "V -> v switches to visual char",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["V", "v"],
+    "expect_mode": "v"
+  },
+  {
+    "id": 431,
+    "name": "double v returns to normal",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["v", "v"],
+    "expect_mode": "n"
+  },
+  {
+    "id": 432,
+    "name": "double V returns to normal",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["V", "V"],
+    "expect_mode": "n"
+  }
+]

@@ -1,0 +1,42 @@
+[
+  {
+    "id": 280,
+    "name": "ma sets mark, 'a jumps to mark line",
+    "text": "line1\nline2\nline3",
+    "cursor": [0, 0],
+    "keys": ["m", "a", "G", "'", "a"],
+    "expect_cursor": [0, 0]
+  },
+  {
+    "id": 281,
+    "name": "ma sets mark, `a jumps to exact position",
+    "text": "hello world\nline2",
+    "cursor": [0, 6],
+    "keys": ["m", "a", "G", "`", "a"],
+    "expect_cursor": [0, 6]
+  },
+  {
+    "id": 282,
+    "name": "d'a deletes from cursor to mark line",
+    "text": "line1\nline2\nline3\nline4",
+    "cursor": [0, 0],
+    "keys": ["m", "a", "2", "j", "d", "'", "a"],
+    "expect_text": "line4"
+  },
+  {
+    "id": 283,
+    "name": "multiple marks work independently",
+    "text": "aaa\nbbb\nccc",
+    "cursor": [0, 0],
+    "keys": ["m", "a", "j", "m", "b", "G", "'", "a"],
+    "expect_cursor": [0, 0]
+  },
+  {
+    "id": 284,
+    "name": "jump to mark b after setting a and b",
+    "text": "aaa\nbbb\nccc",
+    "cursor": [0, 0],
+    "keys": ["m", "a", "j", "m", "b", "G", "'", "b"],
+    "expect_cursor": [1, 0]
+  }
+]

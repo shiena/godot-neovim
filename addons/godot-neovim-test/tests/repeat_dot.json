@@ -1,0 +1,58 @@
+[
+  {
+    "id": 310,
+    "name": ". repeats dd",
+    "text": "line1\nline2\nline3",
+    "cursor": [0, 0],
+    "keys": ["d", "d", "."],
+    "expect_text": "line3"
+  },
+  {
+    "id": 311,
+    "name": ". repeats x",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["x", ".", "."],
+    "expect_text": "lo"
+  },
+  {
+    "id": 312,
+    "name": ". repeats cw",
+    "text": "old old old",
+    "cursor": [0, 0],
+    "keys": ["c", "w", "new", "<Esc>", "w", "."],
+    "expect_text": "new new old"
+  },
+  {
+    "id": 313,
+    "name": ". repeats A with text",
+    "text": "hello\nworld",
+    "cursor": [0, 0],
+    "keys": ["A", "!", "<Esc>", "j", "."],
+    "expect_text": "hello!\nworld!"
+  },
+  {
+    "id": 314,
+    "name": ". repeats r",
+    "text": "aaa",
+    "cursor": [0, 0],
+    "keys": ["r", "x", "l", "."],
+    "expect_text": "xxa"
+  },
+  {
+    "id": 315,
+    "name": ". repeats dw",
+    "text": "one two three four",
+    "cursor": [0, 0],
+    "keys": ["d", "w", "."],
+    "expect_text": "three four"
+  },
+  {
+    "id": 316,
+    "name": "3. repeats with count override",
+    "text": "abcdef",
+    "cursor": [0, 0],
+    "keys": ["x", "3", "."],
+    "expect_text": "ef"
+  }
+]

@@ -1,0 +1,83 @@
+[
+  {
+    "id": 120,
+    "name": "f finds character forward",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["f", "o"],
+    "expect_cursor": [0, 4]
+  },
+  {
+    "id": 121,
+    "name": "F finds character backward",
+    "text": "hello world",
+    "cursor": [0, 10],
+    "keys": ["F", "o"],
+    "expect_cursor": [0, 7]
+  },
+  {
+    "id": 122,
+    "name": "t moves till character forward",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["t", "o"],
+    "expect_cursor": [0, 3]
+  },
+  {
+    "id": 123,
+    "name": "T moves till character backward",
+    "text": "hello world",
+    "cursor": [0, 10],
+    "keys": ["T", "o"],
+    "expect_cursor": [0, 8]
+  },
+  {
+    "id": 124,
+    "name": "; repeats last f forward",
+    "text": "abcabc",
+    "cursor": [0, 0],
+    "keys": ["f", "b", ";"],
+    "expect_cursor": [0, 4]
+  },
+  {
+    "id": 125,
+    "name": ", repeats last f in reverse",
+    "text": "abcabc",
+    "cursor": [0, 0],
+    "keys": ["f", "b", ";", ","],
+    "expect_cursor": [0, 1]
+  },
+  {
+    "id": 126,
+    "name": "df deletes till found char (inclusive)",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["d", "f", " "],
+    "expect_text": "world"
+  },
+  {
+    "id": 127,
+    "name": "dt deletes till char (exclusive)",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["d", "t", " "],
+    "expect_text": " world"
+  },
+  {
+    "id": 128,
+    "name": "cf changes till found char",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["c", "f", " ", "hi", "<Esc>"],
+    "expect_text": "hiworld",
+    "expect_mode": "n"
+  },
+  {
+    "id": 129,
+    "name": "2f finds second occurrence",
+    "text": "abcabcabc",
+    "cursor": [0, 0],
+    "keys": ["2", "f", "b"],
+    "expect_cursor": [0, 4]
+  }
+]

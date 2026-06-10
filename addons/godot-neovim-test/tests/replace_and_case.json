@@ -1,0 +1,86 @@
+[
+  {
+    "id": 220,
+    "name": "r replaces single character",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["r", "H"],
+    "expect_text": "Hello",
+    "expect_cursor": [0, 0],
+    "expect_mode": "n"
+  },
+  {
+    "id": 221,
+    "name": "R enters replace mode and overwrites",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["R", "HE", "<Esc>"],
+    "expect_text": "HEllo",
+    "expect_mode": "n"
+  },
+  {
+    "id": 222,
+    "name": "~ toggles case of character",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["~"],
+    "expect_text": "Hello",
+    "expect_cursor": [0, 1]
+  },
+  {
+    "id": 223,
+    "name": "3~ toggles 3 characters",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["3", "~"],
+    "expect_text": "HELlo"
+  },
+  {
+    "id": 224,
+    "name": "gUw uppercases word",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["g", "U", "w"],
+    "expect_text": "HELLO world"
+  },
+  {
+    "id": 225,
+    "name": "guw lowercases word",
+    "text": "HELLO WORLD",
+    "cursor": [0, 0],
+    "keys": ["g", "u", "w"],
+    "expect_text": "hello WORLD"
+  },
+  {
+    "id": 226,
+    "name": "gUU uppercases entire line",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["g", "U", "U"],
+    "expect_text": "HELLO WORLD"
+  },
+  {
+    "id": 227,
+    "name": "guu lowercases entire line",
+    "text": "HELLO WORLD",
+    "cursor": [0, 0],
+    "keys": ["g", "u", "u"],
+    "expect_text": "hello world"
+  },
+  {
+    "id": 228,
+    "name": "3r replaces 3 characters",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["3", "r", "x"],
+    "expect_text": "xxxlo"
+  },
+  {
+    "id": 229,
+    "name": "gU$ uppercases to end of line",
+    "text": "hello world",
+    "cursor": [0, 6],
+    "keys": ["g", "U", "$"],
+    "expect_text": "hello WORLD"
+  }
+]

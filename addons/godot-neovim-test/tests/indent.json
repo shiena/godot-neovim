@@ -1,0 +1,34 @@
+[
+  {
+    "id": 260,
+    "name": ">> indents current line",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": [">", ">"],
+    "expect_mode": "n"
+  },
+  {
+    "id": 261,
+    "name": "<< unindents current line",
+    "text": "\thello",
+    "cursor": [0, 0],
+    "keys": ["<", "<"],
+    "expect_text": "hello"
+  },
+  {
+    "id": 262,
+    "name": ">j indents current and next line",
+    "text": "line1\nline2\nline3",
+    "cursor": [0, 0],
+    "keys": [">", "j"],
+    "expect_mode": "n"
+  },
+  {
+    "id": 263,
+    "name": "2>> indents 2 lines",
+    "text": "line1\nline2\nline3",
+    "cursor": [0, 0],
+    "keys": ["2", ">", ">"],
+    "expect_mode": "n"
+  }
+]

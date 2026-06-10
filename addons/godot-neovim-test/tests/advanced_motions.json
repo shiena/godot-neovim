@@ -1,0 +1,122 @@
+[
+  {
+    "id": 100,
+    "name": "e moves to end of word",
+    "text": "hello world foo",
+    "cursor": [0, 0],
+    "keys": ["e"],
+    "expect_cursor": [0, 4]
+  },
+  {
+    "id": 101,
+    "name": "E moves to end of WORD",
+    "text": "hello-world foo",
+    "cursor": [0, 0],
+    "keys": ["E"],
+    "expect_cursor": [0, 10]
+  },
+  {
+    "id": 102,
+    "name": "W moves to next WORD",
+    "text": "hello-world foo",
+    "cursor": [0, 0],
+    "keys": ["W"],
+    "expect_cursor": [0, 12]
+  },
+  {
+    "id": 103,
+    "name": "B moves to previous WORD",
+    "text": "foo hello-world",
+    "cursor": [0, 10],
+    "keys": ["B"],
+    "expect_cursor": [0, 4]
+  },
+  {
+    "id": 104,
+    "name": "ge moves to end of previous word",
+    "text": "hello world",
+    "cursor": [0, 6],
+    "keys": ["g", "e"],
+    "expect_cursor": [0, 4]
+  },
+  {
+    "id": 105,
+    "name": "^ moves to first non-blank",
+    "text": "    hello",
+    "cursor": [0, 0],
+    "keys": ["^"],
+    "expect_cursor": [0, 4]
+  },
+  {
+    "id": 106,
+    "name": "% jumps to matching paren",
+    "text": "func test(arg)",
+    "cursor": [0, 9],
+    "keys": ["%"],
+    "expect_cursor": [0, 13]
+  },
+  {
+    "id": 107,
+    "name": "% jumps back from closing paren",
+    "text": "func test(arg)",
+    "cursor": [0, 13],
+    "keys": ["%"],
+    "expect_cursor": [0, 9]
+  },
+  {
+    "id": 108,
+    "name": "% with nested brackets",
+    "text": "a(b[c]d)",
+    "cursor": [0, 0],
+    "keys": ["%"],
+    "expect_cursor": [0, 7]
+  },
+  {
+    "id": 109,
+    "name": "{ jumps to previous blank line",
+    "text": "line1\nline2\n\nline3\nline4",
+    "cursor": [3, 0],
+    "keys": ["{"],
+    "expect_cursor": [2, 0]
+  },
+  {
+    "id": 110,
+    "name": "} jumps to next blank line",
+    "text": "line1\nline2\n\nline3\nline4",
+    "cursor": [0, 0],
+    "keys": ["}"],
+    "expect_cursor": [2, 0]
+  },
+  {
+    "id": 111,
+    "name": "3G goes to line 3",
+    "text": "line1\nline2\nline3\nline4\nline5",
+    "cursor": [0, 0],
+    "keys": ["3", "G"],
+    "expect_cursor": [2, 0]
+  },
+  {
+    "id": 112,
+    "name": "| goes to column",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["5", "|"],
+    "expect_cursor": [0, 4]
+  },
+  {
+    "id": 113,
+    "name": "+ moves to first non-blank of next line",
+    "text": "hello\n    world",
+    "cursor": [0, 0],
+    "keys": ["+"],
+    "expect_cursor": [1, 4]
+  },
+  {
+    "id": 114,
+    "name": "- moves to first non-blank of prev line",
+    "text": "    hello\nworld",
+    "cursor": [1, 0],
+    "keys": ["-"],
+    "expect_cursor": [0, 4]
+  }
+]
