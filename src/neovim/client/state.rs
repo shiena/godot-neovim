@@ -91,6 +91,19 @@ impl NeovimClient {
         });
     }
 
+    /// Number of keys Neovim's main loop has confirmed processing since the
+    /// last call (see keys_processed in mod.rs for what "confirmed" means).
+    /// The baseline is stored on this client, so counters of different Neovim
+    /// instances (script vs shader, or a restarted client) are never compared
+    /// against each other. A non-zero delta proves this instance is alive even
+    /// without any visible redraw — e.g. a no-op motion at the end of the file
+    /// (#75) — and the caller can subtract it from its pending-key count.
+    pub fn take_keys_processed_delta(&self) -> u64 {
+        let current = self.keys_processed.load(Ordering::SeqCst);
+        let seen = self.keys_processed_seen.swap(current, Ordering::SeqCst);
+        current.saturating_sub(seen)
+    }
+
     /// Take pending debug messages from Lua
     /// Returns empty Vec if no messages
     pub fn take_debug_messages(&self) -> Vec<String> {

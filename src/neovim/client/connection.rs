@@ -37,6 +37,8 @@ impl NeovimClient {
             io_handle: None,
             key_input_tx: None,
             key_input_handle: None,
+            keys_processed: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            keys_processed_seen: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -152,14 +154,41 @@ impl NeovimClient {
 
         // Spawn key input processor task
         let neovim_arc = self.neovim.clone();
+        let keys_processed = self.keys_processed.clone();
         let key_input_handle = self.runtime.spawn(async move {
             while let Some(keys) = rx.recv().await {
                 let nvim_lock = neovim_arc.lock().await;
                 if let Some(neovim) = nvim_lock.as_ref() {
-                    if let Err(e) = neovim.input(&keys).await {
-                        // Log error but continue processing
-                        // Note: Can't use godot_error here (tokio thread)
-                        eprintln!("[godot-neovim] Failed to send key '{}': {}", keys, e);
+                    match neovim.input(&keys).await {
+                        // nvim_input returns the number of bytes written.
+                        // Ok(0) means the typeahead buffer was full and the key
+                        // was silently dropped — do NOT count that as an ack.
+                        Ok(n) if n > 0 => {
+                            // nvim_input is FUNC_API_FAST: it is answered from
+                            // Neovim's fast event context even while the main
+                            // loop is hung, so its Ok alone proves nothing.
+                            // Follow up with a deferred (non-fast) request that
+                            // only the main loop can answer; advance the
+                            // processed counter only when it completes. A no-op
+                            // key (e.g. `j` at the last line) still acks here,
+                            // while a genuine main-loop hang stalls the counter
+                            // and lets the plugin's watchdog fire (see #75).
+                            if neovim.eval("1").await.is_ok() {
+                                keys_processed
+                                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            }
+                        }
+                        Ok(_) => {
+                            // Note: Can't use godot_error here (tokio thread)
+                            eprintln!(
+                                "[godot-neovim] Key '{}' dropped: Neovim typeahead buffer full",
+                                keys
+                            );
+                        }
+                        Err(e) => {
+                            // Log error but continue processing
+                            eprintln!("[godot-neovim] Failed to send key '{}': {}", keys, e);
+                        }
                     }
                 }
                 // Release lock before next iteration

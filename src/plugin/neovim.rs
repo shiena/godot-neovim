@@ -725,7 +725,7 @@ impl GodotNeovimPlugin {
         }
 
         // Collect data from Neovim while holding lock, then release and process
-        let (state_from_redraw, buf_events, viewport_change, debug_messages) = {
+        let (state_from_redraw, buf_events, viewport_change, debug_messages, keys_acked) = {
             let Some(neovim) = self.get_current_neovim() else {
                 return;
             };
@@ -734,7 +734,9 @@ impl GodotNeovimPlugin {
                 return;
             };
 
-            // Poll the runtime to process async events (including redraw)
+            // Poll the runtime to process async events (including redraw).
+            // This also gives the key-input worker task a chance to drain queued
+            // keys and call nvim_input, advancing keys_processed below.
             client.poll();
 
             // Collect buffer events
@@ -769,11 +771,17 @@ impl GodotNeovimPlugin {
             // Get debug messages from Lua
             let debug_messages = client.take_debug_messages();
 
+            // Keys this client's main loop confirmed since last frame. Advances
+            // even when a key changes nothing on screen (no-op motion at EOF),
+            // but stalls on a genuine main-loop hang — see connection.rs.
+            let keys_acked = client.take_keys_processed_delta();
+
             (
                 state_from_redraw,
                 buf_events,
                 viewport_change,
                 debug_messages,
+                keys_acked,
             )
         };
         // Lock is now released
@@ -791,6 +799,25 @@ impl GodotNeovimPlugin {
             // Got response, reset pending key tracking
             self.pending_key_count = 0;
             self.last_key_send_time = None;
+        } else if keys_acked > 0 {
+            // No visible change, but Neovim's main loop confirmed processing
+            // keys (each ack requires a deferred eval round-trip) — it is alive
+            // even though the keys were no-ops (e.g. `j` at the last line, #75).
+            // Subtract only the acked keys so partial progress does not disarm
+            // the watchdog while other keys are still stuck in the queue.
+            // May over-subtract for channel sends that bypass send_keys
+            // (send_escape, pending_keys_after_exit) — saturating_sub keeps
+            // that benign, and those acks are genuine life signs anyway.
+            self.pending_key_count = self
+                .pending_key_count
+                .saturating_sub(u32::try_from(keys_acked).unwrap_or(u32::MAX));
+            if self.pending_key_count == 0 {
+                self.last_key_send_time = None;
+            } else {
+                // Fresh sign of life: restart the no-response window for the
+                // keys that remain pending.
+                self.last_key_send_time = Some(std::time::Instant::now());
+            }
         } else if let Some(send_time) = self.last_key_send_time {
             // No response - check if we've been waiting too long
             use crate::neovim::TIMEOUT_RECOVERY_WINDOW_SECS;
