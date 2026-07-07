@@ -18,7 +18,7 @@ mod state;
 use crate::neovim::{NeovimHandler, NeovimState};
 use nvim_rs::Neovim;
 use std::fmt;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::UnboundedSender;
@@ -153,6 +153,21 @@ pub struct NeovimClient {
     /// Key input processor task handle
     #[allow(dead_code)]
     pub(super) key_input_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Monotonic counter of keys confirmed processed by Neovim's main loop.
+    /// The key-input worker increments this only after (a) nvim_input accepted
+    /// the key (returned bytes written > 0 — Ok(0) means the typeahead buffer
+    /// was full and the key was dropped) AND (b) a follow-up deferred request
+    /// (nvim_eval) completed. nvim_input alone is FUNC_API_FAST and is answered
+    /// even while the main loop is hung, so only the eval round-trip proves the
+    /// main loop is alive. This lets the plugin distinguish a genuine hang from
+    /// a legitimately-ignored key (e.g. `j` at the last line — see #75).
+    pub(super) keys_processed: Arc<AtomicU64>,
+    /// Last keys_processed value consumed by take_keys_processed_delta().
+    /// Lives on the client (not the plugin) so each Neovim instance tracks its
+    /// own baseline — switching between script/shader editors or restarting a
+    /// client can never produce a spurious ack from comparing counters of two
+    /// different instances.
+    pub(super) keys_processed_seen: AtomicU64,
 }
 
 impl Default for NeovimClient {
