@@ -198,7 +198,12 @@ func _inject_key_event(step: Dictionary) -> void:
 		var ch := char(event.keycode)
 		event.unicode = (ch.to_lower() if not event.shift_pressed else ch).unicode_at(0)
 
-	Input.parse_input_event(event)
+	# push_input (not Input.parse_input_event): deliver straight to the editor
+	# viewport's shortcut/gui phases. parse_input_event goes through the OS
+	# input queue where some modified nav keys (Ctrl+Left/Home) get consumed
+	# before reaching the CodeEdit.
+	var vp := EditorInterface.get_base_control().get_viewport()
+	vp.push_input(event)
 
 
 # ---- Buffer setup ----
@@ -248,7 +253,11 @@ func _check(t: Dictionary) -> Dictionary:
 		return result
 
 	if t.has("expect_text"):
-		var actual: String = code_edit.get_text().strip_edges(false, true)
+		# Strip only trailing newlines (NOT spaces/tabs) so expectations
+		# with trailing whitespace like "hello " remain testable.
+		var actual: String = code_edit.get_text()
+		while actual.ends_with("\n"):
+			actual = actual.substr(0, actual.length() - 1)
 		if actual != t.expect_text:
 			result.passed = false
 			result.diff["text"] = {"expected": t.expect_text, "actual": actual}

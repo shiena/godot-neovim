@@ -3,40 +3,114 @@
     "id": 350,
     "name": "\"ayy + \"ap uses named register a",
     "text": "hello\nworld",
-    "cursor": [0, 0],
-    "keys": ["\"", "a", "y", "y", "G", "\"", "a", "p"],
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "\"",
+      "a",
+      "y",
+      "y",
+      "G",
+      "\"",
+      "a",
+      "p"
+    ],
     "expect_text": "hello\nworld\nhello"
   },
   {
     "id": 351,
     "name": "\"_dd deletes to black hole register",
     "text": "keep\ndelete\nstay",
-    "cursor": [0, 0],
-    "keys": ["y", "y", "j", "\"", "_", "d", "d", "p"],
-    "expect_text": "keep\nkeep\nstay"
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "y",
+      "y",
+      "j",
+      "\"",
+      "_",
+      "d",
+      "d",
+      "p"
+    ],
+    "expect_text": "keep\nstay\nkeep"
   },
   {
     "id": 352,
     "name": "\"0p pastes from yank register after delete",
     "text": "first\nsecond\nthird",
-    "cursor": [0, 0],
-    "keys": ["y", "y", "j", "d", "d", "\"", "0", "p"],
-    "expect_text": "first\nfirst\nthird"
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "y",
+      "y",
+      "j",
+      "d",
+      "d",
+      "\"",
+      "0",
+      "p"
+    ],
+    "expect_text": "first\nthird\nfirst"
   },
   {
     "id": 353,
     "name": "named registers are independent",
     "text": "aaa\nbbb",
-    "cursor": [0, 0],
-    "keys": ["\"", "a", "y", "y", "j", "\"", "b", "y", "y", "o", "<Esc>", "\"", "a", "p", "\"", "b", "p"],
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "\"",
+      "a",
+      "y",
+      "y",
+      "j",
+      "\"",
+      "b",
+      "y",
+      "y",
+      "o",
+      "<Esc>",
+      "\"",
+      "a",
+      "p",
+      "\"",
+      "b",
+      "p"
+    ],
     "expect_text": "aaa\nbbb\naaa\nbbb"
   },
   {
     "id": 354,
     "name": "\"Ayy appends to register a",
     "text": "first\nsecond\nthird",
-    "cursor": [0, 0],
-    "keys": ["\"", "a", "y", "y", "j", "\"", "A", "y", "y", "G", "\"", "a", "p"],
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "\"",
+      "a",
+      "y",
+      "y",
+      "j",
+      "\"",
+      "A",
+      "y",
+      "y",
+      "G",
+      "\"",
+      "a",
+      "p"
+    ],
     "expect_text": "first\nsecond\nthird\nfirst\nsecond"
   }
 ]

@@ -3,33 +3,58 @@
     "id": 240,
     "name": "D deletes to end of line",
     "text": "hello world",
-    "cursor": [0, 5],
-    "keys": ["D"],
+    "cursor": [
+      0,
+      5
+    ],
+    "keys": [
+      "D"
+    ],
     "expect_text": "hello"
   },
   {
     "id": 241,
     "name": "C changes to end of line",
     "text": "hello world",
-    "cursor": [0, 5],
-    "keys": ["C", " there", "<Esc>"],
+    "cursor": [
+      0,
+      5
+    ],
+    "keys": [
+      "C",
+      " there",
+      "<Esc>"
+    ],
     "expect_text": "hello there",
     "expect_mode": "n"
   },
   {
     "id": 242,
-    "name": "Y yanks line (like yy)",
+    "name": "Y yanks to end of line (Neovim default y$)",
     "text": "hello\nworld",
-    "cursor": [0, 0],
-    "keys": ["Y", "p"],
-    "expect_text": "hello\nhello\nworld"
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "Y",
+      "p"
+    ],
+    "expect_text": "hhelloello\nworld"
   },
   {
     "id": 243,
     "name": "s substitutes character",
     "text": "hello",
-    "cursor": [0, 0],
-    "keys": ["s", "H", "<Esc>"],
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "s",
+      "H",
+      "<Esc>"
+    ],
     "expect_text": "Hello",
     "expect_mode": "n"
   },
@@ -37,8 +62,15 @@
     "id": 244,
     "name": "S substitutes entire line",
     "text": "old line\nkeep",
-    "cursor": [0, 3],
-    "keys": ["S", "new line", "<Esc>"],
+    "cursor": [
+      0,
+      3
+    ],
+    "keys": [
+      "S",
+      "new line",
+      "<Esc>"
+    ],
     "expect_text": "new line\nkeep",
     "expect_mode": "n"
   },
@@ -46,41 +78,74 @@
     "id": 245,
     "name": "X deletes character before cursor",
     "text": "hello",
-    "cursor": [0, 1],
-    "keys": ["X"],
+    "cursor": [
+      0,
+      1
+    ],
+    "keys": [
+      "X"
+    ],
     "expect_text": "ello",
-    "expect_cursor": [0, 0]
+    "expect_cursor": [
+      0,
+      0
+    ]
   },
   {
     "id": 246,
     "name": "3s substitutes 3 characters",
     "text": "hello",
-    "cursor": [0, 0],
-    "keys": ["3", "s", "Hi", "<Esc>"],
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "3",
+      "s",
+      "Hi",
+      "<Esc>"
+    ],
     "expect_text": "Hilo"
   },
   {
     "id": 247,
     "name": "D at line start deletes entire content",
     "text": "hello",
-    "cursor": [0, 0],
-    "keys": ["D"],
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "D"
+    ],
     "expect_text": ""
   },
   {
     "id": 248,
     "name": "gJ joins lines without space",
     "text": "hello\nworld",
-    "cursor": [0, 0],
-    "keys": ["g", "J"],
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "g",
+      "J"
+    ],
     "expect_text": "helloworld"
   },
   {
     "id": 249,
     "name": "2J joins 2 lines",
     "text": "line1\nline2\nline3",
-    "cursor": [0, 0],
-    "keys": ["2", "J"],
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "2",
+      "J"
+    ],
     "expect_text": "line1 line2\nline3"
   }
 ]

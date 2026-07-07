@@ -3,56 +3,109 @@
     "id": 270,
     "name": "p pastes after cursor (charwise)",
     "text": "hllo",
-    "cursor": [0, 0],
-    "keys": ["x", "l", "p"],
-    "expect_text": "hlhlo"
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "x",
+      "l",
+      "p"
+    ],
+    "expect_text": "llho"
   },
   {
     "id": 271,
     "name": "P pastes before cursor (charwise)",
     "text": "hllo",
-    "cursor": [0, 0],
-    "keys": ["x", "l", "P"],
-    "expect_text": "hhllo"
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "x",
+      "l",
+      "P"
+    ],
+    "expect_text": "lhlo"
   },
   {
     "id": 272,
     "name": "p pastes line below (linewise yank)",
     "text": "line1\nline2",
-    "cursor": [0, 0],
-    "keys": ["y", "y", "p"],
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "y",
+      "y",
+      "p"
+    ],
     "expect_text": "line1\nline1\nline2"
   },
   {
     "id": 273,
     "name": "P pastes line above (linewise yank)",
     "text": "line1\nline2",
-    "cursor": [1, 0],
-    "keys": ["y", "y", "P"],
+    "cursor": [
+      1,
+      0
+    ],
+    "keys": [
+      "y",
+      "y",
+      "P"
+    ],
     "expect_text": "line1\nline2\nline2"
   },
   {
     "id": 274,
     "name": "xp transposes two characters",
     "text": "ab",
-    "cursor": [0, 0],
-    "keys": ["x", "p"],
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "x",
+      "p"
+    ],
     "expect_text": "ba"
   },
   {
     "id": 275,
     "name": "ddp swaps two lines",
     "text": "line1\nline2\nline3",
-    "cursor": [0, 0],
-    "keys": ["d", "d", "p"],
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "d",
+      "d",
+      "p"
+    ],
     "expect_text": "line2\nline1\nline3"
   },
   {
     "id": 276,
     "name": "diw then P replaces word",
     "text": "old new",
-    "cursor": [0, 4],
-    "keys": ["y", "i", "w", "b", "v", "i", "w", "p"],
+    "cursor": [
+      0,
+      4
+    ],
+    "keys": [
+      "y",
+      "i",
+      "w",
+      "b",
+      "v",
+      "i",
+      "w",
+      "p"
+    ],
     "expect_text": "new new"
   }
 ]

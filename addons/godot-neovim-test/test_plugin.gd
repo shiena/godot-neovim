@@ -19,6 +19,64 @@ func _enter_tree() -> void:
 	dock = _create_dock()
 	add_control_to_dock(DOCK_SLOT_RIGHT_BL, dock)
 	_find_neovim_plugin()
+	if OS.get_environment("GODOT_NEOVIM_TEST_AUTORUN") != "":
+		_autorun.call_deferred()
+
+
+## Headless-ish CI entry point: when GODOT_NEOVIM_TEST_AUTORUN is set, open the
+## sandbox script (or GODOT_NEOVIM_TEST_SCRIPT), run the whole suite
+## (or only GODOT_NEOVIM_TEST_CATEGORY), then quit the editor. Results land in
+## user://godot_neovim_test_results.json as usual.
+func _autorun() -> void:
+	# Give the editor and the neovim plugin time to finish starting up.
+	await get_tree().create_timer(3.0).timeout
+	# Deterministic indent behavior for indent-sensitive tests (Ctrl+T/Ctrl+D
+	# expect 4-space steps): force Spaces/4 regardless of local settings.
+	# convert_indent_on_save MUST be off: the editor saves every open script
+	# on quit, and with conversion enabled that rewrites their indentation
+	# on disk (real project files!) as collateral damage.
+	var es := EditorInterface.get_editor_settings()
+	es.set_setting("text_editor/behavior/indent/type", 1)  # 1 = Spaces
+	es.set_setting("text_editor/behavior/indent/size", 4)
+	es.set_setting("text_editor/behavior/files/convert_indent_on_save", false)
+	var script_path := OS.get_environment("GODOT_NEOVIM_TEST_SCRIPT")
+	if script_path == "":
+		script_path = "res://addons/godot-neovim-test/sandbox.gd"
+	var res := load(script_path)
+	if res:
+		EditorInterface.edit_resource(res)
+	await get_tree().create_timer(1.0).timeout
+	# Focus the CodeEdit so the neovim plugin's focus-based editor detection
+	# tracks the same CodeEdit the tests mutate (the window may be unfocused
+	# when launched from a script).
+	var se := EditorInterface.get_script_editor()
+	if se and se.get_current_editor():
+		var ce := se.get_current_editor().get_base_editor()
+		if ce:
+			ce.grab_focus()
+	await get_tree().create_timer(1.0).timeout
+	if not _prepare_runner():
+		print("[godot-neovim-test] autorun: neovim plugin not found, aborting")
+		get_tree().quit(1)
+		return
+	var test_id := OS.get_environment("GODOT_NEOVIM_TEST_ID")
+	var category := OS.get_environment("GODOT_NEOVIM_TEST_CATEGORY")
+	if test_id != "":
+		await runner.run_test(int(test_id))
+	elif category != "":
+		await runner.run_filtered(category, "")
+	else:
+		await runner.run_tests()
+	await get_tree().create_timer(0.5).timeout
+	# Restore the sandbox buffer to its on-disk content so the editor's
+	# save-on-quit doesn't overwrite the file with test residue.
+	var se_restore := EditorInterface.get_script_editor()
+	if se_restore and se_restore.get_current_editor():
+		var ce_restore := se_restore.get_current_editor().get_base_editor()
+		if ce_restore:
+			ce_restore.set_text(FileAccess.get_file_as_string(script_path))
+	print("[godot-neovim-test] autorun: done, quitting")
+	get_tree().quit()
 
 
 func _exit_tree() -> void:
