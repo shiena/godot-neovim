@@ -68,13 +68,22 @@ func _autorun() -> void:
 	else:
 		await runner.run_tests()
 	await get_tree().create_timer(0.5).timeout
-	# Restore the sandbox buffer to its on-disk content so the editor's
-	# save-on-quit doesn't overwrite the file with test residue.
-	var se_restore := EditorInterface.get_script_editor()
-	if se_restore and se_restore.get_current_editor():
-		var ce_restore := se_restore.get_current_editor().get_base_editor()
-		if ce_restore:
-			ce_restore.set_text(FileAccess.get_file_as_string(script_path))
+	# Restore the sandbox buffers to their on-disk content so the editor's
+	# save-on-quit doesn't overwrite the files with test residue. sandbox_b
+	# first, then the primary sandbox so it ends up as the current tab.
+	for restore_path in ["res://addons/godot-neovim-test/sandbox_b.gd", script_path]:
+		if not ResourceLoader.exists(restore_path):
+			continue
+		var restore_res = load(restore_path)
+		if not restore_res:
+			continue
+		EditorInterface.edit_resource(restore_res)
+		await get_tree().create_timer(0.3).timeout
+		var se_restore := EditorInterface.get_script_editor()
+		if se_restore and se_restore.get_current_editor():
+			var ce_restore := se_restore.get_current_editor().get_base_editor()
+			if ce_restore:
+				ce_restore.set_text(FileAccess.get_file_as_string(restore_path))
 	print("[godot-neovim-test] autorun: done, quitting")
 	get_tree().quit()
 

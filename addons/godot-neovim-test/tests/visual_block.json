@@ -1,0 +1,112 @@
+[
+  {
+    "id": 620,
+    "name": "Ctrl+V enters visual block mode",
+    "text": "abc",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "<C-v>"
+    ],
+    "expect_mode": "\u0016"
+  },
+  {
+    "id": 621,
+    "name": "block delete removes 2x2 region",
+    "text": "abc\ndef",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "<C-v>",
+      "j",
+      "l",
+      "d"
+    ],
+    "expect_text": "c\nf"
+  },
+  {
+    "id": 622,
+    "name": "block insert with I prepends to all lines",
+    "text": "abc\ndef",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "<C-v>",
+      "j",
+      "I",
+      "X",
+      "<Esc>"
+    ],
+    "expect_text": "Xabc\nXdef",
+    "expect_mode": "n"
+  },
+  {
+    "id": 623,
+    "name": "block yank and paste duplicates column",
+    "text": "ab\ncd",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "<C-v>",
+      "j",
+      "y",
+      "p"
+    ],
+    "expect_text": "aab\nccd"
+  },
+  {
+    "id": 624,
+    "name": "block append at line ends with $A",
+    "text": "abc\ndef",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "<C-v>",
+      "j",
+      "$",
+      "A",
+      "!",
+      "<Esc>"
+    ],
+    "expect_text": "abc!\ndef!",
+    "expect_mode": "n"
+  },
+  {
+    "id": 625,
+    "name": "v -> Ctrl+V switches to visual block",
+    "text": "abc",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "v",
+      "<C-v>"
+    ],
+    "expect_mode": "\u0016"
+  },
+  {
+    "id": 626,
+    "name": "Ctrl+V -> Esc returns to normal",
+    "text": "abc",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "<C-v>",
+      "<Esc>"
+    ],
+    "expect_mode": "n"
+  }
+]

@@ -14,6 +14,8 @@ extends Node
 ##                          {"send": "..."} → action_send_keys
 ##                          {"event": "BACKSPACE", "ctrl": true} → InputEventKey
 ##                          {"wait": 0.1} → delay seconds
+##                          {"open": "res://..."} → switch script editor tab
+##                            (optional "open_wait": settle time, default 0.6)
 ##   interval      float  Optional: delay between keys/events (default 0.05s)
 ##   sync_wait     float  Optional: post-keys Neovim sync wait (default 0.3s)
 ##   category      str    Optional: tag override (defaults to filename stem)
@@ -169,6 +171,17 @@ func _run_step(step: Dictionary, interval: float) -> void:
 		await get_tree().create_timer(interval).timeout
 	elif step.has("wait"):
 		await get_tree().create_timer(float(step.wait)).timeout
+	elif step.has("open"):
+		# Switch the script editor to another script (buffer-switching tests).
+		# The plugin's script-change processing is deferred with retries, so
+		# wait for it to settle before the next step.
+		_record_recent("open", String(step.open).get_file())
+		var res = load(String(step.open))
+		if res:
+			EditorInterface.edit_resource(res)
+		else:
+			_log("[color=yellow]Cannot load script: %s[/color]" % step.open)
+		await get_tree().create_timer(float(step.get("open_wait", 0.6))).timeout
 	else:
 		_log("[color=yellow]Unknown step type: %s[/color]" % JSON.stringify(step))
 
