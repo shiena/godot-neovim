@@ -1,0 +1,277 @@
+[
+  {
+    "id": 400,
+    "name": "j at last line stays on last line",
+    "text": "line1\nline2",
+    "cursor": [
+      1,
+      0
+    ],
+    "keys": [
+      "j"
+    ],
+    "expect_cursor": [
+      1,
+      0
+    ]
+  },
+  {
+    "id": 401,
+    "name": "k at first line stays on first line",
+    "text": "line1\nline2",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "k"
+    ],
+    "expect_cursor": [
+      0,
+      0
+    ]
+  },
+  {
+    "id": 402,
+    "name": "h at column 0 stays at column 0",
+    "text": "hello",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "h"
+    ],
+    "expect_cursor": [
+      0,
+      0
+    ]
+  },
+  {
+    "id": 403,
+    "name": "l at end of line stays at last char",
+    "text": "hi",
+    "cursor": [
+      0,
+      1
+    ],
+    "keys": [
+      "l"
+    ],
+    "expect_cursor": [
+      0,
+      1
+    ]
+  },
+  {
+    "id": 404,
+    "name": "dd on last remaining line leaves empty",
+    "text": "only",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "d",
+      "d"
+    ],
+    "expect_text": ""
+  },
+  {
+    "id": 405,
+    "name": "x on empty line does nothing",
+    "text": "",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "x"
+    ],
+    "expect_text": ""
+  },
+  {
+    "id": 406,
+    "name": "p on empty buffer pastes content",
+    "text": "hello",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "y",
+      "y",
+      "d",
+      "d",
+      "p"
+    ],
+    "expect_text": "\nhello",
+    "expect_cursor": [
+      1,
+      0
+    ]
+  },
+  {
+    "id": 407,
+    "name": "cursor stays valid after deleting long line",
+    "text": "short\nvery long line here\nend",
+    "cursor": [
+      1,
+      18
+    ],
+    "keys": [
+      "d",
+      "d"
+    ],
+    "expect_cursor": [
+      1,
+      2
+    ]
+  },
+  {
+    "id": 408,
+    "name": "j preserves desired column",
+    "text": "long line here\nhi\nlong line here",
+    "cursor": [
+      0,
+      10
+    ],
+    "keys": [
+      "j",
+      "j"
+    ],
+    "expect_cursor": [
+      2,
+      10
+    ]
+  },
+  {
+    "id": 409,
+    "name": "o on empty buffer creates new line",
+    "text": "",
+    "cursor": [
+      0,
+      0
+    ],
+    "expect_text": "\nhello",
+    "expect_mode": "n",
+    "steps": [
+      {
+        "send": "o"
+      },
+      {
+        "wait": 0.3
+      },
+      {
+        "event": "H"
+      },
+      {
+        "event": "E"
+      },
+      {
+        "event": "L"
+      },
+      {
+        "event": "L"
+      },
+      {
+        "event": "O"
+      },
+      {
+        "event": "ESCAPE"
+      }
+    ]
+  },
+  {
+    "id": 410,
+    "name": "yy + dd + P restores deleted line above",
+    "text": "line1\nline2\nline3",
+    "cursor": [
+      1,
+      0
+    ],
+    "keys": [
+      "y",
+      "y",
+      "d",
+      "d",
+      "P"
+    ],
+    "expect_text": "line1\nline2\nline3"
+  },
+  {
+    "id": 411,
+    "name": "ci( with empty parens inserts",
+    "text": "func()",
+    "cursor": [
+      0,
+      4
+    ],
+    "keys": [
+      "c",
+      "i",
+      "(",
+      "arg",
+      "<Esc>"
+    ],
+    "expect_text": "func(arg)"
+  },
+  {
+    "id": 412,
+    "name": "% on non-bracket finds next bracket",
+    "text": "hello (world)",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "%"
+    ],
+    "expect_cursor": [
+      0,
+      12
+    ]
+  },
+  {
+    "id": 413,
+    "name": "insert mode with special characters",
+    "text": "",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "i",
+      "a",
+      " ",
+      "&",
+      "&",
+      " ",
+      "b",
+      " ",
+      "|",
+      "|",
+      " ",
+      "c",
+      "<Esc>"
+    ],
+    "expect_text": "a && b || c",
+    "expect_mode": "n"
+  },
+  {
+    "id": 414,
+    "name": "multiline dd + u preserves all lines",
+    "text": "line1\nline2\nline3\nline4\nline5",
+    "cursor": [
+      1,
+      0
+    ],
+    "keys": [
+      "3",
+      "d",
+      "d",
+      "u"
+    ],
+    "expect_text": "line1\nline2\nline3\nline4\nline5"
+  }
+]

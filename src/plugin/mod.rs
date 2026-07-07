@@ -222,6 +222,13 @@ pub struct GodotNeovimPlugin {
     /// Pending macro operation: Some('q') for record, Some('@') for play
     #[init(val = None)]
     pending_macro_op: Option<char>,
+    /// Set to true after `<C-r>` in insert/replace mode while waiting for
+    /// the register-name keystroke. The next key event is captured by the
+    /// pending handler and sent as `<C-r>{reg}` atomically — preventing the
+    /// register-name char from being inserted into Godot's buffer as text.
+    /// Mirrors the normal-mode `selected_register` pattern.
+    #[init(val = false)]
+    pending_insert_register: bool,
     /// Named registers storage: char -> content
     #[init(val = HashMap::new())]
     registers: HashMap<char, String>,
@@ -371,6 +378,16 @@ pub struct GodotNeovimPlugin {
     /// This enables GDScript-based keybinding customization without recompiling the GDExtension.
     #[init(val = None)]
     input_handler: Option<Callable>,
+    /// Insert-mode keys whose GDScript keymap binding differs from the default
+    /// action_send_keys. Registered by godot_neovim_input.gd via
+    /// set_custom_dispatch_keys(). These are routed through the (deferred)
+    /// GDScript dispatch; all other Ctrl/Alt insert-mode keys are sent to
+    /// Neovim synchronously to preserve keystroke ordering (see dispatch.rs).
+    #[init(val = std::collections::HashSet::new())]
+    custom_insert_keys: std::collections::HashSet<String>,
+    /// Replace-mode counterpart of custom_insert_keys.
+    #[init(val = std::collections::HashSet::new())]
+    custom_replace_keys: std::collections::HashSet<String>,
 }
 
 #[godot_api]
@@ -663,30 +680,42 @@ impl IEditorPlugin for GodotNeovimPlugin {
 
         // Handle insert mode
         if self.is_insert_mode() {
-            self.handle_insert_mode_input(&key_event);
+            let result = self.process_insert_key_event_impl(&key_event);
+            self.handle_dispatch_result(result);
             return;
         }
 
         // Handle replace mode
         if self.is_replace_mode() {
-            self.handle_replace_mode_input(&key_event);
+            let result = self.process_replace_key_event_impl(&key_event);
+            self.handle_dispatch_result(result);
             return;
         }
 
         // Handle normal/visual mode input
+        let result = self.process_key_event_impl(&key_event);
+        self.handle_dispatch_result(result);
+    }
+}
+
+impl GodotNeovimPlugin {
+    /// Execute a process_*_key_event_impl result that requests keymap dispatch.
+    /// With a GDScript handler registered, defer the lookup via call_deferred
+    /// (a direct Callable invocation would re-enter &mut self). Without one,
+    /// resolve against the built-in default keymap (input/builtin.rs).
+    fn handle_dispatch_result(&mut self, result: VarDictionary) {
+        if !result.get_or_nil("needs_dispatch").to::<bool>() {
+            return;
+        }
+        let resolved_key = result.get_or_nil("resolved_key");
+        let mode = result.get_or_nil("mode");
         if self.input_handler.is_some() {
-            // GDScript dispatch path: process key in Rust, defer keymap lookup to GDScript.
-            // Cannot call GDScript Callable directly here (re-entrant &mut self borrow).
-            let result = self.process_key_event_impl(&key_event);
-            if result.get_or_nil("needs_dispatch").to::<bool>() {
-                let resolved_key = result.get_or_nil("resolved_key");
-                let mode = result.get_or_nil("mode");
-                self.base_mut()
-                    .call_deferred("_dispatch_key_to_gdscript", &[resolved_key, mode]);
-            }
+            self.base_mut()
+                .call_deferred("_dispatch_key_to_gdscript", &[resolved_key, mode]);
         } else {
-            // Fallback: built-in Rust handling
-            self.handle_normal_mode_input(&key_event);
+            let mode = mode.to::<GString>().to_string();
+            let key = resolved_key.to::<GString>().to_string();
+            self.dispatch_key_builtin(&mode, &key);
         }
     }
 }
@@ -844,6 +873,66 @@ impl GodotNeovimPlugin {
         self.sync_cursor_to_neovim();
 
         crate::verbose_print!("[godot-neovim] Synced buffer after toggle comment");
+    }
+
+    /// Pushed Godot edits to Neovim during insert/replace mode.
+    ///
+    /// Connected to CodeEdit's `text_changed` signal. Without this, Neovim
+    /// would see only the buffer state from when insert mode was entered, so
+    /// commands like `<C-w>` or `<C-r>` would operate on stale text and the
+    /// ESC sync would discard any Neovim-side changes.
+    ///
+    /// Skips when:
+    /// - Not in insert/replace mode (nothing to sync — normal mode already
+    ///   uses Neovim as master).
+    /// - The change came from Neovim itself (`changed_by_nvim` flag), to
+    ///   avoid an echo loop with `apply_nvim_change`.
+    #[func]
+    fn on_text_changed_for_insert_sync(&mut self) {
+        if !self.is_insert_mode() && !self.is_replace_mode() {
+            return;
+        }
+        if self.sync_manager.is_changed_by_nvim() {
+            return;
+        }
+        self.sync_buffer_to_neovim_during_insert();
+    }
+
+    /// Deferred clear of the changed_by_nvim echo guard. Scheduled by
+    /// apply_nvim_change: Godot's TextEdit emits text_changed via
+    /// call_deferred, so the flag must survive until after that emission —
+    /// a synchronous clear would make the guard in
+    /// on_text_changed_for_insert_sync never observe it.
+    #[func]
+    fn _end_nvim_change_deferred(&mut self) {
+        self.sync_manager.end_nvim_change();
+    }
+
+    /// Register insert/replace-mode keys whose keymap binding differs from
+    /// the default action_send_keys. Called by godot_neovim_input.gd whenever
+    /// keymaps are (re)loaded or changed. Keys in this set are dispatched
+    /// through the GDScript keymap (call_deferred); all other Ctrl/Alt keys
+    /// in insert/replace mode are sent to Neovim synchronously so a plain
+    /// character typed in the same frame cannot overtake the command.
+    #[func]
+    fn set_custom_dispatch_keys(&mut self, mode: GString, keys: PackedStringArray) {
+        let set: std::collections::HashSet<String> =
+            keys.as_slice().iter().map(|s| s.to_string()).collect();
+        crate::verbose_print!(
+            "[godot-neovim] Custom dispatch keys for mode '{}': {:?}",
+            mode,
+            set
+        );
+        match mode.to_string().as_str() {
+            "i" => self.custom_insert_keys = set,
+            "R" => self.custom_replace_keys = set,
+            other => {
+                crate::verbose_print!(
+                    "[godot-neovim] set_custom_dispatch_keys: unsupported mode '{}'",
+                    other
+                );
+            }
+        }
     }
 
     /// Sync mouse selection to Neovim on mouse release
@@ -1443,18 +1532,48 @@ impl GodotNeovimPlugin {
 
         // Handle insert mode
         if self.is_insert_mode() {
-            self.handle_insert_mode_input(&key_event);
+            let result = self.process_insert_key_event_impl(&key_event);
+            self.consume_float_event_unless_pass_through(&result);
+            self.handle_dispatch_result(result);
             return;
         }
 
         // Handle replace mode
         if self.is_replace_mode() {
-            self.handle_replace_mode_input(&key_event);
+            let result = self.process_replace_key_event_impl(&key_event);
+            self.consume_float_event_unless_pass_through(&result);
+            self.handle_dispatch_result(result);
             return;
         }
 
         // Handle normal/visual mode input
-        self.handle_normal_mode_input(&key_event);
+        let result = self.process_key_event_impl(&key_event);
+        self.handle_dispatch_result(result);
+    }
+
+    /// In float windows, consume the gui_input event on the CodeEdit itself
+    /// unless the dispatcher asked for pass-through.
+    ///
+    /// mark_input_handled() (used by dispatch_handled/dispatch_key) calls
+    /// set_input_as_handled on the EditorPlugin's viewport — the MAIN window's
+    /// viewport — which does not stop a float window's CodeEdit from also
+    /// processing the key natively. Without this, a key the dispatcher already
+    /// handled in insert/replace mode (Esc, Ctrl commands, the register name
+    /// after <C-r>) is processed twice: once by us, once by the CodeEdit,
+    /// inserting stray characters that the insert sync then pushes to Neovim.
+    fn consume_float_event_unless_pass_through(&mut self, result: &VarDictionary) {
+        let pass_through = result
+            .get("pass_through")
+            .map(|v| v.to::<bool>())
+            .unwrap_or(false);
+        if pass_through {
+            return;
+        }
+        if let Some(ref mut editor) = self.current_editor {
+            if editor.is_instance_valid() {
+                editor.accept_event();
+            }
+        }
     }
 
     /// Check if current CodeEdit is in a float window
@@ -1598,13 +1717,15 @@ impl GodotNeovimPlugin {
 
         // Insert mode
         if self.is_insert_mode() {
-            self.handle_insert_mode_input(&event);
+            let result = self.process_insert_key_event_impl(&event);
+            self.handle_dispatch_result(result);
             return;
         }
 
         // Replace mode
         if self.is_replace_mode() {
-            self.handle_replace_mode_input(&event);
+            let result = self.process_replace_key_event_impl(&event);
+            self.handle_dispatch_result(result);
         }
     }
 
@@ -2159,6 +2280,7 @@ impl GodotNeovimPlugin {
 
         // Disconnect from gui_input signal
         self.disconnect_gui_input_signal();
+        self.disconnect_text_changed_signal();
 
         // Clear current editor reference
         self.current_editor = None;
@@ -2178,5 +2300,3 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] Plugin deactivated");
     }
 }
-
-// Note: handle_normal_mode_input moved to input/normal.rs

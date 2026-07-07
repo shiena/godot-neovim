@@ -1,0 +1,505 @@
+[
+  {
+    "id": 500,
+    "name": "Ctrl+BS in insert mode passes through to Godot (word delete)",
+    "text": "hello world",
+    "cursor": [
+      0,
+      0
+    ],
+    "steps": [
+      {
+        "send": "A"
+      },
+      {
+        "event": "BACKSPACE",
+        "ctrl": true
+      },
+      {
+        "send": "<Esc>"
+      }
+    ],
+    "expect_text": "hello ",
+    "expect_mode": "n"
+  },
+  {
+    "id": 501,
+    "name": "Ctrl+Delete in insert mode passes through to Godot (word delete forward)",
+    "text": "hello world",
+    "cursor": [
+      0,
+      0
+    ],
+    "steps": [
+      {
+        "send": "i"
+      },
+      {
+        "event": "DELETE",
+        "ctrl": true
+      },
+      {
+        "send": "<Esc>"
+      }
+    ],
+    "expect_text": " world",
+    "expect_mode": "n"
+  },
+  {
+    "id": 502,
+    "name": "Ctrl+Left in insert mode passes through to Godot (word back)",
+    "text": "hello world",
+    "cursor": [
+      0,
+      11
+    ],
+    "steps": [
+      {
+        "send": "i"
+      },
+      {
+        "event": "LEFT",
+        "ctrl": true
+      },
+      {
+        "event": "ESCAPE"
+      }
+    ],
+    "expect_text": "hello world",
+    "expect_mode": "n",
+    "expect_cursor": [
+      0,
+      5
+    ]
+  },
+  {
+    "id": 503,
+    "name": "Ctrl+Right in insert mode passes through to Godot (word forward)",
+    "text": "hello world",
+    "cursor": [
+      0,
+      0
+    ],
+    "steps": [
+      {
+        "send": "i"
+      },
+      {
+        "event": "RIGHT",
+        "ctrl": true
+      },
+      {
+        "send": "<Esc>"
+      }
+    ],
+    "expect_text": "hello world",
+    "expect_mode": "n",
+    "expect_cursor": [
+      0,
+      5
+    ]
+  },
+  {
+    "id": 504,
+    "name": "Ctrl+Home in insert mode passes through to Godot (file start)",
+    "text": "line 1\nline 2\nline 3",
+    "cursor": [
+      2,
+      6
+    ],
+    "steps": [
+      {
+        "send": "i"
+      },
+      {
+        "event": "HOME",
+        "ctrl": true
+      },
+      {
+        "event": "ESCAPE"
+      }
+    ],
+    "expect_text": "line 1\nline 2\nline 3",
+    "expect_mode": "n",
+    "expect_cursor": [
+      0,
+      0
+    ]
+  },
+  {
+    "id": 505,
+    "name": "Ctrl+End in insert mode passes through to Godot (file end)",
+    "text": "line 1\nline 2\nline 3",
+    "cursor": [
+      0,
+      0
+    ],
+    "steps": [
+      {
+        "send": "i"
+      },
+      {
+        "event": "END",
+        "ctrl": true
+      },
+      {
+        "send": "<Esc>"
+      }
+    ],
+    "expect_mode": "n",
+    "expect_cursor": [
+      2,
+      6
+    ]
+  },
+  {
+    "id": 510,
+    "name": "Ctrl+R \" pastes default register in insert mode",
+    "text": "hello\nworld",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "y",
+      "i",
+      "w",
+      "j",
+      "A",
+      " ",
+      "<C-r>",
+      "\"",
+      "<Esc>"
+    ],
+    "expect_text": "hello\nworld hello",
+    "expect_mode": "n"
+  },
+  {
+    "id": 511,
+    "name": "Ctrl+R a pastes named register in insert mode",
+    "text": "alpha\nbeta",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "\"",
+      "a",
+      "y",
+      "i",
+      "w",
+      "j",
+      "A",
+      " ",
+      "<C-r>",
+      "a",
+      "<Esc>"
+    ],
+    "expect_text": "alpha\nbeta alpha",
+    "expect_mode": "n"
+  },
+  {
+    "id": 512,
+    "name": "Ctrl+R then ESC cancels register paste without inserting",
+    "text": "hello",
+    "cursor": [
+      0,
+      5
+    ],
+    "expect_text": "hello",
+    "expect_mode": "n",
+    "steps": [
+      {
+        "send": "A"
+      },
+      {
+        "event": "R",
+        "ctrl": true
+      },
+      {
+        "event": "ESCAPE"
+      }
+    ]
+  },
+  {
+    "id": 513,
+    "name": "Pending insert register state is set after Ctrl+R",
+    "text": "hello",
+    "cursor": [
+      0,
+      5
+    ],
+    "steps": [
+      {
+        "send": "A"
+      },
+      {
+        "event": "R",
+        "ctrl": true
+      }
+    ],
+    "expect_pending_insert_register": true
+  },
+  {
+    "id": 514,
+    "name": "Pending insert register state clears after register name",
+    "text": "hello\n",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "y",
+      "i",
+      "w",
+      "A",
+      "<C-r>",
+      "\""
+    ],
+    "expect_pending_insert_register": false
+  },
+  {
+    "id": 520,
+    "name": "Ctrl+W in insert mode deletes word backward (Neovim sync)",
+    "text": "",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "i",
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d",
+      "<C-w>",
+      "<Esc>"
+    ],
+    "expect_text": "hello ",
+    "expect_mode": "n"
+  },
+  {
+    "id": 521,
+    "name": "Ctrl+U in insert mode deletes to line start (Neovim sync)",
+    "text": "",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "i",
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d",
+      "<C-u>",
+      "<Esc>"
+    ],
+    "expect_text": "",
+    "expect_mode": "n"
+  },
+  {
+    "id": 522,
+    "name": "Ctrl+H in insert mode is backspace (Neovim sync)",
+    "text": "",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "i",
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      "<C-h>",
+      "<Esc>"
+    ],
+    "expect_text": "hell",
+    "expect_mode": "n"
+  },
+  {
+    "id": 530,
+    "name": "Ctrl+O runs one normal command then returns to insert",
+    "text": "alpha beta gamma",
+    "cursor": [
+      0,
+      6
+    ],
+    "keys": [
+      "i",
+      "<C-o>",
+      "d",
+      "w",
+      "X",
+      "<Esc>"
+    ],
+    "expect_text": "alpha Xgamma",
+    "expect_mode": "n"
+  },
+  {
+    "id": 540,
+    "name": "Ctrl+T adds an indent step",
+    "text": "func test():\n    pass",
+    "cursor": [
+      1,
+      4
+    ],
+    "keys": [
+      "I",
+      "<C-t>",
+      "<Esc>"
+    ],
+    "expect_text": "func test():\n        pass",
+    "expect_mode": "n"
+  },
+  {
+    "id": 541,
+    "name": "Ctrl+D removes an indent step",
+    "text": "func test():\n        pass",
+    "cursor": [
+      1,
+      8
+    ],
+    "keys": [
+      "I",
+      "<C-d>",
+      "<Esc>"
+    ],
+    "expect_text": "func test():\n    pass",
+    "expect_mode": "n"
+  },
+  {
+    "id": 550,
+    "name": "Replace mode Ctrl+BS passes through to Godot",
+    "text": "hello world",
+    "cursor": [
+      0,
+      11
+    ],
+    "steps": [
+      {
+        "send": "R"
+      },
+      {
+        "event": "BACKSPACE",
+        "ctrl": true
+      },
+      {
+        "send": "<Esc>"
+      }
+    ],
+    "expect_text": "hello d",
+    "expect_mode": "n"
+  },
+  {
+    "id": 551,
+    "name": "Replace mode Ctrl+W restores original text (Neovim sync)",
+    "text": "hello world",
+    "cursor": [
+      0,
+      11
+    ],
+    "steps": [
+      {
+        "send": "R"
+      },
+      {
+        "send": "<C-w>"
+      },
+      {
+        "send": "<Esc>"
+      }
+    ],
+    "expect_text": "hello world",
+    "expect_mode": "n"
+  },
+  {
+    "id": 552,
+    "name": "Replace mode Ctrl+R pastes register",
+    "text": "alpha beta\n",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "\"",
+      "a",
+      "y",
+      "i",
+      "w",
+      "j",
+      "0",
+      "R",
+      "<C-r>",
+      "a",
+      "<Esc>"
+    ],
+    "expect_text": "alpha beta\nalpha",
+    "expect_mode": "n"
+  },
+  {
+    "id": 560,
+    "name": "Plain typing in insert mode syncs to Neovim before Ctrl+W",
+    "text": "",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "i",
+      "f",
+      "o",
+      "o",
+      " ",
+      "b",
+      "a",
+      "r"
+    ],
+    "expect_macro_buffer": [
+      "f",
+      "o",
+      "o",
+      " ",
+      "b",
+      "a",
+      "r"
+    ]
+  },
+  {
+    "id": 561,
+    "name": "Ctrl+W after fast typing operates on freshly synced buffer",
+    "text": "",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "i",
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      "<C-w>",
+      "<Esc>"
+    ],
+    "expect_text": "",
+    "expect_mode": "n"
+  }
+]

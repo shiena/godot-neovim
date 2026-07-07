@@ -1,0 +1,116 @@
+[
+  {
+    "id": 160,
+    "name": "v + d deletes selection",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["v", "e", "d"],
+    "expect_text": " world",
+    "expect_mode": "n"
+  },
+  {
+    "id": 161,
+    "name": "v + y yanks and p pastes selection",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["v", "e", "y", "$", "p"],
+    "expect_text": "hello worldhello"
+  },
+  {
+    "id": 162,
+    "name": "V + d deletes entire line",
+    "text": "line1\nline2\nline3",
+    "cursor": [1, 0],
+    "keys": ["V", "d"],
+    "expect_text": "line1\nline3",
+    "expect_mode": "n"
+  },
+  {
+    "id": 163,
+    "name": "V + y + p duplicates line",
+    "text": "hello\nworld",
+    "cursor": [0, 0],
+    "keys": ["V", "y", "p"],
+    "expect_text": "hello\nhello\nworld"
+  },
+  {
+    "id": 164,
+    "name": "v + c changes selection",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["v", "e", "c", "hi", "<Esc>"],
+    "expect_text": "hi world",
+    "expect_mode": "n"
+  },
+  {
+    "id": 165,
+    "name": "v + ~ toggles case of selection",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["v", "e", "~"],
+    "expect_text": "HELLO",
+    "expect_mode": "n"
+  },
+  {
+    "id": 166,
+    "name": "V + > indents selected line",
+    "text": "hello\nworld",
+    "cursor": [0, 0],
+    "keys": ["V", ">"],
+    "expect_mode": "n"
+  },
+  {
+    "id": 167,
+    "name": "v + o toggles selection anchor",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["v", "l", "l", "l", "o"],
+    "expect_cursor": [0, 0],
+    "expect_mode": "v"
+  },
+  {
+    "id": 168,
+    "name": "V selects multiple lines with j",
+    "text": "line1\nline2\nline3\nline4",
+    "cursor": [1, 0],
+    "keys": ["V", "j", "d"],
+    "expect_text": "line1\nline4",
+    "expect_mode": "n"
+  },
+  {
+    "id": 169,
+    "name": "v + iw selects inner word",
+    "text": "hello world foo",
+    "cursor": [0, 6],
+    "keys": ["v", "i", "w", "d"],
+    "expect_text": "hello  foo",
+    "expect_mode": "n"
+  },
+  {
+    "id": 170,
+    "name": "v + u lowercases selection",
+    "text": "HELLO",
+    "cursor": [0, 0],
+    "keys": ["v", "e", "u"],
+    "expect_text": "hello",
+    "expect_mode": "n"
+  },
+  {
+    "id": 171,
+    "name": "v + U uppercases selection",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["v", "e", "U"],
+    "expect_text": "HELLO",
+    "expect_mode": "n"
+  },
+  {
+    "id": 172,
+    "name": "gv reselects last visual selection and deletes",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["v", "e", "<Esc>", "g", "v", "d"],
+    "expect_text": " world",
+    "expect_mode": "n"
+  }
+]

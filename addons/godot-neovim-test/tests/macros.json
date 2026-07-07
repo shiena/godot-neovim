@@ -1,0 +1,36 @@
+[
+  {
+    "id": 290,
+    "name": "qa records macro, @a plays it",
+    "text": "hello\nhello\nhello",
+    "cursor": [0, 0],
+    "keys": ["q", "a", "I", "# ", "<Esc>", "j", "q", "@", "a"],
+    "expect_text": "# hello\n# hello\nhello",
+    "expect_mode": "n"
+  },
+  {
+    "id": 291,
+    "name": "@@ repeats last macro",
+    "text": "hello\nhello\nhello",
+    "cursor": [0, 0],
+    "keys": ["q", "a", "I", "# ", "<Esc>", "j", "q", "@", "a", "@", "@"],
+    "expect_text": "# hello\n# hello\n# hello",
+    "expect_mode": "n"
+  },
+  {
+    "id": 292,
+    "name": "2@a plays macro twice",
+    "text": "aaa\nbbb\nccc\nddd",
+    "cursor": [0, 0],
+    "keys": ["q", "a", "d", "d", "q", "2", "@", "a"],
+    "expect_text": "ddd"
+  },
+  {
+    "id": 293,
+    "name": "macro with append (A)",
+    "text": "line1\nline2\nline3",
+    "cursor": [0, 0],
+    "keys": ["q", "b", "A", "!", "<Esc>", "j", "q", "2", "@", "b"],
+    "expect_text": "line1!\nline2!\nline3!"
+  }
+]

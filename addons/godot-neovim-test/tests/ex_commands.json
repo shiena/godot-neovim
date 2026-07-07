@@ -1,0 +1,81 @@
+[
+  {
+    "id": 380,
+    "name": ":3 goes to line 3",
+    "text": "line1\nline2\nline3\nline4",
+    "cursor": [0, 0],
+    "keys": [":", "3", "<CR>"],
+    "expect_cursor": [2, 0],
+    "expect_mode": "n"
+  },
+  {
+    "id": 381,
+    "name": ":s substitutes on current line",
+    "text": "hello hello",
+    "cursor": [0, 0],
+    "keys": [":", "s", "/", "h", "e", "l", "l", "o", "/", "w", "o", "r", "l", "d", "/", "<CR>"],
+    "expect_text": "world hello",
+    "expect_mode": "n"
+  },
+  {
+    "id": 382,
+    "name": ":s with g flag replaces all on line",
+    "text": "hello hello hello",
+    "cursor": [0, 0],
+    "keys": [":", "s", "/", "h", "e", "l", "l", "o", "/", "w", "o", "r", "l", "d", "/", "g", "<CR>"],
+    "expect_text": "world world world",
+    "expect_mode": "n"
+  },
+  {
+    "id": 383,
+    "name": ":%s replaces in entire file",
+    "text": "foo bar\nfoo baz\nfoo qux",
+    "cursor": [0, 0],
+    "keys": [":", "%", "s", "/", "f", "o", "o", "/", "x", "x", "x", "/", "g", "<CR>"],
+    "expect_text": "xxx bar\nxxx baz\nxxx qux",
+    "expect_mode": "n"
+  },
+  {
+    "id": 384,
+    "name": ":sort sorts all lines",
+    "text": "cherry\napple\nbanana",
+    "cursor": [0, 0],
+    "keys": [":", "s", "o", "r", "t", "<CR>"],
+    "expect_text": "apple\nbanana\ncherry",
+    "expect_mode": "n"
+  },
+  {
+    "id": 385,
+    "name": ":t copies line to after target",
+    "text": "line1\nline2\nline3",
+    "cursor": [0, 0],
+    "keys": [":", "1", "t", "3", "<CR>"],
+    "expect_text": "line1\nline2\nline3\nline1"
+  },
+  {
+    "id": 386,
+    "name": ":m moves line to after target",
+    "text": "line1\nline2\nline3",
+    "cursor": [0, 0],
+    "keys": [":", "1", "m", "3", "<CR>"],
+    "expect_text": "line2\nline3\nline1"
+  },
+  {
+    "id": 387,
+    "name": ":g/pattern/d deletes matching lines",
+    "text": "keep\ndelete_me\nkeep\ndelete_me",
+    "cursor": [0, 0],
+    "keys": [":", "g", "/", "d", "e", "l", "e", "t", "e", "/", "d", "<CR>"],
+    "expect_text": "keep\nkeep",
+    "expect_mode": "n"
+  },
+  {
+    "id": 388,
+    "name": ":v/pattern/d deletes non-matching lines",
+    "text": "keep\nremove\nkeep\nremove",
+    "cursor": [0, 0],
+    "keys": [":", "v", "/", "k", "e", "e", "p", "/", "d", "<CR>"],
+    "expect_text": "keep\nkeep",
+    "expect_mode": "n"
+  }
+]

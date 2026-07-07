@@ -65,10 +65,11 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 | | `Ctrl+A`/`Ctrl+X` (numbers) | ✅ | ❌ |
 | | `ga`, `gq`/`gw` | ✅ | ✅ |
 | | Visual block insert (`I`/`A`) | ❌ | ✅ |
-| **Insert Mode** | `Ctrl+W`/`Ctrl+U` (delete) | ❌ | ✅ |
-| | `Ctrl+R` (insert from register) | ❌ | ✅ |
-| | `Ctrl+A` (re-insert last text) | ❌ | ✅ |
-| | `Ctrl+T`/`Ctrl+D` (indent) | ❌ | ✅ |
+| **Insert Mode** | `Ctrl+W`/`Ctrl+U`/`Ctrl+H` (delete) | ✅ | ✅ |
+| | `Ctrl+R` (insert from register) | ✅ | ✅ |
+| | `Ctrl+A` (re-insert last text) | ✅ | ✅ |
+| | `Ctrl+T`/`Ctrl+D` (indent) | ✅ | ✅ |
+| | `Ctrl+O` (one normal command) | ✅ | ❌ |
 | **Text Objects** | Words, quotes, brackets | ✅ | ✅ |
 | | Sentence (`is`, `as`), Paragraph (`ip`, `ap`) | ✅ | ✅ |
 | | Entire buffer (`ie`, `ae`) | ✅ | ✅ |
@@ -227,9 +228,24 @@ Custom mappings are persisted in `Editor Settings` under `godot_neovim/custom_ke
 ## Exporting Projects
 
 > [!IMPORTANT]
-> This is an **editor-only** plugin. It does not include libraries for export platforms (iOS, Android, Web, etc.), so Godot will show a warning about missing GDExtension libraries when exporting.
+> This is an **editor-only** plugin. Its `.gdextension` only declares `editor`-tagged libraries, so it ships no binaries for export platforms (iOS, Android, Web, etc.).
 >
-> To suppress this warning, add `addons/godot-neovim/*` to the **Exclude Filter** in your export preset's **Resources** tab.
+> If you export a project **without excluding this addon**, the `.gdextension` file is still packaged and stays registered in `.godot/extension_list.cfg`. The exported game then tries to load it at startup and fails. For example, a Web build opened in a browser logs:
+>
+> ```
+> ERROR: No GDExtension library found for current OS and architecture (web.wasm32)
+>        in configuration file: res://addons/godot-neovim/godot-neovim.gdextension
+> ERROR: GDExtension dynamic library not found: 'res://addons/godot-neovim/godot-neovim.gdextension'.
+> ERROR: Error loading extension: 'res://addons/godot-neovim/godot-neovim.gdextension'.
+> ```
+>
+> To prevent this, exclude the addon from every export preset:
+>
+> 1. Open **Project > Export…**
+> 2. Select your export preset and switch to the **Resources** tab
+> 3. Add `addons/godot-neovim/*` to the **Filters to exclude files/folders from project** field (`exclude_filter` in `export_presets.cfg`)
+>
+> On **Godot 4.4+**, excluding via this filter also drops the entry from `extension_list.cfg` automatically ([godotengine/godot#97216](https://github.com/godotengine/godot/pull/97216)), so the exported game no longer attempts to load the extension. Excluding with an `EditorExportPlugin.skip()` does **not** clean up `extension_list.cfg` ([godotengine/godot#99698](https://github.com/godotengine/godot/issues/99698)), which is why the resource filter above is the recommended approach.
 
 ## Usage
 
@@ -514,18 +530,30 @@ This plugin has architectural limitations due to using Godot's native CodeEdit f
 
 ### Insert Mode
 
-Insert mode uses Godot's native input system to support auto-completion and other editor features. As a result, Vim's insert mode commands are **not available**:
+Insert mode uses Godot's native input system for text editing (to keep auto-completion, IME, and undo working), while still forwarding Vim's insert-mode commands to Neovim. The plugin pushes the current Godot buffer to Neovim before each `Ctrl`/`Alt`-modified key so commands operate on the up-to-date text.
 
-| Not Supported | Description |
-|---------------|-------------|
-| `Ctrl+O` | Execute one normal mode command |
-| `Ctrl+W` | Delete word backward |
-| `Ctrl+U` | Delete to start of line |
-| `Ctrl+R` | Insert from register |
-| `Ctrl+A` | Insert previously inserted text |
-| `Ctrl+N/P` | Keyword completion (use Godot's auto-completion instead) |
+**Supported Vim insert-mode commands**: `Ctrl+W`, `Ctrl+U`, `Ctrl+H`, `Ctrl+R{reg}`, `Ctrl+O`, `Ctrl+T`, `Ctrl+D`, `Ctrl+V`, `Ctrl+K`, `Ctrl+A`, `Ctrl+Y`, `Ctrl+E`.
 
-**Macro recording in insert mode**: Character inputs are recorded from key events. IME compositions (e.g., Japanese input) are recorded as final confirmed characters only, not intermediate states.
+**Keys passed through to Godot's CodeEdit** (cannot be remapped to send to Neovim):
+
+| Key | Godot native action |
+|-----|---------------------|
+| `Ctrl+Backspace` / `Ctrl+Delete` | Delete word backward / forward |
+| `Ctrl+Left` / `Ctrl+Right` | Move by word |
+| `Ctrl+Up` / `Ctrl+Down` | Move/scroll by line |
+| `Ctrl+Home` / `Ctrl+End` | Jump to file start / end |
+| `Ctrl+PageUp` / `Ctrl+PageDown` | Jump by page |
+| `Alt`-modified variants of the above | Same as `Ctrl` variants where Godot supports them |
+
+**Known limitations within insert mode**:
+
+| Limitation | Detail |
+|-----------|--------|
+| `Ctrl+N` / `Ctrl+P` (Neovim completion) | Forwarded to Neovim, but Godot's native auto-completion popup is usually preferred. The two completion systems do not interact. |
+| `<C-r>=` (expression register) | Opens Neovim's expression command line, which Godot is not aware of — typed text goes to Godot instead of Neovim's prompt. |
+| `<C-r><C-r>{reg}` / `<C-r><C-o>{reg}` / `<C-r><C-p>{reg}` | Not supported. The `<C-r>` prefix pending state clears after one key, so the variant modifier becomes the register name. |
+| Dot repeat (`.`) of inserted text | Only structural commands (e.g., `cw`) are replayed; the inserted text itself is not re-typed because Neovim doesn't see individual keystrokes. |
+| Macro recording with IME | Only confirmed characters are recorded; intermediate composition states are not captured. |
 
 ### Not Implemented
 

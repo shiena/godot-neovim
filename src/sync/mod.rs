@@ -2,8 +2,6 @@
 //!
 //! Implements changedtick-based synchronization with Neovim as master.
 
-use std::collections::HashMap;
-
 /// Buffer change event from Neovim
 #[derive(Debug, Clone)]
 pub struct BufLinesEvent {
@@ -43,9 +41,12 @@ pub struct SyncManager {
     /// Used to prevent echo (Godot change -> Neovim -> back to Godot)
     changed_by_nvim: bool,
 
-    /// Pending changes from Godot (tick -> change)
-    /// When Neovim confirms with changedtick, we check here to ignore echoes
-    pending_changes: HashMap<i64, DocumentChange>,
+    /// Highest changedtick produced by our own Godot→Neovim buffer pushes.
+    /// Any buf_lines/changedtick event at or below this watermark is stale:
+    /// either the echo of our own nvim_buf_set_lines, or an in-flight Neovim
+    /// edit that our full-buffer push has already overwritten on the Neovim
+    /// side (applying its delta to the diverged Godot buffer would corrupt it).
+    last_pushed_tick: i64,
 
     /// Buffer attached flag
     attached: bool,
@@ -62,7 +63,7 @@ impl SyncManager {
         Self {
             changedtick: -1,
             changed_by_nvim: false,
-            pending_changes: HashMap::new(),
+            last_pushed_tick: -1,
             attached: false,
             initial_sync_tick: None,
             nvim_line_count: 0,
@@ -73,7 +74,7 @@ impl SyncManager {
     pub fn reset(&mut self) {
         self.changedtick = -1;
         self.changed_by_nvim = false;
-        self.pending_changes.clear();
+        self.last_pushed_tick = -1;
         self.attached = false;
         self.initial_sync_tick = None;
         self.nvim_line_count = 0;
@@ -174,9 +175,13 @@ impl SyncManager {
         self.changedtick = tick;
     }
 
-    /// Check if change is an echo of our pending change
-    fn is_echo(&mut self, tick: i64) -> bool {
-        self.pending_changes.remove(&tick).is_some()
+    /// Check if an event is stale relative to our own pushes: either the echo
+    /// of a Godot→Neovim buffer push, or an older in-flight Neovim change that
+    /// the push has already overwritten on the Neovim side. Applying such an
+    /// event to Godot would either loop the echo back or corrupt the buffer
+    /// (its line range refers to a pre-push state).
+    fn is_echo(&self, tick: i64) -> bool {
+        tick <= self.last_pushed_tick
     }
 
     /// Set flag when applying Neovim change to Godot
@@ -187,6 +192,23 @@ impl SyncManager {
     /// Clear flag after applying Neovim change
     pub fn end_nvim_change(&mut self) {
         self.changed_by_nvim = false;
+    }
+
+    /// Read the changed_by_nvim flag. Used by Godot→Neovim sync paths
+    /// (e.g., text_changed handler in insert mode) to skip pushing changes
+    /// that originated from Neovim itself.
+    pub fn is_changed_by_nvim(&self) -> bool {
+        self.changed_by_nvim
+    }
+
+    /// Record the changedtick produced by a Godot→Neovim buffer push. Every
+    /// event at or below this watermark is dropped by `on_nvim_buf_lines`:
+    /// the push's own echo, and any in-flight Neovim edits from before the
+    /// push (whose state the full-buffer push has already overwritten).
+    pub fn mark_pushed_tick(&mut self, tick: i64) {
+        if tick > self.last_pushed_tick {
+            self.last_pushed_tick = tick;
+        }
     }
 }
 

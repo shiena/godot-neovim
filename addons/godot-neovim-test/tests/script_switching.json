@@ -1,0 +1,40 @@
+[
+  {
+    "id": 640,
+    "name": "edits survive switching away and back",
+    "text": "aaa\nbbb\nccc",
+    "cursor": [0, 0],
+    "steps": [
+      {"send": "d"},
+      {"send": "d"},
+      {"open": "res://addons/godot-neovim-test/sandbox_b.gd"},
+      {"open": "res://addons/godot-neovim-test/sandbox.gd"}
+    ],
+    "expect_text": "bbb\nccc"
+  },
+  {
+    "id": 641,
+    "name": "cursor position survives switching away and back",
+    "text": "l1\nl2\nl3\nl4",
+    "cursor": [0, 0],
+    "steps": [
+      {"send": "3"},
+      {"send": "j"},
+      {"open": "res://addons/godot-neovim-test/sandbox_b.gd"},
+      {"open": "res://addons/godot-neovim-test/sandbox.gd"}
+    ],
+    "expect_cursor": [3, 0]
+  },
+  {
+    "id": 642,
+    "name": "buffer content is intact after switch roundtrip",
+    "text": "AAA\nBBB",
+    "cursor": [0, 0],
+    "steps": [
+      {"open": "res://addons/godot-neovim-test/sandbox_b.gd"},
+      {"open": "res://addons/godot-neovim-test/sandbox.gd"}
+    ],
+    "expect_text": "AAA\nBBB",
+    "expect_mode": "n"
+  }
+]

@@ -236,6 +236,38 @@ impl GodotNeovimPlugin {
         }
     }
 
+    /// Connect to CodeEdit text_changed signal.
+    /// Used by insert/replace mode to push Godot edits to Neovim in real time
+    /// so commands like `<C-w>`, `<C-u>`, `<C-r>` operate on the current buffer.
+    /// The handler itself is a no-op in normal/visual mode, so it is safe to
+    /// keep connected for the editor's lifetime.
+    pub(super) fn connect_text_changed_signal(&mut self) {
+        let callable = self.base().callable("on_text_changed_for_insert_sync");
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        if !editor.is_connected("text_changed", &callable) {
+            editor.connect("text_changed", &callable);
+            crate::verbose_print!("[godot-neovim] Connected to text_changed signal");
+        }
+    }
+
+    /// Disconnect from CodeEdit text_changed signal.
+    pub(super) fn disconnect_text_changed_signal(&mut self) {
+        let callable = self.base().callable("on_text_changed_for_insert_sync");
+
+        let Some(ref mut editor) = self.current_editor else {
+            return;
+        };
+
+        if editor.is_connected("text_changed", &callable) {
+            editor.disconnect("text_changed", &callable);
+            crate::verbose_print!("[godot-neovim] Disconnected from text_changed signal");
+        }
+    }
+
     /// Connect to CodeEdit resized signal
     pub(super) fn connect_resized_signal(&mut self) {
         // Create callable first to avoid borrow conflicts

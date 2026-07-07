@@ -1,0 +1,90 @@
+[
+  {
+    "id": 600,
+    "name": "w moves over multibyte word",
+    "text": "こんにちは world",
+    "cursor": [0, 0],
+    "keys": ["w"],
+    "expect_cursor": [0, 6]
+  },
+  {
+    "id": 601,
+    "name": "x deletes multibyte char",
+    "text": "あいう",
+    "cursor": [0, 0],
+    "keys": ["x"],
+    "expect_text": "いう",
+    "expect_cursor": [0, 0]
+  },
+  {
+    "id": 602,
+    "name": "l moves by characters over multibyte",
+    "text": "あいう",
+    "cursor": [0, 0],
+    "keys": ["l", "l"],
+    "expect_cursor": [0, 2]
+  },
+  {
+    "id": 603,
+    "name": "$ moves to last multibyte char",
+    "text": "あいうえお",
+    "cursor": [0, 0],
+    "keys": ["$"],
+    "expect_cursor": [0, 4]
+  },
+  {
+    "id": 604,
+    "name": "ci( replaces multibyte content",
+    "text": "func(こんにちは)",
+    "cursor": [0, 0],
+    "keys": ["c", "i", "(", "abc", "<Esc>"],
+    "expect_text": "func(abc)",
+    "expect_cursor": [0, 7],
+    "expect_mode": "n"
+  },
+  {
+    "id": 605,
+    "name": "v + d deletes multibyte selection",
+    "text": "あいうえお",
+    "cursor": [0, 0],
+    "keys": ["v", "l", "l", "d"],
+    "expect_text": "えお",
+    "expect_cursor": [0, 0]
+  },
+  {
+    "id": 606,
+    "name": "dw deletes multibyte word",
+    "text": "こんにちは world",
+    "cursor": [0, 0],
+    "keys": ["d", "w"],
+    "expect_text": "world",
+    "expect_cursor": [0, 0]
+  },
+  {
+    "id": 607,
+    "name": "A appends after multibyte line",
+    "text": "あいう",
+    "cursor": [0, 0],
+    "keys": ["A", "!", "<Esc>"],
+    "expect_text": "あいう!",
+    "expect_cursor": [0, 3],
+    "expect_mode": "n"
+  },
+  {
+    "id": 608,
+    "name": "yy + p duplicates multibyte line",
+    "text": "日本語の行",
+    "cursor": [0, 0],
+    "keys": ["y", "y", "p"],
+    "expect_text": "日本語の行\n日本語の行",
+    "expect_cursor": [1, 0]
+  },
+  {
+    "id": 609,
+    "name": "f finds multibyte char",
+    "text": "abcあいうdef",
+    "cursor": [0, 0],
+    "keys": ["f", "あ"],
+    "expect_cursor": [0, 3]
+  }
+]

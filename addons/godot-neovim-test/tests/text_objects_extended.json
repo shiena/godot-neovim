@@ -1,0 +1,222 @@
+[
+  {
+    "id": 330,
+    "name": "ci[ changes inside brackets",
+    "text": "arr[old]",
+    "cursor": [
+      0,
+      5
+    ],
+    "keys": [
+      "c",
+      "i",
+      "[",
+      "new",
+      "<Esc>"
+    ],
+    "expect_text": "arr[new]",
+    "expect_mode": "n"
+  },
+  {
+    "id": 331,
+    "name": "ci{ changes inside braces",
+    "text": "func() {old}",
+    "cursor": [
+      0,
+      9
+    ],
+    "keys": [
+      "c",
+      "i",
+      "{",
+      "new",
+      "<Esc>"
+    ],
+    "expect_text": "func() {new}",
+    "expect_mode": "n"
+  },
+  {
+    "id": 332,
+    "name": "ci' changes inside single quotes",
+    "text": "var s = 'old'",
+    "cursor": [
+      0,
+      9
+    ],
+    "keys": [
+      "c",
+      "i",
+      "'",
+      "new",
+      "<Esc>"
+    ],
+    "expect_text": "var s = 'new'",
+    "expect_mode": "n"
+  },
+  {
+    "id": 333,
+    "name": "ci` changes inside backticks",
+    "text": "var s = `old`",
+    "cursor": [
+      0,
+      9
+    ],
+    "keys": [
+      "c",
+      "i",
+      "`",
+      "new",
+      "<Esc>"
+    ],
+    "expect_text": "var s = `new`",
+    "expect_mode": "n"
+  },
+  {
+    "id": 334,
+    "name": "da( deletes including parens",
+    "text": "call(arg)",
+    "cursor": [
+      0,
+      5
+    ],
+    "keys": [
+      "d",
+      "a",
+      "("
+    ],
+    "expect_text": "call"
+  },
+  {
+    "id": 335,
+    "name": "da\" deletes including double quotes",
+    "text": "say \"hello\" end",
+    "cursor": [
+      0,
+      6
+    ],
+    "keys": [
+      "d",
+      "a",
+      "\""
+    ],
+    "expect_text": "say end"
+  },
+  {
+    "id": 336,
+    "name": "di{ deletes inside braces multiline",
+    "text": "func() {\n    body\n}",
+    "cursor": [
+      1,
+      4
+    ],
+    "keys": [
+      "d",
+      "i",
+      "{"
+    ],
+    "expect_text": "func() {\n}"
+  },
+  {
+    "id": 337,
+    "name": "yiw yanks inner word, paste elsewhere",
+    "text": "hello world",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "y",
+      "i",
+      "w",
+      "A",
+      " ",
+      "<Esc>",
+      "p"
+    ],
+    "expect_text": "hello world hello"
+  },
+  {
+    "id": 338,
+    "name": "cib changes inside block (alias for ci()",
+    "text": "func(old)",
+    "cursor": [
+      0,
+      5
+    ],
+    "keys": [
+      "c",
+      "i",
+      "b",
+      "new",
+      "<Esc>"
+    ],
+    "expect_text": "func(new)",
+    "expect_mode": "n"
+  },
+  {
+    "id": 339,
+    "name": "ciB changes inside Block (alias for ci{)",
+    "text": "func {old}",
+    "cursor": [
+      0,
+      6
+    ],
+    "keys": [
+      "c",
+      "i",
+      "B",
+      "new",
+      "<Esc>"
+    ],
+    "expect_text": "func {new}",
+    "expect_mode": "n"
+  },
+  {
+    "id": 340,
+    "name": "dis deletes inner sentence",
+    "text": "First sentence. Second sentence.",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "d",
+      "i",
+      "s"
+    ],
+    "expect_text": " Second sentence."
+  },
+  {
+    "id": 341,
+    "name": "dip deletes inner paragraph",
+    "text": "para1 line1\npara1 line2\n\npara2 line1",
+    "cursor": [
+      0,
+      0
+    ],
+    "keys": [
+      "d",
+      "i",
+      "p"
+    ],
+    "expect_text": "\npara2 line1"
+  },
+  {
+    "id": 342,
+    "name": "nested text objects ci( inside ci{",
+    "text": "func {call(old)}",
+    "cursor": [
+      0,
+      12
+    ],
+    "keys": [
+      "c",
+      "i",
+      "(",
+      "new",
+      "<Esc>"
+    ],
+    "expect_text": "func {call(new)}",
+    "expect_mode": "n"
+  }
+]

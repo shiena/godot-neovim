@@ -389,6 +389,7 @@ impl GodotNeovimPlugin {
         // Disconnect from signals BEFORE closing to avoid
         // accessing freed CodeEdit instance
         self.disconnect_caret_changed_signal();
+        self.disconnect_text_changed_signal();
         self.disconnect_resized_signal();
 
         if self.current_editor_type == EditorType::Unknown {
@@ -461,6 +462,7 @@ impl GodotNeovimPlugin {
         // Disconnect from signals BEFORE clearing editor reference
         // to avoid accessing freed CodeEdit instance
         self.disconnect_caret_changed_signal();
+        self.disconnect_text_changed_signal();
         self.disconnect_resized_signal();
         self.disconnect_gui_input_signal();
 
@@ -495,6 +497,7 @@ impl GodotNeovimPlugin {
     pub(in crate::plugin) fn cmd_close_discard(&mut self) {
         // Disconnect from signals BEFORE closing
         self.disconnect_caret_changed_signal();
+        self.disconnect_text_changed_signal();
         self.disconnect_resized_signal();
 
         if self.current_editor_type == EditorType::Unknown {
@@ -606,6 +609,7 @@ impl GodotNeovimPlugin {
 
         // Disconnect from signals BEFORE closing
         self.disconnect_caret_changed_signal();
+        self.disconnect_text_changed_signal();
         self.disconnect_resized_signal();
 
         // Clear current editor reference since it will be freed

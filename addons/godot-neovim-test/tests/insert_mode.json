@@ -1,0 +1,73 @@
+[
+  {
+    "id": 360,
+    "name": "i enters insert mode",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["i"],
+    "expect_mode": "i"
+  },
+  {
+    "id": 361,
+    "name": "a appends after cursor",
+    "text": "hllo",
+    "cursor": [0, 0],
+    "keys": ["a", "e", "<Esc>"],
+    "expect_text": "hello",
+    "expect_mode": "n"
+  },
+  {
+    "id": 362,
+    "name": "Ctrl+W deletes previous word in insert mode",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["A", "<C-w>", "<Esc>"],
+    "expect_text": "hello ",
+    "expect_mode": "n"
+  },
+  {
+    "id": 363,
+    "name": "Ctrl+U deletes to start of line in insert mode",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["A", "<C-u>", "<Esc>"],
+    "expect_text": "",
+    "expect_mode": "n"
+  },
+  {
+    "id": 364,
+    "name": "Ctrl+H is backspace in insert mode",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["A", "<C-h>", "<Esc>"],
+    "expect_text": "hell",
+    "expect_mode": "n"
+  },
+  {
+    "id": 365,
+    "name": "Esc returns to normal mode from insert",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keys": ["i", "x", "<Esc>"],
+    "expect_text": "xhello",
+    "expect_mode": "n"
+  },
+  {
+    "id": 366,
+    "name": "gi inserts at last insert position",
+    "text": "hello world",
+    "cursor": [0, 0],
+    "keys": ["i", "x", "<Esc>", "$", "g", "i", "y", "<Esc>"],
+    "expect_text": "xyhello world",
+    "expect_mode": "n"
+  },
+  {
+    "id": 367,
+    "name": "gI inserts at column 0",
+    "text": "    hello",
+    "cursor": [0, 6],
+    "keys": ["g", "I", "#", "<Esc>"],
+    "expect_text": "#    hello",
+    "expect_mode": "n"
+  }
+]

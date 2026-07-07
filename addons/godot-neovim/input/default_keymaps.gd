@@ -7,7 +7,7 @@
 ## - Single chars: "a", "A", "0", "$", etc.
 ## - Control: "<C-a>", "<C-f>", etc.
 ## - Special: "<CR>", "<Esc>", "<Tab>", etc.
-## - Sequences: "gg", "gd", "zo", "ZZ", etc.
+## - Sequences: "gg", "gd", "ZZ", etc.
 class_name GodotNeovimDefaultKeymaps
 
 
@@ -75,12 +75,9 @@ static func get_normal_keymap() -> Dictionary:
 		"g$": "action_display_line_end",
 		"g^": "action_display_line_first_non_blank",
 
-		# --- z-prefix commands (resolved as sequences) ---
-		"zo": "action_fold_open",
-		"zc": "action_fold_close",
-		"za": "action_fold_toggle",
-		"zR": "action_fold_open_all",
-		"zM": "action_fold_close_all",
+		# NOTE: z-prefix commands (zo/zc/za/zR/zM folds, zz/zt/zb scrolls) are
+		# intercepted in Rust (handle_scroll_command) before keymap dispatch,
+		# so they cannot be remapped here.
 
 		# --- Z-prefix commands (resolved as sequences) ---
 		"ZZ": "action_save_and_close",
@@ -118,4 +115,54 @@ static func get_visual_keymap() -> Dictionary:
 		"gv": "action_visual_block_toggle",
 		"gj": "action_display_line_down",
 		"gk": "action_display_line_up",
+	}
+
+
+## Insert mode keymap.
+## The Rust dispatcher only routes Ctrl/Alt + letter keys here (see
+## process_insert_key_event_impl). Plain characters and unmodified specials
+## fall through to Godot directly, Ctrl/Alt + nav/delete keys (BS, Del,
+## arrows, Home, End, PageUp/Down) are passed through to Godot's CodeEdit
+## natively, and `<C-r>` is handled in Rust as a pending register-paste —
+## none of those are customizable from this map.
+##
+## Entries below define Vim's standard insert-mode commands. The Rust
+## dispatcher pushes Godot's current buffer to Neovim before sending these
+## keys, so commands like `<C-w>` operate on the up-to-date text. Unmapped
+## keys fall through to action_send_keys which forwards them verbatim.
+static func get_insert_keymap() -> Dictionary:
+	return {
+		# Word/line deletion (Vim insert mode)
+		"<C-w>": "action_send_keys",
+		"<C-u>": "action_send_keys",
+		"<C-h>": "action_send_keys",
+
+		# Insertion helpers
+		"<C-o>": "action_send_keys",
+		"<C-v>": "action_send_keys",
+		"<C-k>": "action_send_keys",
+		"<C-a>": "action_send_keys",
+		"<C-y>": "action_send_keys",
+		"<C-e>": "action_send_keys",
+
+		# Indent / unindent
+		"<C-t>": "action_send_keys",
+		"<C-d>": "action_send_keys",
+
+		# Completion popup navigation
+		"<C-n>": "action_send_keys",
+		"<C-p>": "action_send_keys",
+	}
+
+
+## Replace mode keymap.
+## Same routing rules as insert mode (see get_insert_keymap()).
+static func get_replace_keymap() -> Dictionary:
+	return {
+		# Replace mode borrows most insert-mode bindings.
+		"<C-w>": "action_send_keys",
+		"<C-u>": "action_send_keys",
+		"<C-h>": "action_send_keys",
+		"<C-o>": "action_send_keys",
+		"<C-v>": "action_send_keys",
 	}
