@@ -495,6 +495,22 @@ impl GodotNeovimPlugin {
         // (user_cursor_sync is set by mouse click to prevent viewport override)
         self.user_cursor_sync = false;
 
+        // Track the visual submode at send time. mode_change redraw events
+        // report all of v/V/Ctrl-V as "visual", so this is the only reliable
+        // signal. The dispatch path also sets this from InputEventKey, but
+        // keys can arrive here directly (GDScript action_send_keys, macros).
+        match keys {
+            "v" => self.visual_mode_type = 'v',
+            "V" => self.visual_mode_type = 'V',
+            "<C-v>" => self.visual_mode_type = '\x16',
+            _ => {}
+        }
+
+        // nvim_input parses "<...>" notation, so a bare "<" is an incomplete
+        // special key: it returns 0 bytes written and the key is silently
+        // dropped (breaking << unindent). Escape it as "<lt>".
+        let keys = if keys == "<" { "<lt>" } else { keys };
+
         // If exiting Insert mode, buffer keys to be sent after exit completes
         // This prevents key loss during the sync process (vscode-neovim style)
         if self.is_exiting_insert_mode {
@@ -1341,10 +1357,11 @@ impl GodotNeovimPlugin {
                     // Appending at end of buffer: use set_text since insert_line_at is out of bounds
                     let text = editor.get_text().to_string();
                     let new_lines_text = change.new_lines.join("\n");
+                    // An empty get_text() still represents one (empty) line, so
+                    // appending always needs the "\n" separator — treating "" as
+                    // "no lines" would drop the appended line (o on empty buffer).
                     let new_text = if text.ends_with('\n') {
                         format!("{}{}", text, new_lines_text)
-                    } else if text.is_empty() {
-                        new_lines_text
                     } else {
                         format!("{}\n{}", text, new_lines_text)
                     };

@@ -385,8 +385,28 @@ impl GodotNeovimPlugin {
     // =========================================================================
 
     /// Get current Vim mode (n, i, v, V, R, etc.)
+    ///
+    /// current_mode stores whatever Neovim last reported, which is a long UI
+    /// name ("normal", "insert", ...) when it came from a mode_change redraw
+    /// event. Normalize to Vim's canonical short names so GDScript consumers
+    /// (keymaps, tests) see a stable format. Visual submodes are not
+    /// distinguished by mode_change ("visual" covers v/V/Ctrl-V), so use the
+    /// visual_mode_type tracked at key-send time.
     pub(super) fn get_current_mode_impl(&self) -> GString {
-        GString::from(&self.current_mode)
+        let mode = match self.current_mode.as_str() {
+            "normal" => "n",
+            "insert" => "i",
+            "replace" => "R",
+            "visual" | "visual_select" => match self.visual_mode_type {
+                'V' => "V",
+                '\x16' => "\x16",
+                _ => "v",
+            },
+            "cmdline_normal" | "cmdline_insert" | "cmdline_replace" => "c",
+            "operator" => "no",
+            other => other,
+        };
+        GString::from(mode)
     }
 
     /// Get the last key pressed (for sequence detection)

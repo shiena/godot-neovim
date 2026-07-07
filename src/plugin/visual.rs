@@ -36,33 +36,37 @@ impl GodotNeovimPlugin {
             return;
         };
 
-        // Normalize selection direction (start should be before end)
-        let (from_line, from_byte_col, to_line, to_byte_col) =
-            if start_line < end_line || (start_line == end_line && start_col <= end_col) {
-                (start_line, start_col, end_line, end_col)
-            } else {
-                (end_line, end_col, start_line, start_col)
-            };
+        // Endpoints are (anchor "v", cursor "."). Godot's select() places the
+        // caret at the second pair, so pass (anchor, cursor) in that order to
+        // preserve the selection direction (e.g. after `o` the caret must sit
+        // at the start). The +1 inclusive adjustment (visual selections
+        // include the character under the later endpoint) applies to
+        // whichever endpoint is later in the buffer.
+        let forward = start_line < end_line || (start_line == end_line && start_col <= end_col);
 
         // Convert byte columns to character columns for Godot
         // Neovim returns byte positions, Godot expects character positions
-        let from_line_text = editor.get_line(from_line as i32).to_string();
-        let to_line_text = editor.get_line(to_line as i32).to_string();
-        let from_col = Self::byte_col_to_char_col(&from_line_text, from_byte_col as i32);
-        // +1 to include cursor char (in character position, not bytes)
-        let to_col = Self::byte_col_to_char_col(&to_line_text, to_byte_col as i32) + 1;
+        let anchor_line_text = editor.get_line(start_line as i32).to_string();
+        let cursor_line_text = editor.get_line(end_line as i32).to_string();
+        let mut anchor_col = Self::byte_col_to_char_col(&anchor_line_text, start_col as i32);
+        let mut cursor_col = Self::byte_col_to_char_col(&cursor_line_text, end_col as i32);
+        if forward {
+            cursor_col += 1;
+        } else {
+            anchor_col += 1;
+        }
 
         crate::verbose_print!(
-            "[godot-neovim] Visual selection: ({}, {}) -> ({}, {})",
-            from_line,
-            from_col,
-            to_line,
-            to_col
+            "[godot-neovim] Visual selection: anchor=({}, {}) cursor=({}, {})",
+            start_line,
+            anchor_col,
+            end_line,
+            cursor_col
         );
 
-        // Enable selecting and update Godot selection
+        // Enable selecting and update Godot selection (caret at the cursor end)
         editor.set_selecting_enabled(true);
-        editor.select(from_line as i32, from_col, to_line as i32, to_col);
+        editor.select(start_line as i32, anchor_col, end_line as i32, cursor_col);
     }
 
     /// Update visual line selection in Godot editor (V mode - selects entire lines)

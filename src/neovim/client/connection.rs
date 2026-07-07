@@ -157,8 +157,14 @@ impl NeovimClient {
         let keys_processed = self.keys_processed.clone();
         let key_input_handle = self.runtime.spawn(async move {
             while let Some(keys) = rx.recv().await {
-                let nvim_lock = neovim_arc.lock().await;
-                if let Some(neovim) = nvim_lock.as_ref() {
+                // Clone the Neovim handle out of the lock so the mutex is not
+                // held across RPC awaits. Holding it would block the main
+                // thread's block_on(lock) calls while a request is in flight.
+                let neovim = {
+                    let nvim_lock = neovim_arc.lock().await;
+                    nvim_lock.as_ref().cloned()
+                };
+                if let Some(neovim) = neovim {
                     match neovim.input(&keys).await {
                         // nvim_input returns the number of bytes written.
                         // Ok(0) means the typeahead buffer was full and the key
@@ -173,10 +179,22 @@ impl NeovimClient {
                             // key (e.g. `j` at the last line) still acks here,
                             // while a genuine main-loop hang stalls the counter
                             // and lets the plugin's watchdog fire (see #75).
-                            if neovim.eval("1").await.is_ok() {
-                                keys_processed
-                                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                            }
+                            //
+                            // The ack MUST NOT block this loop: a deferred
+                            // request is not answered while Neovim waits for
+                            // the rest of a multi-key command (e.g. after the
+                            // first `g` of `gg`), so awaiting it inline would
+                            // deadlock — the completing key sits unsent in the
+                            // channel while the ack waits for that very key.
+                            // Run it as a detached task instead.
+                            let keys_processed = keys_processed.clone();
+                            let ack_nvim = neovim.clone();
+                            tokio::spawn(async move {
+                                if ack_nvim.eval("1").await.is_ok() {
+                                    keys_processed
+                                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                }
+                            });
                         }
                         Ok(_) => {
                             // Note: Can't use godot_error here (tokio thread)
@@ -191,8 +209,6 @@ impl NeovimClient {
                         }
                     }
                 }
-                // Release lock before next iteration
-                drop(nvim_lock);
             }
         });
         self.key_input_handle = Some(key_input_handle);

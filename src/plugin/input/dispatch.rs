@@ -1135,6 +1135,10 @@ impl GodotNeovimPlugin {
                         self.macro_buffer.push(notation);
                     }
                 }
+                // The user is taking control of the caret: cancel any pending
+                // entering-insert cursor sync, or a late win_viewport from the
+                // insert entry would snap the caret back to the entry point.
+                self.pending_insert_cursor_sync = false;
                 return self.dispatch_pass_through();
             }
             let nvim_key = self.key_event_to_nvim_notation(key_event);
@@ -1198,9 +1202,15 @@ impl GodotNeovimPlugin {
         let keycode = key_event.get_keycode();
         let ctrl = key_event.is_ctrl_pressed();
 
-        // Esc / Ctrl+[ cancels (no `<C-r>` was sent yet — just drop the state).
+        // Esc / Ctrl+[ cancels the pending register (no `<C-r>` was sent yet)
+        // AND exits insert mode — in Neovim, <C-r><Esc> aborts the register
+        // prompt and the Esc still takes effect, returning to normal mode.
         if keycode == Key::ESCAPE || (ctrl && keycode == Key::BRACKETLEFT) {
             self.pending_insert_register = false;
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push("<Esc>".to_string());
+            }
+            self.send_escape();
             return self.dispatch_handled();
         }
 
