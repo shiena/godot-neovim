@@ -339,8 +339,10 @@ impl GodotNeovimPlugin {
 
         match update_result {
             Ok(tick) => {
-                // Register the tick so the resulting buf_lines echo is ignored.
-                self.sync_manager.push_pending(tick);
+                // Watermark the tick: the push's own buf_lines echo AND any
+                // in-flight Neovim edits from before the push are dropped
+                // (the full-buffer push already overwrote their state).
+                self.sync_manager.mark_pushed_tick(tick);
                 self.sync_manager.set_line_count(line_count);
                 crate::verbose_print!("[godot-neovim] Insert-mode sync to Neovim (tick={})", tick);
             }
@@ -549,6 +551,11 @@ impl GodotNeovimPlugin {
         use crate::neovim::BufEvent;
 
         crate::verbose_print!("[godot-neovim] send_escape");
+
+        // Leaving insert/replace mode invalidates a pending <C-r> register
+        // capture — without this, the stale flag would silently consume the
+        // first key of the next insert session as a register name.
+        self.pending_insert_register = false;
 
         // Cancel code completion popup if open
         if let Some(ref mut editor) = self.current_editor {
@@ -995,6 +1002,14 @@ impl GodotNeovimPlugin {
             entering_insert = is_insert && !was_insert;
             let leaving_insert = was_insert && !is_insert;
 
+            // Insert/replace mode ended on the Neovim side (e.g. InsertLeave
+            // from a command, not an Esc keypress in Godot) — drop any pending
+            // <C-r> register capture so it cannot consume the first key of the
+            // next insert session.
+            if leaving_insert {
+                self.pending_insert_register = false;
+            }
+
             // Check if entering/leaving visual mode
             was_visual = Self::is_visual_mode(&old_mode);
             is_visual = Self::is_visual_mode(mode);
@@ -1270,21 +1285,12 @@ impl GodotNeovimPlugin {
 
     /// Apply a change from Neovim to Godot editor
     fn apply_nvim_change(&mut self, change: &crate::sync::DocumentChange) {
-        let Some(ref mut editor) = self.current_editor else {
-            return;
-        };
-
         crate::verbose_print!(
             "[godot-neovim] Applying nvim change: lines {}..{} -> {} new lines",
             change.first_line,
             change.last_line,
             change.new_lines.len()
         );
-
-        // Cancel code completion popup before modifying buffer
-        // This prevents "Index p_from_column = -1 is out of bounds" error
-        // when completion is active and buffer changes invalidate cursor position
-        editor.cancel_code_completion();
 
         // Set flag to prevent echo back to Neovim
         self.sync_manager.begin_nvim_change();
@@ -1296,105 +1302,110 @@ impl GodotNeovimPlugin {
         // correct post-change cursor that Neovim sends separately (e.g. cc → col 0).
         self.syncing_from_grid = true;
 
-        let line_count = editor.get_line_count() as i64;
-        let first = change.first_line.max(0) as i32;
-        let last = if change.last_line < 0 {
-            line_count as i32
-        } else {
-            change.last_line as i32
-        };
+        // Scope the editor borrow: the deferred cleanup at the end needs &mut self.
+        if let Some(ref mut editor) = self.current_editor {
+            // Cancel code completion popup before modifying buffer
+            // This prevents "Index p_from_column = -1 is out of bounds" error
+            // when completion is active and buffer changes invalidate cursor position
+            editor.cancel_code_completion();
 
-        // For full buffer replacement (first=0 and replacing ALL lines),
-        // use set_text directly to avoid line count drift issues
-        // Note: Only treat as full replacement when replacing the entire buffer
-        let is_full_replacement = first == 0 && last as i64 >= line_count;
-
-        if is_full_replacement && !change.new_lines.is_empty() {
-            // Full buffer replacement: use set_text for reliability
-            let new_text = change.new_lines.join("\n");
-            editor.set_text(&new_text);
-            // Record Godot's caret after the edit so the deferred caret_changed matches.
-            // See comment before end_nvim_change() below for details.
-            let after_line = editor.get_caret_line() as i64;
-            let after_col = editor.get_caret_column() as i64;
-            self.last_synced_cursor = (after_line, after_col);
-            self.sync_manager.end_nvim_change();
-            self.syncing_from_grid = false;
-            return;
-        }
-
-        // Handle different change types
-        if change.new_lines.is_empty() {
-            // Deletion: remove lines from first to last
-            let safe_last = last.min(editor.get_line_count());
-            for line in (first..safe_last).rev() {
-                if line < editor.get_line_count() {
-                    editor.remove_line_at(line);
-                }
-            }
-        } else if first == last {
-            // Insertion: insert new lines at first position
-            let current_line_count = editor.get_line_count();
-            if first >= current_line_count {
-                // Appending at end of buffer: use set_text since insert_line_at is out of bounds
-                let text = editor.get_text().to_string();
-                let new_lines_text = change.new_lines.join("\n");
-                let new_text = if text.ends_with('\n') {
-                    format!("{}{}", text, new_lines_text)
-                } else if text.is_empty() {
-                    new_lines_text
-                } else {
-                    format!("{}\n{}", text, new_lines_text)
-                };
-                editor.set_text(&new_text);
+            let line_count = editor.get_line_count() as i64;
+            let first = change.first_line.max(0) as i32;
+            let last = if change.last_line < 0 {
+                line_count as i32
             } else {
-                // Insert within buffer
-                for (i, line_text) in change.new_lines.iter().enumerate() {
-                    let insert_at = first + i as i32;
-                    editor.insert_line_at(insert_at, line_text);
+                change.last_line as i32
+            };
+
+            // For full buffer replacement (first=0 and replacing ALL lines),
+            // use set_text directly to avoid line count drift issues
+            // Note: Only treat as full replacement when replacing the entire buffer
+            let is_full_replacement = first == 0 && last as i64 >= line_count;
+
+            if is_full_replacement && !change.new_lines.is_empty() {
+                // Full buffer replacement: use set_text for reliability
+                let new_text = change.new_lines.join("\n");
+                editor.set_text(&new_text);
+            } else if change.new_lines.is_empty() {
+                // Deletion: remove lines from first to last
+                let safe_last = last.min(editor.get_line_count());
+                for line in (first..safe_last).rev() {
+                    if line < editor.get_line_count() {
+                        editor.remove_line_at(line);
+                    }
                 }
-            }
-        } else {
-            // Partial replacement: delete old lines, insert new lines
-            let safe_last = last.min(editor.get_line_count());
-            // First, delete old lines (in reverse to maintain indices)
-            for line in (first..safe_last).rev() {
-                if line < editor.get_line_count() {
-                    editor.remove_line_at(line);
-                }
-            }
-            // Then, insert new lines
-            for (i, line_text) in change.new_lines.iter().enumerate() {
-                let insert_at = first + i as i32;
-                if insert_at >= editor.get_line_count() {
-                    // Need to append remaining lines
+            } else if first == last {
+                // Insertion: insert new lines at first position
+                let current_line_count = editor.get_line_count();
+                if first >= current_line_count {
+                    // Appending at end of buffer: use set_text since insert_line_at is out of bounds
                     let text = editor.get_text().to_string();
-                    let remaining_lines: Vec<&str> =
-                        change.new_lines[i..].iter().map(|s| s.as_str()).collect();
-                    let new_lines_text = remaining_lines.join("\n");
-                    let new_text = if text.ends_with('\n') || text.is_empty() {
+                    let new_lines_text = change.new_lines.join("\n");
+                    let new_text = if text.ends_with('\n') {
                         format!("{}{}", text, new_lines_text)
+                    } else if text.is_empty() {
+                        new_lines_text
                     } else {
                         format!("{}\n{}", text, new_lines_text)
                     };
                     editor.set_text(&new_text);
-                    break;
+                } else {
+                    // Insert within buffer
+                    for (i, line_text) in change.new_lines.iter().enumerate() {
+                        let insert_at = first + i as i32;
+                        editor.insert_line_at(insert_at, line_text);
+                    }
                 }
-                editor.insert_line_at(insert_at, line_text);
+            } else {
+                // Partial replacement: delete old lines, insert new lines
+                let safe_last = last.min(editor.get_line_count());
+                // First, delete old lines (in reverse to maintain indices)
+                for line in (first..safe_last).rev() {
+                    if line < editor.get_line_count() {
+                        editor.remove_line_at(line);
+                    }
+                }
+                // Then, insert new lines
+                for (i, line_text) in change.new_lines.iter().enumerate() {
+                    let insert_at = first + i as i32;
+                    if insert_at >= editor.get_line_count() {
+                        // Need to append remaining lines
+                        let text = editor.get_text().to_string();
+                        let remaining_lines: Vec<&str> =
+                            change.new_lines[i..].iter().map(|s| s.as_str()).collect();
+                        let new_lines_text = remaining_lines.join("\n");
+                        let new_text = if text.ends_with('\n') || text.is_empty() {
+                            format!("{}{}", text, new_lines_text)
+                        } else {
+                            format!("{}\n{}", text, new_lines_text)
+                        };
+                        editor.set_text(&new_text);
+                        break;
+                    }
+                    editor.insert_line_at(insert_at, line_text);
+                }
             }
+
+            // Record Godot's caret position right after the buffer edit so that the deferred
+            // caret_changed (Godot's TextEdit queues the signal via call_deferred) fires with
+            // last_synced_cursor already matching the transient caret. Without this, on_caret_changed
+            // would call sync_cursor_to_neovim() with Godot's auto-moved caret, overriding the
+            // correct cursor that Neovim sends separately via win_viewport → sync_cursor_from_grid().
+            let after_line = editor.get_caret_line() as i64;
+            let after_col = editor.get_caret_column() as i64;
+            self.last_synced_cursor = (after_line, after_col);
         }
 
-        // Record Godot's caret position right after the buffer edit so that the deferred
-        // caret_changed (Godot's TextEdit queues the signal via call_deferred) fires with
-        // last_synced_cursor already matching the transient caret. Without this, on_caret_changed
-        // would call sync_cursor_to_neovim() with Godot's auto-moved caret, overriding the
-        // correct cursor that Neovim sends separately via win_viewport → sync_cursor_from_grid().
-        let after_line = editor.get_caret_line() as i64;
-        let after_col = editor.get_caret_column() as i64;
-        self.last_synced_cursor = (after_line, after_col);
-
-        self.sync_manager.end_nvim_change();
         self.syncing_from_grid = false;
+
+        // Do NOT clear changed_by_nvim synchronously: Godot's TextEdit emits
+        // text_changed via call_deferred — after this function returns — so a
+        // synchronous clear would mean on_text_changed_for_insert_sync always
+        // observes the flag already cleared and pushes Neovim's own change
+        // straight back (echo loop + cursor override). Deferred calls flush
+        // FIFO, so this clear runs after the queued text_changed emission.
+        self.base_mut()
+            .call_deferred("_end_nvim_change_deferred", &[]);
     }
 
     /// Convert byte column to character column for a given line

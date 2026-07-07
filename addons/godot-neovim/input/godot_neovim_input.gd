@@ -54,6 +54,9 @@ func setup(p_plugin: Object) -> void:
 	# Load custom keymaps from EditorSettings (godot_neovim/custom_keymaps)
 	_load_custom_keymaps_from_settings()
 
+	# Tell Rust which insert/replace keys have non-default bindings
+	_push_custom_dispatch_keys()
+
 	# Note: input handler registration is done by plugin.gd after setup() returns,
 	# to avoid re-entrant borrow issues with &mut self.
 
@@ -75,7 +78,13 @@ func _on_dispatch(resolved_key: String, mode: String) -> void:
 	if action is Callable:
 		action.call_deferred()
 	elif action is String and action != "":
-		plugin.call_deferred(action)
+		if action == "action_send_keys":
+			# action_send_keys requires the key notation argument; without it
+			# the deferred call fails with "too few arguments" and the key is
+			# silently dropped (all default insert/replace entries use this).
+			plugin.call_deferred(&"action_send_keys", resolved_key)
+		else:
+			plugin.call_deferred(action)
 	else:
 		# Key not in keymap - send directly to Neovim
 		plugin.call_deferred(&"action_send_keys", resolved_key)
@@ -124,6 +133,9 @@ func apply_keymap_changes(p_changes: Dictionary) -> void:
 		if keymaps.has(mode_key):
 			_apply_mode_changes(mode_key, p_changes[mode_key])
 
+	# Re-sync the custom-key sets with Rust after any keymap change
+	_push_custom_dispatch_keys()
+
 
 
 ## Apply changes for a single mode.
@@ -167,6 +179,25 @@ func _load_custom_keymaps_from_settings() -> void:
 				_apply_mode_changes(rm, data[mode_key])
 		elif keymaps.has(mode_key):
 			_apply_mode_changes(mode_key, data[mode_key])
+
+
+## Report insert/replace-mode keys with non-default bindings to Rust.
+## The Rust dispatcher sends unlisted Ctrl/Alt keys to Neovim synchronously
+## (preserving keystroke ordering with same-frame plain characters) and only
+## routes the listed keys through the deferred GDScript dispatch.
+func _push_custom_dispatch_keys() -> void:
+	if not plugin:
+		return
+	for mode in ["i", "R"]:
+		var custom := PackedStringArray()
+		var keymap: Dictionary = keymaps.get(mode, {})
+		for key in keymap:
+			var action = keymap[key]
+			# "action_send_keys" is the default (forward to Neovim); anything
+			# else — another action string or a Callable — needs GDScript dispatch.
+			if not (action is String and action == "action_send_keys"):
+				custom.append(key)
+		plugin.call_deferred(&"set_custom_dispatch_keys", mode, custom)
 
 
 ## Disconnect this input handler from the plugin.

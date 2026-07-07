@@ -1016,31 +1016,54 @@ impl GodotNeovimPlugin {
     }
 
     // =====================================================================
-    // Insert mode dispatcher
+    // Insert/Replace mode dispatcher
     // =====================================================================
     //
-    // Routes insert-mode key events through the same dispatch primitives used
-    // by normal/visual mode. The decision tree is:
+    // Routes insert- and replace-mode key events through the same dispatch
+    // primitives used by normal/visual mode. Both modes share one decision
+    // tree; replace mode additionally simulates overwrite for text input:
     //
     //   1. Esc / Ctrl+[ / Ctrl+B            → handled internally (mode exit)
     //   2. AltGr composed unicode (Option+Q → @, etc.)
     //                                       → pass through to Godot as text
-    //   3. Ctrl/Alt + nav/delete keys       → pass through to Godot
+    //   3. Ctrl+R                           → pending register-paste state
+    //   4. Ctrl/Alt + nav/delete keys       → pass through to Godot
     //      (BS, Del, arrows, Home, End, PageUp/Down)
     //      Neovim has no insert-mode binding for these; Godot's CodeEdit
     //      handles them natively (e.g., Ctrl+BS = delete word). Godot's edits
     //      sync to Neovim on the next Esc via sync_buffer_to_neovim_keep_undo.
-    //   4. Ctrl/Alt + other key             → dispatch to GDScript keymap
+    //   5. Ctrl/Alt + letter                → dispatch to GDScript keymap
     //      Default action_send_keys forwards to Neovim (e.g., <C-w>=delword).
-    //   5. Plain chars / unmodified specials → pass through (with macro record)
+    //   6. Ctrl-flagged composed chars (IME) and plain chars
+    //                                       → pass through to Godot as text
     //
-    // Pass-through keys (case 3) are decided in Rust because the GDScript
-    // dispatch is call_deferred — by the time GDScript runs, input() has
-    // already returned and set_input_as_handled() can no longer be skipped.
-    // This mirrors the Ctrl+/ pattern at line 70.
+    // Pass-through keys are decided in Rust because the GDScript dispatch is
+    // call_deferred — by the time GDScript runs, input() has already returned
+    // and set_input_as_handled() can no longer be skipped. This mirrors the
+    // Ctrl+/ pattern at line 70.
     pub(in crate::plugin) fn process_insert_key_event_impl(
         &mut self,
         key_event: &Gd<godot::classes::InputEventKey>,
+    ) -> VarDictionary {
+        self.process_insert_replace_key_event(key_event, false)
+    }
+
+    pub(in crate::plugin) fn process_replace_key_event_impl(
+        &mut self,
+        key_event: &Gd<godot::classes::InputEventKey>,
+    ) -> VarDictionary {
+        self.process_insert_replace_key_event(key_event, true)
+    }
+
+    /// Shared insert/replace routing. `overwrite` is true in replace mode:
+    /// before Godot inserts a plain character, the char under the cursor is
+    /// deleted so the insert appears to replace it. The overwrite must happen
+    /// synchronously inside input() so Godot sees the correct buffer state
+    /// when it processes the keypress.
+    fn process_insert_replace_key_event(
+        &mut self,
+        key_event: &Gd<godot::classes::InputEventKey>,
+        overwrite: bool,
     ) -> VarDictionary {
         let keycode = key_event.get_keycode();
         let ctrl = key_event.is_ctrl_pressed();
@@ -1051,7 +1074,7 @@ impl GodotNeovimPlugin {
             return self.handle_pending_insert_register(key_event);
         }
 
-        // ----- 1a. Escape / Ctrl+[ : exit insert mode -----
+        // ----- 1a. Escape / Ctrl+[ : exit insert/replace mode -----
         if keycode == Key::ESCAPE || (ctrl && keycode == Key::BRACKETLEFT) {
             if self.recording_macro.is_some() && !self.playing_macro {
                 self.macro_buffer.push("<Esc>".to_string());
@@ -1060,8 +1083,8 @@ impl GodotNeovimPlugin {
             return self.dispatch_handled();
         }
 
-        // ----- 1b. Ctrl+B : exit insert and enter visual block -----
-        if ctrl && keycode == Key::B {
+        // ----- 1b. Ctrl+B : exit insert and enter visual block (insert only) -----
+        if !overwrite && ctrl && keycode == Key::B {
             if self.recording_macro.is_some() && !self.playing_macro {
                 self.macro_buffer.push("<Esc>".to_string());
                 self.macro_buffer.push("<C-v>".to_string());
@@ -1074,7 +1097,20 @@ impl GodotNeovimPlugin {
             return self.dispatch_handled();
         }
 
-        // ----- 1c. Ctrl+R : begin register-paste pending state -----
+        // ----- 2. AltGr / Option composed unicode : insert as text -----
+        // Must run BEFORE the Ctrl+R intercept: Windows reports AltGr as
+        // Ctrl+Alt, so on layouts where AltGr+R composes a character (e.g.
+        // US-International AltGr+R = ®) the event also matches
+        // `ctrl && keycode == R` and would be swallowed as <C-r>.
+        if (ctrl || alt) && self.is_alt_composed_unicode(key_event) {
+            self.record_plain_insert_key(key_event);
+            if overwrite {
+                self.apply_replace_overwrite(key_event);
+            }
+            return self.dispatch_pass_through();
+        }
+
+        // ----- 3. Ctrl+R : begin register-paste pending state -----
         // We intercept BEFORE dispatching so the next key (the register name)
         // can be captured by Rust and combined with <C-r> as one atomic
         // send_keys call. Otherwise Godot would insert the register-name char
@@ -1087,39 +1123,72 @@ impl GodotNeovimPlugin {
             return self.dispatch_handled();
         }
 
-        // ----- 2. AltGr / Option composed unicode : insert as text -----
-        if (ctrl || alt) && self.is_alt_composed_unicode(key_event) {
-            self.record_plain_insert_key(key_event);
-            return self.dispatch_pass_through();
-        }
-
-        // ----- 3 & 4. Ctrl/Alt modified keys -----
+        // ----- 4 & 5. Ctrl/Alt modified keys -----
         if ctrl || alt {
-            // 3. Nav/delete special keys: pass through to Godot's CodeEdit.
+            // 4. Nav/delete special keys: pass through to Godot's CodeEdit.
+            //    Record the notation (<C-BS>, <C-Left>, ...) so macro playback
+            //    reproduces the word deletion / navigation.
             if Self::is_insert_passthrough_key(keycode) {
+                if self.recording_macro.is_some() && !self.playing_macro {
+                    let notation = self.key_event_to_nvim_notation(key_event);
+                    if !notation.is_empty() {
+                        self.macro_buffer.push(notation);
+                    }
+                }
                 return self.dispatch_pass_through();
             }
-            // 4. Other Ctrl/Alt keys: convert to Neovim notation and dispatch.
-            //    Sync Godot's edits to Neovim first so commands like <C-w> or
-            //    <C-u> operate on the correct buffer (Neovim does not see the
-            //    chars the user typed in Godot otherwise).
             let nvim_key = self.key_event_to_nvim_notation(key_event);
             if nvim_key.is_empty() || !nvim_key.starts_with('<') {
-                // Unrecognized modifier combination — treat as no-op to avoid
-                // sending raw chars to Neovim (matches prior insert.rs behavior).
-                return self.dispatch_handled();
+                // 6. Not a <C-x>/<A-x> notation: a modifier-only press, or a
+                // composed character that reports a ctrl flag (IMEs like
+                // CorvusSKK compose CJK chars with ctrl set and no alt).
+                // Let Godot buffer it as text — consuming it here would
+                // silently drop every IME-composed character.
+                self.record_plain_insert_key(key_event);
+                if overwrite {
+                    self.apply_replace_overwrite(key_event);
+                }
+                return self.dispatch_pass_through();
             }
+            // 5. Ctrl/Alt commands: sync Godot's edits to Neovim first so
+            //    commands like <C-w> or <C-u> operate on the correct buffer
+            //    (Neovim does not see the chars the user typed in Godot
+            //    otherwise).
             self.sync_buffer_to_neovim_during_insert();
-            return self.dispatch_key(&nvim_key);
+            if self.recording_macro.is_some() && !self.playing_macro {
+                self.macro_buffer.push(nvim_key.clone());
+            }
+            // Keys with a custom (non-default) keymap binding go through the
+            // GDScript dispatch. Everything else is sent to Neovim
+            // synchronously: the GDScript path is double call_deferred, so a
+            // plain character typed in the same frame would be inserted into
+            // Godot and synced BEFORE the deferred command executed — e.g.
+            // typing `<C-w>x` quickly would make <C-w> delete the x too.
+            let custom = if overwrite {
+                &self.custom_replace_keys
+            } else {
+                &self.custom_insert_keys
+            };
+            if custom.contains(&nvim_key) {
+                return self.dispatch_key(&nvim_key);
+            }
+            self.send_keys(&nvim_key);
+            return self.dispatch_handled();
         }
 
-        // ----- 5. Plain chars / unmodified specials : Godot handles -----
+        // ----- 6. Plain chars / unmodified specials : Godot handles -----
         self.record_plain_insert_key(key_event);
+        if overwrite {
+            self.apply_replace_overwrite(key_event);
+        }
         self.dispatch_pass_through()
     }
 
     /// Capture the register-name key that follows `<C-r>` in insert/replace
-    /// mode and send `<C-r>{reg}` to Neovim as a single sequence. Esc cancels.
+    /// mode and send `<C-r>{reg}` to Neovim as a single sequence. Esc and
+    /// Ctrl+[ cancel. Modifier-only presses (e.g. the Shift keydown that
+    /// precedes a shifted register name like `"` or `+`) keep the pending
+    /// state so the actual register character can still be captured.
     /// Variants `<C-r><C-r>`, `<C-r><C-o>`, `<C-r><C-p>` are not handled — the
     /// pending state clears and the second key is treated as the register.
     fn handle_pending_insert_register(
@@ -1127,20 +1196,20 @@ impl GodotNeovimPlugin {
         key_event: &Gd<godot::classes::InputEventKey>,
     ) -> VarDictionary {
         let keycode = key_event.get_keycode();
+        let ctrl = key_event.is_ctrl_pressed();
 
-        // Esc cancels (no `<C-r>` was sent yet — just drop the pending state).
-        if keycode == Key::ESCAPE {
+        // Esc / Ctrl+[ cancels (no `<C-r>` was sent yet — just drop the state).
+        if keycode == Key::ESCAPE || (ctrl && keycode == Key::BRACKETLEFT) {
             self.pending_insert_register = false;
             return self.dispatch_handled();
         }
 
         let register_key = self.key_event_to_nvim_notation(key_event);
-        self.pending_insert_register = false;
-
         if register_key.is_empty() {
-            // Modifier-only press or unrecognized — drop silently.
+            // Modifier-only press — keep waiting for the register character.
             return self.dispatch_handled();
         }
+        self.pending_insert_register = false;
 
         let full = format!("<C-r>{}", register_key);
         if self.recording_macro.is_some() && !self.playing_macro {
@@ -1149,64 +1218,6 @@ impl GodotNeovimPlugin {
         self.send_keys(&full);
 
         self.dispatch_handled()
-    }
-
-    // =====================================================================
-    // Replace mode dispatcher
-    // =====================================================================
-    //
-    // Same routing as insert mode, plus: for plain character input, simulate
-    // overwrite by deleting the character under the cursor before letting
-    // Godot insert. The overwrite must happen synchronously inside input() so
-    // Godot sees the correct buffer state when it processes the keypress.
-    pub(in crate::plugin) fn process_replace_key_event_impl(
-        &mut self,
-        key_event: &Gd<godot::classes::InputEventKey>,
-    ) -> VarDictionary {
-        let keycode = key_event.get_keycode();
-        let ctrl = key_event.is_ctrl_pressed();
-        let alt = key_event.is_alt_pressed();
-
-        if self.pending_insert_register {
-            return self.handle_pending_insert_register(key_event);
-        }
-
-        if keycode == Key::ESCAPE || (ctrl && keycode == Key::BRACKETLEFT) {
-            if self.recording_macro.is_some() && !self.playing_macro {
-                self.macro_buffer.push("<Esc>".to_string());
-            }
-            self.send_escape();
-            return self.dispatch_handled();
-        }
-
-        if ctrl && keycode == Key::R {
-            self.sync_buffer_to_neovim_during_insert();
-            self.pending_insert_register = true;
-            return self.dispatch_handled();
-        }
-
-        if (ctrl || alt) && self.is_alt_composed_unicode(key_event) {
-            self.record_plain_replace_key(key_event);
-            self.apply_replace_overwrite(key_event);
-            return self.dispatch_pass_through();
-        }
-
-        if ctrl || alt {
-            if Self::is_insert_passthrough_key(keycode) {
-                return self.dispatch_pass_through();
-            }
-            let nvim_key = self.key_event_to_nvim_notation(key_event);
-            if nvim_key.is_empty() || !nvim_key.starts_with('<') {
-                return self.dispatch_handled();
-            }
-            self.sync_buffer_to_neovim_during_insert();
-            return self.dispatch_key(&nvim_key);
-        }
-
-        // Plain key input — overwrite then pass through for Godot to insert.
-        self.record_plain_replace_key(key_event);
-        self.apply_replace_overwrite(key_event);
-        self.dispatch_pass_through()
     }
 
     /// Keys that Neovim insert mode does not define and Godot's CodeEdit
@@ -1246,12 +1257,6 @@ impl GodotNeovimPlugin {
                 }
             }
         }
-    }
-
-    /// Record an unmodified replace-mode key to the macro buffer.
-    fn record_plain_replace_key(&mut self, key_event: &Gd<godot::classes::InputEventKey>) {
-        // Same recording rules as insert mode.
-        self.record_plain_insert_key(key_event);
     }
 
     /// Simulate replace-mode overwrite: delete the char under the cursor so
