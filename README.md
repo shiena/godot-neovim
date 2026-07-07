@@ -65,11 +65,12 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 | | `Ctrl+A`/`Ctrl+X` (numbers) | ✅ | ❌ |
 | | `ga`, `gq`/`gw` | ✅ | ✅ |
 | | Visual block insert (`I`/`A`) | ❌ | ✅ |
+| | Multi-cursor | ❌ | ✅ (VS Code-style, `<C-S-Down>`, `:addcursor`) |
 | **Insert Mode** | `Ctrl+W`/`Ctrl+U`/`Ctrl+H` (delete) | ✅ | ✅ |
 | | `Ctrl+R` (insert from register) | ✅ | ✅ |
 | | `Ctrl+A` (re-insert last text) | ✅ | ✅ |
 | | `Ctrl+T`/`Ctrl+D` (indent) | ✅ | ✅ |
-| | `Ctrl+O` (one normal command) | ✅ | ❌ |
+| | `Ctrl+O` (one normal command) | ✅ | ✅ |
 | **Text Objects** | Words, quotes, brackets | ✅ | ✅ |
 | | Sentence (`is`, `as`), Paragraph (`ip`, `ap`) | ✅ | ✅ |
 | | Entire buffer (`ie`, `ae`) | ✅ | ✅ |
@@ -95,6 +96,8 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 | **Godot Integration** | `:run`/`:stop` (scene control) | ❌ | ✅ |
 | | Debugger (`:GodotBreakpoint`, step) | ❌ | ✅ |
 | | Dock navigation (`Ctrl+H/J/K/L`) | ❌ | ✅ |
+| | File explorer (FileSystem dock) | ❌ | ✅ (nvim-tree style) |
+| | Editor actions (`:action`, `<Action>` mapping) | ❌ | ✅ |
 | | Zen mode (`:zen`) | ❌ | ✅ |
 | **Other** | Custom key mappings | ✅ (Neovim Keymaps panel) | ✅ (`.godot-vimrc`) |
 | | Neovim config/plugins | ⚠️** | N/A |
@@ -105,7 +108,7 @@ godot-neovim integrates Neovim into Godot's script editor, allowing you to use t
 
 **Summary:**
 - **godot-neovim**: Real Neovim backend with full Ex command support and Godot auto-completion. Requires Neovim 0.9+ installation.
-- **GodotVim**: Self-contained Vim engine (vim-core) with comprehensive Vim emulation, Godot-specific commands (debugger, scene control), and `.godot-vimrc` configuration. No external dependencies.
+- **GodotVim**: Self-contained Vim engine (vim-core) with comprehensive Vim emulation (including multi-cursor and undo tree), Godot-specific commands (debugger, scene control, editor actions), and `.godot-vimrc` configuration. No external dependencies.
 
 </details>
 
