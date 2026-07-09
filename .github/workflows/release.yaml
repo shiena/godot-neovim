@@ -240,6 +240,9 @@ jobs:
           # Remove .gitkeep files from platform directories
           rm -f addons/godot-neovim/bin/*/.gitkeep
 
+          # Include license files in the addon
+          cp LICENSE-MIT LICENSE-APACHE addons/godot-neovim/
+
           # Show contents
           ls -laR addons/godot-neovim/bin/
 
