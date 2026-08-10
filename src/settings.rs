@@ -1,14 +1,12 @@
 use godot::classes::{EditorInterface, EditorSettings};
 use godot::prelude::*;
+use godot::register::info::PropertyHint;
 use std::path::Path;
 use std::process::{Command, Output};
 
 const SETTING_NEOVIM_PATH: &str = "godot_neovim/neovim_executable_path";
 const SETTING_NEOVIM_CLEAN: &str = "godot_neovim/neovim_clean";
 const SETTING_TIMEOUTLEN: &str = "godot_neovim/timeoutlen";
-
-const PROPERTY_HINT_RANGE: i32 = 1;
-const PROPERTY_HINT_GLOBAL_FILE: i32 = 23;
 
 /// Default timeout for multi-key sequences (matches Neovim's default)
 pub const DEFAULT_TIMEOUTLEN_MS: i64 = 1000;
@@ -50,7 +48,7 @@ pub fn initialize_settings() {
     let mut property_info = VarDictionary::new();
     property_info.set("name", SETTING_NEOVIM_PATH);
     property_info.set("type", VariantType::STRING.ord());
-    property_info.set("hint", PROPERTY_HINT_GLOBAL_FILE);
+    property_info.set("hint", PropertyHint::GLOBAL_FILE.ord());
     property_info.set("hint_string", &get_file_filter());
 
     settings.add_property_info(&property_info);
@@ -87,7 +85,7 @@ pub fn initialize_settings() {
     let mut timeoutlen_info = VarDictionary::new();
     timeoutlen_info.set("name", SETTING_TIMEOUTLEN);
     timeoutlen_info.set("type", VariantType::INT.ord());
-    timeoutlen_info.set("hint", PROPERTY_HINT_RANGE);
+    timeoutlen_info.set("hint", PropertyHint::RANGE.ord());
     timeoutlen_info.set("hint_string", "0,10000,100"); // min, max, step
 
     settings.add_property_info(&timeoutlen_info);
