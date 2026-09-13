@@ -117,6 +117,8 @@ pub struct SwitchBufferResult {
     pub tick: i64,
     /// Whether this is a newly created buffer
     pub is_new: bool,
+    /// Whether Godot content was pushed to an existing Neovim buffer
+    pub content_updated: bool,
     /// Whether buffer is attached for notifications
     pub attached: bool,
     /// Cursor position (line, col) - line is 1-indexed, col is 0-indexed

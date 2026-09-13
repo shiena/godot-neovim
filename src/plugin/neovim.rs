@@ -6,8 +6,8 @@ use godot::prelude::*;
 impl GodotNeovimPlugin {
     /// Switch to Neovim buffer for the current file
     /// Creates buffer if not exists, initializes content if new
-    /// Returns (line, col, is_new) - cursor position and whether buffer was newly created
-    pub(super) fn switch_to_neovim_buffer(&mut self) -> Option<(i64, i64, bool)> {
+    /// Returns (line, col, is_new, content_updated) - cursor position and buffer state
+    pub(super) fn switch_to_neovim_buffer(&mut self) -> Option<(i64, i64, bool, bool)> {
         // First, gather all data from editor (to avoid borrow conflicts)
         let (text, godot_line_count, use_spaces, indent_size, visible_lines) = {
             let Some(ref editor) = self.current_editor else {
@@ -80,10 +80,11 @@ impl GodotNeovimPlugin {
         match client.switch_to_buffer(&abs_path, Some(lines), None) {
             Ok(result) => {
                 crate::verbose_print!(
-                    "[godot-neovim] Buffer switched: bufnr={}, tick={}, is_new={}, cursor=({}, {})",
+                    "[godot-neovim] Buffer switched: bufnr={}, tick={}, is_new={}, content_updated={}, cursor=({}, {})",
                     result.bufnr,
                     result.tick,
                     result.is_new,
+                    result.content_updated,
                     result.cursor.0,
                     result.cursor.1
                 );
@@ -176,8 +177,13 @@ impl GodotNeovimPlugin {
                     }
                 }
 
-                // Return cursor position (convert to 0-indexed line) and is_new flag
-                Some((result.cursor.0 - 1, result.cursor.1, result.is_new))
+                // Return cursor position (convert to 0-indexed line) and buffer flags
+                Some((
+                    result.cursor.0 - 1,
+                    result.cursor.1,
+                    result.is_new,
+                    result.content_updated,
+                ))
             }
             Err(e) => {
                 let error_str = e.to_string();
@@ -438,37 +444,60 @@ impl GodotNeovimPlugin {
             char_col
         );
 
-        // Now access Neovim - access field directly to allow borrowing other fields
-        let neovim_ref = match self.current_editor_type {
-            super::EditorType::Shader => self.shader_neovim.as_ref(),
-            _ => self.script_neovim.as_ref(),
-        };
-        let Some(neovim) = neovim_ref else {
-            crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: No neovim");
-            return;
-        };
+        // Scope Neovim access so we can call sync_buffer_to_neovim_keep_undo on retry
+        let cursor_result = {
+            let neovim_ref = match self.current_editor_type {
+                super::EditorType::Shader => self.shader_neovim.as_ref(),
+                _ => self.script_neovim.as_ref(),
+            };
+            let Some(neovim) = neovim_ref else {
+                crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: No neovim");
+                return;
+            };
 
-        let Ok(client) = neovim.try_lock() else {
-            crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: Failed to lock");
-            return;
-        };
+            let Ok(client) = neovim.try_lock() else {
+                crate::verbose_print!("[godot-neovim] sync_cursor_to_neovim: Failed to lock");
+                return;
+            };
 
-        let cursor_result = client.set_cursor(nvim_line, nvim_col);
-        // Release lock before potentially showing dialog
-        drop(client);
+            client.set_cursor(nvim_line, nvim_col)
+        };
 
         if let Err(e) = cursor_result {
             let error_str = e.to_string();
-            // Check if this is a timeout or connection error
-            // "Timeout" = RPC timeout, "Failed to" = Neovim process died
-            if (error_str.contains("Timeout")
-                || error_str.contains("timeout")
-                || error_str.contains("Failed to"))
-                && self.record_timeout_error()
-            {
-                self.show_recovery_dialog();
+            // Godot may have edited the buffer externally (signal connect, refactor).
+            // Push Godot content to Neovim and retry once before reporting failure.
+            if error_str.contains("Failed to set cursor") {
+                crate::verbose_print!(
+                    "[godot-neovim] Cursor sync failed, resyncing buffer from Godot and retrying"
+                );
+                self.sync_buffer_to_neovim_keep_undo();
+                if let Some(retry_neovim) = self.get_current_neovim() {
+                    if let Ok(client) = retry_neovim.try_lock() {
+                        if client.set_cursor(nvim_line, nvim_col).is_ok() {
+                            crate::verbose_print!(
+                                "[godot-neovim] Cursor sync succeeded after buffer resync"
+                            );
+                        } else {
+                            godot_error!(
+                                "[godot-neovim] Failed to sync cursor after buffer resync: {}",
+                                e
+                            );
+                        }
+                    }
+                }
+            } else {
+                // Check if this is a timeout or connection error
+                // "Timeout" = RPC timeout, "Failed to" = Neovim process died
+                if (error_str.contains("Timeout")
+                    || error_str.contains("timeout")
+                    || error_str.contains("Failed to"))
+                    && self.record_timeout_error()
+                {
+                    self.show_recovery_dialog();
+                }
+                godot_error!("[godot-neovim] Failed to sync cursor: {}", e);
             }
-            godot_error!("[godot-neovim] Failed to sync cursor: {}", e);
         }
 
         // Update tracking

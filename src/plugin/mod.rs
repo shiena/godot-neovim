@@ -792,6 +792,11 @@ impl GodotNeovimPlugin {
             return;
         }
 
+        // Skip while a script change is pending (e.g. signal connection updating the buffer)
+        if self.script_changed_pending.get() {
+            return;
+        }
+
         // Skip during mouse drag - will sync on release
         if self.mouse_dragging {
             return;
@@ -1131,8 +1136,22 @@ impl GodotNeovimPlugin {
                 "[godot-neovim] Skipping cursor sync (already synced before close)"
             );
         } else if !self.current_script_path.is_empty() {
+            // Godot can modify the current script in-place (signal connection, refactor).
+            // Cursor sync here runs before Neovim receives the new content and fails.
+            let incoming_path = script
+                .as_ref()
+                .map(|s| s.get_path().to_string())
+                .filter(|p| !p.is_empty());
+            let is_same_file_edit = incoming_path.as_ref() == Some(&self.current_script_path);
+            if is_same_file_edit {
+                crate::verbose_print!(
+                    "[godot-neovim] Skipping cursor sync in on_script_changed (same-file edit)"
+                );
+            }
+
             // This ensures Neovim remembers the cursor position for the current buffer
             // Check if editor is still valid (it may have been freed when closing a script)
+            if !is_same_file_edit {
             if let Some(ref editor) = self.current_editor {
                 if editor.is_instance_valid() {
                     let line = editor.get_caret_line() as i64 + 1; // 1-indexed for Neovim
@@ -1154,6 +1173,7 @@ impl GodotNeovimPlugin {
                         }
                     }
                 }
+            }
             }
         }
 
@@ -1378,11 +1398,14 @@ impl GodotNeovimPlugin {
 
         // Switch to Neovim buffer for this file (creates if not exists)
         // Returns cursor position from Neovim and whether buffer was newly created
-        if let Some((line, col, is_new)) = self.switch_to_neovim_buffer() {
-            if is_new {
-                // New buffer (Godot startup): keep Godot's cursor position
-                // Godot restores cursor from previous session, sync it to Neovim
-                crate::verbose_print!("[godot-neovim] New buffer: keeping Godot cursor position");
+        if let Some((line, col, is_new, content_updated)) = self.switch_to_neovim_buffer() {
+            if is_new || content_updated {
+                // New buffer or Godot pushed external edits: keep Godot's cursor position
+                crate::verbose_print!(
+                    "[godot-neovim] Keeping Godot cursor (is_new={}, content_updated={})",
+                    is_new,
+                    content_updated
+                );
             } else {
                 // Existing buffer: apply Neovim's cursor position to Godot
                 if let Some(ref mut editor) = self.current_editor {

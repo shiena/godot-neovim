@@ -7,6 +7,19 @@ local M = {}
 -- Will be set by init.lua to avoid circular dependency
 M._setup_buffer_autocmds = nil
 
+--- Compare two line arrays for equality.
+local function lines_equal(a, b)
+    if #a ~= #b then
+        return false
+    end
+    for i = 1, #a do
+        if a[i] ~= b[i] then
+            return false
+        end
+    end
+    return true
+end
+
 -- Register a buffer with initial content (clears undo history)
 -- @param bufnr number: Buffer number (0 for current buffer)
 -- @param lines table: Array of lines to set
@@ -131,16 +144,21 @@ function M.switch_to_buffer(path, lines, indent_opts)
     -- Switch to the buffer
     vim.api.nvim_set_current_buf(bufnr)
 
-    -- Initialize content only for new/uninitialized buffers
-    -- Don't re-init existing buffers - it would reset undo history
-    -- External file changes should be handled via :e! command
+    -- Initialize content only for new/uninitialized buffers.
+    -- For existing buffers, push Godot content when it diverges (e.g. signal
+    -- connection, refactor) so Neovim stays in sync without a tab switch.
     local should_init = false
+    local content_updated = false
     if lines then
         if not core._initialized_buffers[bufnr] then
             should_init = true
+        elseif not is_new then
+            local current_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+            if not lines_equal(current_lines, lines) then
+                M.buffer_update(bufnr, lines)
+                content_updated = true
+            end
         end
-        -- Note: Removed line count check that was causing undo history reset
-        -- on buffer switch. Existing buffers keep their Neovim state.
     end
 
     if should_init and lines then
@@ -200,6 +218,7 @@ function M.switch_to_buffer(path, lines, indent_opts)
         bufnr = bufnr,
         tick = tick,
         is_new = is_new,
+        content_updated = content_updated,
         attached = attached,
         cursor = cursor
     }

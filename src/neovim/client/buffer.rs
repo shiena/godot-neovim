@@ -124,6 +124,7 @@ impl NeovimClient {
             let mut bufnr: Option<i64> = None;
             let mut tick: Option<i64> = None;
             let mut is_new: Option<bool> = None;
+            let mut content_updated: Option<bool> = None;
             let mut attached: Option<bool> = None;
             let mut cursor: Option<(i64, i64)> = None;
 
@@ -133,6 +134,7 @@ impl NeovimClient {
                         Some("bufnr") => bufnr = value.as_i64(),
                         Some("tick") => tick = value.as_i64(),
                         Some("is_new") => is_new = value.as_bool(),
+                        Some("content_updated") => content_updated = value.as_bool(),
                         Some("attached") => attached = value.as_bool(),
                         Some("cursor") => {
                             // cursor is [row, col] array, 1-indexed
@@ -149,11 +151,12 @@ impl NeovimClient {
                 }
             }
 
-            match (bufnr, tick, is_new, attached, cursor) {
-                (Some(b), Some(t), Some(n), Some(a), Some(c)) => Ok(SwitchBufferResult {
+            match (bufnr, tick, is_new, content_updated, attached, cursor) {
+                (Some(b), Some(t), Some(n), Some(cu), Some(a), Some(c)) => Ok(SwitchBufferResult {
                     bufnr: b,
                     tick: t,
                     is_new: n,
+                    content_updated: cu,
                     attached: a,
                     cursor: c,
                 }),
