@@ -86,6 +86,80 @@ function M.buffer_update(bufnr, lines)
     return vim.api.nvim_buf_get_changedtick(bufnr)
 end
 
+-- Drop one trailing empty line (the implicit end-of-line).
+-- Godot's text keeps the final newline as an empty last line, while Neovim
+-- buffers may or may not have it depending on how they were synced
+-- (switch_to_buffer strips it, the ESC-time buffer_update keeps it).
+local function content_end(lines)
+    local n = #lines
+    if n > 1 and lines[n] == "" then
+        return n - 1
+    end
+    return n
+end
+
+-- Apply an edit that Godot made on its own (signal connection, drag & drop,
+-- Replace in Files, hot reload, ...) to a buffer that Neovim already owns.
+-- Only the changed line range is replaced, so this is a single, minimal undo
+-- step, and nothing is done when the content already matches (ignoring the
+-- implicit trailing empty line).
+-- @param bufnr number: Buffer number (0 for current buffer)
+-- @param lines table: Godot's lines
+-- @param opts table|nil: {
+--     expected_tick = number|nil: abort if b:changedtick differs (Neovim has
+--         changes Godot has not applied yet; pushing would revert them),
+--     unmodified = bool|nil: clear 'modified' afterwards (Godot has saved it) }
+-- @return table: { status = "unchanged"|"updated"|"stale", tick, line_count }
+function M.sync_external_lines(bufnr, lines, opts)
+    if bufnr == 0 then
+        bufnr = vim.api.nvim_get_current_buf()
+    end
+    opts = opts or {}
+
+    local function result(status)
+        return {
+            status = status,
+            tick = vim.api.nvim_buf_get_changedtick(bufnr),
+            line_count = vim.api.nvim_buf_line_count(bufnr),
+        }
+    end
+
+    if opts.expected_tick and opts.expected_tick ~= vim.api.nvim_buf_get_changedtick(bufnr) then
+        return result("stale")
+    end
+
+    local current = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local cur_end = content_end(current)
+    local new_end = content_end(lines)
+
+    -- Common prefix / suffix within the content range
+    local prefix = 0
+    while prefix < cur_end and prefix < new_end and current[prefix + 1] == lines[prefix + 1] do
+        prefix = prefix + 1
+    end
+    local suffix = 0
+    while suffix < cur_end - prefix and suffix < new_end - prefix
+        and current[cur_end - suffix] == lines[new_end - suffix] do
+        suffix = suffix + 1
+    end
+
+    if prefix == cur_end and prefix == new_end then
+        return result("unchanged")
+    end
+
+    local replacement = {}
+    for i = prefix + 1, new_end - suffix do
+        replacement[#replacement + 1] = lines[i]
+    end
+    vim.api.nvim_buf_set_lines(bufnr, prefix, cur_end - suffix, false, replacement)
+
+    if opts.unmodified then
+        vim.bo[bufnr].modified = false
+    end
+
+    return result("updated")
+end
+
 -- Set indent options for a buffer
 -- @param bufnr number: Buffer number (0 for current buffer)
 -- @param use_spaces boolean: Use spaces instead of tabs
@@ -103,10 +177,12 @@ end
 
 -- Switch to buffer by path, creating and initializing if needed
 -- @param path string: Absolute file path
--- @param lines table|nil: Lines to initialize with (only used for new buffers)
+-- @param lines table|nil: Godot's lines. Initializes new buffers; for existing
+--   buffers, edits Godot made while the buffer was not current are applied
 -- @param indent_opts table|nil: { use_spaces = bool, indent_size = number }
--- @return table: { bufnr, tick, is_new, cursor }
-function M.switch_to_buffer(path, lines, indent_opts)
+-- @param unmodified boolean|nil: Godot has no unsaved changes for this file
+-- @return table: { bufnr, tick, is_new, content_updated, line_count, attached, cursor }
+function M.switch_to_buffer(path, lines, indent_opts, unmodified)
     -- Find existing buffer by path
     local bufnr = vim.fn.bufnr(path)
     local is_new = (bufnr == -1)
@@ -135,12 +211,18 @@ function M.switch_to_buffer(path, lines, indent_opts)
     -- Don't re-init existing buffers - it would reset undo history
     -- External file changes should be handled via :e! command
     local should_init = false
+    local content_updated = false
     if lines then
         if not core._initialized_buffers[bufnr] then
             should_init = true
+        else
+            -- Existing buffers keep their Neovim state and undo history.
+            -- Godot may still have edited the file while it was not the
+            -- current buffer (e.g. connecting a signal inserts a callback
+            -- before the tab switch reaches us): apply just that difference.
+            local synced = M.sync_external_lines(bufnr, lines, { unmodified = unmodified })
+            content_updated = synced.status == "updated"
         end
-        -- Note: Removed line count check that was causing undo history reset
-        -- on buffer switch. Existing buffers keep their Neovim state.
     end
 
     if should_init and lines then
@@ -200,6 +282,8 @@ function M.switch_to_buffer(path, lines, indent_opts)
         bufnr = bufnr,
         tick = tick,
         is_new = is_new,
+        content_updated = content_updated,
+        line_count = vim.api.nvim_buf_line_count(bufnr),
         attached = attached,
         cursor = cursor
     }

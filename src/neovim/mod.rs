@@ -4,7 +4,7 @@ mod handler;
 
 pub use client::NeovimClient;
 #[allow(unused_imports)]
-pub use client::{IndentOptions, SwitchBufferResult};
+pub use client::{ExternalSyncStatus, IndentOptions, SwitchBufferResult};
 pub use client::{TIMEOUT_RECOVERY_THRESHOLD, TIMEOUT_RECOVERY_WINDOW_SECS};
 #[allow(unused_imports)]
 pub use events::{ParseError, RedrawEvent};

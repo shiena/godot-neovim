@@ -1,0 +1,90 @@
+[
+  {
+    "id": 650,
+    "name": "Godot-side edit in normal mode (signal callback) reaches Neovim",
+    "text": "extends Node\nvar a = 1",
+    "cursor": [0, 0],
+    "steps": [
+      {"godot_append": "\n\nfunc _on_body_entered():\n    pass"},
+      {"wait": 0.2},
+      {"send": "k"},
+      {"send": "d"},
+      {"send": "d"}
+    ],
+    "expect_text": "extends Node\nvar a = 1\n\n    pass",
+    "expect_mode": "n"
+  },
+  {
+    "id": 651,
+    "name": "Godot-side edit is a single undo step in Neovim",
+    "text": "extends Node\nvar a = 1",
+    "cursor": [0, 0],
+    "steps": [
+      {"godot_append": "\n\nfunc _on_body_entered():\n    pass"},
+      {"wait": 0.2},
+      {"send": "u"}
+    ],
+    "expect_text": "extends Node\nvar a = 1",
+    "expect_mode": "n"
+  },
+  {
+    "id": 652,
+    "name": "Godot-side edit to a non-current script is applied on switch",
+    "text": "extends Node\nvar a = 1",
+    "cursor": [0, 0],
+    "steps": [
+      {"open": "res://addons/godot-neovim-test/sandbox_b.gd"},
+      {"godot_append": "\n\nfunc _on_body_entered():\n    pass", "path": "res://addons/godot-neovim-test/sandbox.gd"},
+      {"open": "res://addons/godot-neovim-test/sandbox.gd"},
+      {"send": "k"},
+      {"send": "d"},
+      {"send": "d"}
+    ],
+    "expect_text": "extends Node\nvar a = 1\n\n    pass",
+    "expect_mode": "n"
+  },
+  {
+    "id": 653,
+    "name": "Godot cursor is kept on switch when Godot edited the script",
+    "text": "extends Node\nvar a = 1",
+    "cursor": [0, 0],
+    "steps": [
+      {"open": "res://addons/godot-neovim-test/sandbox_b.gd"},
+      {"godot_append": "\n\nfunc _on_body_entered():\n    pass", "path": "res://addons/godot-neovim-test/sandbox.gd"},
+      {"open": "res://addons/godot-neovim-test/sandbox.gd"},
+      {"send": "0"}
+    ],
+    "expect_cursor": [4, 0],
+    "expect_mode": "n"
+  },
+  {
+    "id": 654,
+    "name": "Trailing newline difference on switch does not add an undo step",
+    "text": "hello\n",
+    "cursor": [0, 0],
+    "steps": [
+      {"send": "x"},
+      {"open": "res://addons/godot-neovim-test/sandbox_b.gd"},
+      {"open": "res://addons/godot-neovim-test/sandbox.gd"},
+      {"send": "u"}
+    ],
+    "expect_text": "hello",
+    "expect_mode": "n"
+  },
+  {
+    "id": 655,
+    "name": "Insert-mode edit then switch roundtrip keeps undo intact",
+    "text": "hello\n",
+    "cursor": [0, 5],
+    "steps": [
+      {"send": "A"},
+      {"event": "W"},
+      {"send": "<Esc>"},
+      {"open": "res://addons/godot-neovim-test/sandbox_b.gd"},
+      {"open": "res://addons/godot-neovim-test/sandbox.gd"},
+      {"send": "u"}
+    ],
+    "expect_text": "hello",
+    "expect_mode": "n"
+  }
+]
