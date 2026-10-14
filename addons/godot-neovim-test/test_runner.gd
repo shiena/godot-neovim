@@ -19,12 +19,18 @@ extends Node
 ##   interval      float  Optional: delay between keys/events (default 0.05s)
 ##   sync_wait     float  Optional: post-keys Neovim sync wait (default 0.3s)
 ##   category      str    Optional: tag override (defaults to filename stem)
+##   keymap        dict   Optional: temporary keymap bindings for this test,
+##                          { mode: { key: action } } (mode: n/v/i/R).
+##                          Restored after the test.
 ##
 ##   expect_text          str    Expected CodeEdit text after run
 ##   expect_cursor        [l,c]  Expected cursor position
 ##   expect_mode          str    Expected vim mode (n/i/v/V/R/c)
 ##   expect_macro_buffer  [str]  Expected macro buffer contents
 ##   expect_pending_insert_register  bool  Expected pending <C-r> state
+##   expect_saved         bool   Whether the buffer matches the file on disk.
+##                               The file's original content is restored
+##                               after the test.
 ##
 ## Either `keys` or `steps` (not both) is required; presence of any expect_*
 ## determines which axes are checked.
@@ -127,6 +133,15 @@ func _run_single(t: Dictionary) -> void:
 	if t.has("cursor"):
 		await _set_cursor(t.cursor[0], t.cursor[1])
 
+	# 2b. Temporary keymap bindings / original file content for save tests
+	var saved_keymaps = null
+	if t.has("keymap"):
+		saved_keymaps = await _apply_test_keymap(t.keymap)
+	var script_path := _get_current_script_path()
+	var original_file := ""
+	if t.has("expect_saved") and script_path != "":
+		original_file = FileAccess.get_file_as_string(script_path)
+
 	# 3. Execute steps (preferred) or keys (legacy)
 	var interval: float = float(t.get("interval", 0.05))
 	if t.has("steps"):
@@ -145,6 +160,12 @@ func _run_single(t: Dictionary) -> void:
 	# 5. Verify
 	var result := _check(t)
 	results.append(result)
+
+	# 5b. Undo test-only state
+	if saved_keymaps != null:
+		await _restore_keymap(saved_keymaps)
+	if t.has("expect_saved") and script_path != "":
+		await _restore_file(script_path, original_file)
 
 	# 6. Log result with diagnostics on failure
 	var status := "[color=green]PASS[/color]" if result.passed else "[color=red]FAIL[/color]"
@@ -312,7 +333,92 @@ func _check(t: Dictionary) -> Dictionary:
 				"actual": actual_pending,
 			}
 
+	if t.has("expect_saved"):
+		var path := _get_current_script_path()
+		var on_disk := _strip_trailing_newlines(FileAccess.get_file_as_string(path))
+		var actual_saved := path != "" and on_disk == _strip_trailing_newlines(code_edit.get_text())
+		if actual_saved != bool(t.expect_saved):
+			result.passed = false
+			result.diff["saved"] = {"expected": bool(t.expect_saved), "actual": actual_saved}
+
 	return result
+
+
+# ---- Keymap / file helpers ----
+
+## The GodotNeovimInput instance, reached through the keymap editor dock.
+func _get_input_handler() -> Object:
+	# The dock may be renamed/wrapped by the editor, so match by class.
+	for node in EditorInterface.get_base_control().find_children("*", "Control", true, false):
+		if node is GodotNeovimKeymapEditor:
+			return node.input_handler
+	return null
+
+
+## Apply { mode: { key: action } } on top of the current keymaps.
+## Returns a deep copy of the previous keymaps for _restore_keymap().
+func _apply_test_keymap(keymap: Dictionary) -> Variant:
+	var handler := _get_input_handler()
+	if not handler:
+		_log("[color=yellow]Input handler not found; keymap not applied[/color]")
+		return null
+	var backup: Dictionary = handler.keymaps.duplicate(true)
+	var modes_for := {
+		"n": ["n"],
+		"v": Array(handler.VISUAL_MODES),
+		"i": Array(handler.INSERT_MODES),
+		"R": Array(handler.REPLACE_MODES),
+	}
+	for mode in keymap:
+		for m in modes_for.get(mode, [mode]):
+			handler._apply_mode_changes(m, {"set": keymap[mode]})
+	handler._push_custom_dispatch_keys()
+	# set_custom_dispatch_keys is call_deferred
+	await get_tree().process_frame
+	return backup
+
+
+func _restore_keymap(backup: Dictionary) -> void:
+	var handler := _get_input_handler()
+	if not handler:
+		return
+	handler.keymaps = backup
+	handler._push_custom_dispatch_keys()
+	await get_tree().process_frame
+
+
+func _get_current_script_path() -> String:
+	var se := EditorInterface.get_script_editor()
+	if se and se.get_current_script():
+		return se.get_current_script().resource_path
+	return ""
+
+
+## Put the original content back into the buffer and save it through the
+## plugin, so the editor's in-memory script matches the file again.
+func _restore_file(path: String, original: String) -> void:
+	if FileAccess.get_file_as_string(path) == original:
+		return
+	var code_edit := _get_code_edit()
+	if code_edit:
+		code_edit.set_text(original)
+		if plugin.has_method("sync_buffer_for_test"):
+			plugin.sync_buffer_for_test()
+		await get_tree().create_timer(0.15).timeout
+		plugin.action_save()
+		await get_tree().create_timer(0.3).timeout
+	if FileAccess.get_file_as_string(path) != original:
+		_log("[color=yellow]Could not restore %s through the editor; writing it directly[/color]" % path)
+		var f := FileAccess.open(path, FileAccess.WRITE)
+		if f:
+			f.store_string(original)
+			f.close()
+
+
+static func _strip_trailing_newlines(text: String) -> String:
+	while text.ends_with("\n"):
+		text = text.substr(0, text.length() - 1)
+	return text
 
 
 # ---- Failure diagnostics ----
