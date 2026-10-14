@@ -388,6 +388,11 @@ pub struct GodotNeovimPlugin {
     /// Replace-mode counterpart of custom_insert_keys.
     #[init(val = std::collections::HashSet::new())]
     custom_replace_keys: std::collections::HashSet<String>,
+    /// Retry count for a Godot-side edit (normal/visual mode) that could not
+    /// be pushed to Neovim yet because Neovim had edits Godot had not applied.
+    /// Retried from process() after Neovim events are drained.
+    #[init(val = None)]
+    pending_godot_edit_sync: Option<u32>,
     /// Normal-mode keys whose keymap binding differs from action_send_keys.
     /// Only modifier combinations (<C-x>, <A-x>, <D-x>) are looked up: they
     /// are dispatched through the keymap instead of being sent to Neovim.
@@ -540,6 +545,11 @@ impl IEditorPlugin for GodotNeovimPlugin {
 
         // Check for pending updates from Neovim redraw events
         self.process_neovim_updates();
+
+        // Retry a Godot-side edit that had to wait for Neovim's in-flight edits
+        if self.pending_godot_edit_sync.is_some() {
+            self.retry_godot_edit_sync();
+        }
 
         // Check for key sequence timeout (like Neovim's timeoutlen)
         // Only applies in Normal mode - Insert/Replace/Visual modes don't use operator-pending
@@ -883,27 +893,29 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] Synced buffer after toggle comment");
     }
 
-    /// Pushed Godot edits to Neovim during insert/replace mode.
+    /// Push Godot-side edits to Neovim. Connected to CodeEdit's `text_changed`.
     ///
-    /// Connected to CodeEdit's `text_changed` signal. Without this, Neovim
-    /// would see only the buffer state from when insert mode was entered, so
-    /// commands like `<C-w>` or `<C-r>` would operate on stale text and the
-    /// ESC sync would discard any Neovim-side changes.
+    /// - Insert/replace mode: Godot handles typing, so every edit is pushed.
+    ///   Without this, Neovim would see only the buffer state from when
+    ///   insert mode was entered, so commands like `<C-w>` or `<C-r>` would
+    ///   operate on stale text and the ESC sync would discard Neovim changes.
+    /// - Normal/visual mode: Neovim is the master, but Godot still edits the
+    ///   buffer on its own (connecting a signal, drag & drop, Replace in
+    ///   Files, Trim Trailing Whitespace, hot reload, ...). Those edits are
+    ///   applied to Neovim as a minimal line-range change.
     ///
-    /// Skips when:
-    /// - Not in insert/replace mode (nothing to sync — normal mode already
-    ///   uses Neovim as master).
-    /// - The change came from Neovim itself (`changed_by_nvim` flag), to
-    ///   avoid an echo loop with `apply_nvim_change`.
+    /// Skips changes that came from Neovim itself (`changed_by_nvim` flag),
+    /// to avoid an echo loop with `apply_nvim_change`.
     #[func]
     fn on_text_changed_for_insert_sync(&mut self) {
-        if !self.is_insert_mode() && !self.is_replace_mode() {
-            return;
-        }
         if self.sync_manager.is_changed_by_nvim() {
             return;
         }
-        self.sync_buffer_to_neovim_during_insert();
+        if self.is_insert_mode() || self.is_replace_mode() {
+            self.sync_buffer_to_neovim_during_insert();
+        } else {
+            self.sync_godot_edit_to_neovim(false);
+        }
     }
 
     /// Deferred clear of the changed_by_nvim echo guard. Scheduled by
@@ -1390,11 +1402,12 @@ impl GodotNeovimPlugin {
 
         // Switch to Neovim buffer for this file (creates if not exists)
         // Returns cursor position from Neovim and whether buffer was newly created
-        if let Some((line, col, is_new)) = self.switch_to_neovim_buffer() {
-            if is_new {
-                // New buffer (Godot startup): keep Godot's cursor position
-                // Godot restores cursor from previous session, sync it to Neovim
-                crate::verbose_print!("[godot-neovim] New buffer: keeping Godot cursor position");
+        if let Some((line, col, keep_godot_cursor)) = self.switch_to_neovim_buffer() {
+            if keep_godot_cursor {
+                // New buffer (Godot startup): Godot restores cursor from the
+                // previous session. Godot-edited buffer: Godot placed the caret
+                // at its edit (e.g. a new signal callback). Sync it to Neovim.
+                crate::verbose_print!("[godot-neovim] Keeping Godot cursor position");
             } else {
                 // Existing buffer: apply Neovim's cursor position to Godot
                 if let Some(ref mut editor) = self.current_editor {

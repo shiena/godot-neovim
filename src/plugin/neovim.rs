@@ -1,15 +1,21 @@
 //! Neovim communication: buffer sync, cursor sync, key sending
 
 use super::GodotNeovimPlugin;
+use crate::neovim::ExternalSyncStatus;
 use godot::prelude::*;
 
 impl GodotNeovimPlugin {
     /// Switch to Neovim buffer for the current file
     /// Creates buffer if not exists, initializes content if new
-    /// Returns (line, col, is_new) - cursor position and whether buffer was newly created
+    /// Returns (line, col, keep_godot_cursor): Neovim's cursor, and whether
+    /// Godot's cursor should win instead (new buffer, or Godot edited the file
+    /// while it was not current — e.g. a connected signal's new callback)
     pub(super) fn switch_to_neovim_buffer(&mut self) -> Option<(i64, i64, bool)> {
+        // A deferred Godot-edit retry belongs to the previous buffer
+        self.pending_godot_edit_sync = None;
+
         // First, gather all data from editor (to avoid borrow conflicts)
-        let (text, godot_line_count, use_spaces, indent_size, visible_lines) = {
+        let (text, godot_line_count, use_spaces, indent_size, visible_lines, unmodified) = {
             let Some(ref editor) = self.current_editor else {
                 crate::verbose_print!("[godot-neovim] switch_to_neovim_buffer: No current editor");
                 return None;
@@ -20,6 +26,7 @@ impl GodotNeovimPlugin {
                 editor.is_indent_using_spaces(),
                 editor.get_indent_size(),
                 editor.get_visible_line_count(),
+                editor.get_version() == editor.get_saved_version(),
             )
         };
 
@@ -77,22 +84,30 @@ impl GodotNeovimPlugin {
         // Switch to buffer (creates if not exists)
         // Note: Don't pass indent_opts here - they must be set AFTER filetype
         let nvim_line_count = lines.len() as i32;
-        match client.switch_to_buffer(&abs_path, Some(lines), None) {
+        match client.switch_to_buffer(&abs_path, Some(lines), None, unmodified) {
             Ok(result) => {
                 crate::verbose_print!(
-                    "[godot-neovim] Buffer switched: bufnr={}, tick={}, is_new={}, cursor=({}, {})",
+                    "[godot-neovim] Buffer switched: bufnr={}, tick={}, is_new={}, content_updated={}, cursor=({}, {})",
                     result.bufnr,
                     result.tick,
                     result.is_new,
+                    result.content_updated,
                     result.cursor.0,
                     result.cursor.1
                 );
 
                 // Update sync manager
+                // (result.tick is taken after any external-edit update, so the
+                // initial sync tick also swallows that update's echo)
                 self.sync_manager.reset();
                 self.sync_manager.set_initial_sync_tick(result.tick);
                 self.sync_manager.set_attached(result.attached);
-                self.sync_manager.set_line_count(nvim_line_count);
+                self.sync_manager.set_line_count(
+                    result
+                        .line_count
+                        .map(|n| n as i32)
+                        .unwrap_or(nvim_line_count),
+                );
 
                 // For external CodeEdits, configure as scratch buffer
                 if self.current_editor_type == super::EditorType::Unknown {
@@ -176,8 +191,12 @@ impl GodotNeovimPlugin {
                     }
                 }
 
-                // Return cursor position (convert to 0-indexed line) and is_new flag
-                Some((result.cursor.0 - 1, result.cursor.1, result.is_new))
+                // Return cursor position (convert to 0-indexed line)
+                Some((
+                    result.cursor.0 - 1,
+                    result.cursor.1,
+                    result.is_new || result.content_updated,
+                ))
             }
             Err(e) => {
                 let error_str = e.to_string();
@@ -286,6 +305,108 @@ impl GodotNeovimPlugin {
                 godot_error!("[godot-neovim] Failed to update buffer: {}", e);
             }
         }
+    }
+
+    /// Apply an edit Godot made on its own in normal/visual mode (signal
+    /// connection, drag & drop, Replace in Files, ...) to Neovim.
+    ///
+    /// Only the changed line range is replaced (one undo step in Neovim;
+    /// nothing at all if only the implicit trailing newline differs). The
+    /// push is refused while Neovim has edits Godot has not applied yet —
+    /// Godot's text would otherwise revert them — and retried from process()
+    /// once those events are drained. `force` skips that check.
+    pub(super) fn sync_godot_edit_to_neovim(&mut self, force: bool) {
+        // Buffer not attached/initialized yet (switch_to_buffer will sync it)
+        if self.sync_manager.get_line_count() == 0 {
+            return;
+        }
+
+        let (text, unmodified) = {
+            let Some(ref editor) = self.current_editor else {
+                return;
+            };
+            if !editor.is_instance_valid() {
+                return;
+            }
+            (
+                editor.get_text().to_string(),
+                editor.get_version() == editor.get_saved_version(),
+            )
+        };
+        let lines: Vec<String> = text
+            .split('\n')
+            .map(|s| s.trim_end_matches('\r').to_string())
+            .collect();
+        let expected_tick = (!force).then(|| self.sync_manager.last_known_tick());
+
+        let Some(neovim) = self.get_current_neovim() else {
+            return;
+        };
+        let Ok(client) = neovim.try_lock() else {
+            // Retry next frame
+            self.pending_godot_edit_sync.get_or_insert(0);
+            return;
+        };
+        let result = client.sync_external_lines(lines, expected_tick, unmodified);
+        drop(client);
+
+        match result {
+            Ok(r) => match r.status {
+                ExternalSyncStatus::Unchanged => {
+                    self.pending_godot_edit_sync = None;
+                }
+                ExternalSyncStatus::Updated => {
+                    self.pending_godot_edit_sync = None;
+                    // Drop the echo of our own change
+                    self.sync_manager.mark_pushed_tick(r.tick);
+                    self.sync_manager.set_line_count(r.line_count as i32);
+                    crate::verbose_print!(
+                        "[godot-neovim] Synced Godot-side edit to Neovim (tick={}, lines={})",
+                        r.tick,
+                        r.line_count
+                    );
+                    // Godot moved the caret along with its edit (e.g. into a
+                    // new signal callback). Earlier caret syncs may have been
+                    // clamped to the old line count, so sync it again now.
+                    self.sync_cursor_to_neovim();
+                }
+                ExternalSyncStatus::Stale => {
+                    let retries = self.pending_godot_edit_sync.map_or(0, |n| n + 1);
+                    self.pending_godot_edit_sync = Some(retries);
+                    crate::verbose_print!(
+                        "[godot-neovim] Godot-side edit deferred: Neovim has unapplied edits (tick={}, known={:?}, retry={})",
+                        r.tick,
+                        expected_tick,
+                        retries
+                    );
+                }
+            },
+            Err(e) => {
+                self.pending_godot_edit_sync = None;
+                godot_warn!("[godot-neovim] Failed to sync Godot-side edit: {}", e);
+            }
+        }
+    }
+
+    /// Retry a deferred Godot-side edit (see sync_godot_edit_to_neovim).
+    /// After a few frames, Neovim's pending edits are assumed to never reach
+    /// Godot (e.g. the buffer is not attached), and Godot's text — what the
+    /// user sees and what gets saved — is pushed as is.
+    pub(super) fn retry_godot_edit_sync(&mut self) {
+        const MAX_RETRIES: u32 = 10;
+        if self.is_insert_mode() || self.is_replace_mode() {
+            // The insert-mode sync owns the buffer now
+            self.pending_godot_edit_sync = None;
+            return;
+        }
+        let force = self.pending_godot_edit_sync.unwrap_or(0) >= MAX_RETRIES;
+        if force {
+            crate::verbose_print!(
+                "[godot-neovim] Godot-side edit still deferred after {} retries, forcing",
+                MAX_RETRIES
+            );
+        }
+        self.sync_godot_edit_to_neovim(force);
     }
 
     /// Lightweight Godot → Neovim sync used during insert/replace mode.

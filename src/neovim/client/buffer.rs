@@ -1,7 +1,8 @@
 //! Buffer operations: buffer_update, switch_to_buffer, attach
 
 use super::{
-    IndentOptions, NeovimClient, SwitchBufferResult, RPC_EXTENDED_TIMEOUT_MS, RPC_TIMEOUT_MS,
+    ExternalSyncResult, ExternalSyncStatus, IndentOptions, NeovimClient, SwitchBufferResult,
+    RPC_EXTENDED_TIMEOUT_MS, RPC_TIMEOUT_MS,
 };
 use rmpv::Value;
 
@@ -33,13 +34,90 @@ impl NeovimClient {
         })
     }
 
-    /// Switch to buffer by path, creating and initializing if needed
-    /// Returns (bufnr, tick, is_new, cursor) where cursor is (line, col) 1-indexed
+    /// Apply an edit Godot made on its own to the current buffer, replacing
+    /// only the changed line range (see buffer.lua `sync_external_lines`).
+    /// With `expected_tick`, nothing is changed if Neovim's changedtick
+    /// differs (Neovim has edits that Godot has not applied yet).
+    pub fn sync_external_lines(
+        &self,
+        lines: Vec<String>,
+        expected_tick: Option<i64>,
+        unmodified: bool,
+    ) -> Result<ExternalSyncResult, String> {
+        let neovim_arc = self.neovim.clone();
+
+        self.runtime.block_on(async {
+            let result = tokio::time::timeout(
+                std::time::Duration::from_millis(RPC_EXTENDED_TIMEOUT_MS),
+                async {
+                    let nvim_lock = neovim_arc.lock().await;
+                    let Some(neovim) = nvim_lock.as_ref() else {
+                        return Err("Neovim not connected".to_string());
+                    };
+                    let mut opts = vec![(Value::from("unmodified"), Value::from(unmodified))];
+                    if let Some(tick) = expected_tick {
+                        opts.push((Value::from("expected_tick"), Value::from(tick)));
+                    }
+                    let lines_value = Value::Array(lines.into_iter().map(Value::from).collect());
+                    let args = vec![Value::from(0i64), lines_value, Value::Map(opts)];
+                    let result = neovim
+                        .exec_lua("return _G.godot_neovim.sync_external_lines(...)", args)
+                        .await
+                        .map_err(|e| format!("Failed to sync external edit: {}", e))?;
+                    Self::parse_external_sync_result(result)
+                },
+            )
+            .await;
+
+            match result {
+                Ok(inner) => inner,
+                Err(_) => Err("Timeout syncing external edit".to_string()),
+            }
+        })
+    }
+
+    fn parse_external_sync_result(result: Value) -> Result<ExternalSyncResult, String> {
+        let Value::Map(map) = result else {
+            return Err("Expected table result from sync_external_lines".to_string());
+        };
+        let mut status = None;
+        let mut tick = None;
+        let mut line_count = None;
+        for (key, value) in map {
+            match key.as_str() {
+                Some("status") => {
+                    status = match value.as_str() {
+                        Some("unchanged") => Some(ExternalSyncStatus::Unchanged),
+                        Some("updated") => Some(ExternalSyncStatus::Updated),
+                        Some("stale") => Some(ExternalSyncStatus::Stale),
+                        _ => None,
+                    }
+                }
+                Some("tick") => tick = value.as_i64(),
+                Some("line_count") => line_count = value.as_i64(),
+                _ => {}
+            }
+        }
+        match (status, tick, line_count) {
+            (Some(status), Some(tick), Some(line_count)) => Ok(ExternalSyncResult {
+                status,
+                tick,
+                line_count,
+            }),
+            _ => Err("Invalid result from sync_external_lines".to_string()),
+        }
+    }
+
+    /// Switch to buffer by path, creating and initializing if needed.
+    /// For an existing buffer, `lines` that differ from Neovim's content are
+    /// applied as an external edit (`content_updated`); `unmodified` then
+    /// clears Neovim's 'modified' flag because Godot has saved the file.
     pub fn switch_to_buffer(
         &self,
         path: &str,
         lines: Option<Vec<String>>,
         indent_opts: Option<IndentOptions>,
+        unmodified: bool,
     ) -> Result<SwitchBufferResult, String> {
         let neovim_arc = self.neovim.clone();
         let path = path.to_string();
@@ -67,9 +145,20 @@ impl NeovimClient {
                                         Value::from(opts.indent_size as i64),
                                     ),
                                 ];
-                                vec![Value::from(path), lines_value, Value::Map(map)]
+                                vec![
+                                    Value::from(path),
+                                    lines_value,
+                                    Value::Map(map),
+                                    Value::from(unmodified),
+                                ]
                             }
-                            None => vec![Value::from(path), lines_value],
+                            // `false` stands in for "no indent options"
+                            None => vec![
+                                Value::from(path),
+                                lines_value,
+                                Value::from(false),
+                                Value::from(unmodified),
+                            ],
                         };
 
                         let result = neovim
@@ -77,7 +166,8 @@ impl NeovimClient {
                             .await
                             .map_err(|e| format!("Failed to switch buffer: {}", e))?;
 
-                        // Parse result table { bufnr, tick, is_new, attached, cursor }
+                        // Parse result table
+                        // { bufnr, tick, is_new, content_updated, line_count, attached, cursor }
                         Self::parse_switch_buffer_result(result)
                     } else {
                         Err("Neovim not connected".to_string())
@@ -124,6 +214,8 @@ impl NeovimClient {
             let mut bufnr: Option<i64> = None;
             let mut tick: Option<i64> = None;
             let mut is_new: Option<bool> = None;
+            let mut content_updated = false;
+            let mut line_count: Option<i64> = None;
             let mut attached: Option<bool> = None;
             let mut cursor: Option<(i64, i64)> = None;
 
@@ -133,6 +225,10 @@ impl NeovimClient {
                         Some("bufnr") => bufnr = value.as_i64(),
                         Some("tick") => tick = value.as_i64(),
                         Some("is_new") => is_new = value.as_bool(),
+                        Some("content_updated") => {
+                            content_updated = value.as_bool().unwrap_or(false)
+                        }
+                        Some("line_count") => line_count = value.as_i64(),
                         Some("attached") => attached = value.as_bool(),
                         Some("cursor") => {
                             // cursor is [row, col] array, 1-indexed
@@ -154,6 +250,8 @@ impl NeovimClient {
                     bufnr: b,
                     tick: t,
                     is_new: n,
+                    content_updated,
+                    line_count,
                     attached: a,
                     cursor: c,
                 }),

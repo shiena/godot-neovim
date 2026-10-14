@@ -20,6 +20,7 @@ M.integration = integration
 M.buffer_register = buffer.buffer_register
 M.buffer_register_and_attach = buffer.buffer_register_and_attach
 M.buffer_update = buffer.buffer_update
+M.sync_external_lines = buffer.sync_external_lines
 M.switch_to_buffer = buffer.switch_to_buffer
 M.get_buffer_info = buffer.get_buffer_info
 M.reload_buffer = buffer.reload_buffer

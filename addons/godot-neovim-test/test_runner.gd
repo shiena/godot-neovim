@@ -16,6 +16,11 @@ extends Node
 ##                          {"wait": 0.1} → delay seconds
 ##                          {"open": "res://..."} → switch script editor tab
 ##                            (optional "open_wait": settle time, default 0.6)
+##                          {"godot_append": "...", "path": "res://..."}
+##                            → edit the CodeEdit through Godot's API, the way
+##                            Godot itself inserts a signal callback: caret to
+##                            the end, insert text there. "path" (optional)
+##                            targets an open script that is not current.
 ##   interval      float  Optional: delay between keys/events (default 0.05s)
 ##   sync_wait     float  Optional: post-keys Neovim sync wait (default 0.3s)
 ##   category      str    Optional: tag override (defaults to filename stem)
@@ -192,6 +197,18 @@ func _run_step(step: Dictionary, interval: float) -> void:
 		await get_tree().create_timer(interval).timeout
 	elif step.has("wait"):
 		await get_tree().create_timer(float(step.wait)).timeout
+	elif step.has("godot_append"):
+		var target := String(step.get("path", ""))
+		_record_recent("godot_append", target.get_file() if target != "" else "current")
+		var ce := _get_code_edit_for(target)
+		if ce:
+			var last := ce.get_line_count() - 1
+			ce.set_caret_line(last)
+			ce.set_caret_column(ce.get_line(last).length())
+			ce.insert_text_at_caret(String(step.godot_append))
+		else:
+			_log("[color=yellow]No CodeEdit for: %s[/color]" % target)
+		await get_tree().create_timer(interval).timeout
 	elif step.has("open"):
 		# Switch the script editor to another script (buffer-switching tests).
 		# The plugin's script-change processing is deferred with retries, so
@@ -484,6 +501,24 @@ func _get_code_edit() -> CodeEdit:
 	if not editor:
 		return null
 	return editor.get_base_editor() as CodeEdit
+
+
+## CodeEdit of an open script (current one when path is empty).
+func _get_code_edit_for(path: String) -> CodeEdit:
+	if path == "":
+		return _get_code_edit()
+	var se := EditorInterface.get_script_editor()
+	if not se:
+		return null
+	var scripts := se.get_open_scripts()
+	# get_open_script_editors() also lists text-file editors (TextEditor);
+	# only ScriptTextEditors line up with get_open_scripts().
+	var editors := se.get_open_script_editors().filter(
+		func(e: ScriptEditorBase) -> bool: return e.get_class() == "ScriptTextEditor")
+	for i in range(mini(scripts.size(), editors.size())):
+		if scripts[i].resource_path == path:
+			return editors[i].get_base_editor() as CodeEdit
+	return null
 
 
 # ---- Test Case Loading ----

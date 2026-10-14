@@ -194,6 +194,13 @@ impl SyncManager {
         self.changed_by_nvim = false;
     }
 
+    /// Latest changedtick whose effect Godot already has: either applied from
+    /// a Neovim event or produced by our own push. If Neovim's changedtick is
+    /// higher, Neovim has edits that are still on their way to Godot.
+    pub fn last_known_tick(&self) -> i64 {
+        self.changedtick.max(self.last_pushed_tick)
+    }
+
     /// Read the changed_by_nvim flag. Used by Godot→Neovim sync paths
     /// (e.g., text_changed handler in insert mode) to skip pushing changes
     /// that originated from Neovim itself.

@@ -117,10 +117,35 @@ pub struct SwitchBufferResult {
     pub tick: i64,
     /// Whether this is a newly created buffer
     pub is_new: bool,
+    /// Whether an edit Godot made while the buffer was not current was applied
+    pub content_updated: bool,
+    /// Neovim buffer line count (None if the Lua side did not report it)
+    pub line_count: Option<i64>,
     /// Whether buffer is attached for notifications
     pub attached: bool,
     /// Cursor position (line, col) - line is 1-indexed, col is 0-indexed
     pub cursor: (i64, i64),
+}
+
+/// Outcome of applying a Godot-side edit to the Neovim buffer
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalSyncStatus {
+    /// Content already matched; nothing was changed
+    Unchanged,
+    /// The changed line range was replaced
+    Updated,
+    /// Neovim has edits Godot has not applied yet; nothing was changed
+    Stale,
+}
+
+/// Result from sync_external_lines
+#[derive(Debug, Clone, Copy)]
+pub struct ExternalSyncResult {
+    pub status: ExternalSyncStatus,
+    /// changedtick after the call
+    pub tick: i64,
+    /// Neovim buffer line count after the call
+    pub line_count: i64,
 }
 
 /// Indent options for Neovim buffer
