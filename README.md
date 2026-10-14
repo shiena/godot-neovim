@@ -213,10 +213,12 @@ The **Neovim Keymaps** dock panel allows you to customize key bindings without r
 - Delete bindings with the `Delete` key
 - Reset to defaults with the **Reset** button
 - Import keymaps from Neovim with the **Import from Neovim** button (requires `neovim_clean = false` for user keymaps)
+- Assign keys to actions that have no default binding (such as **save**): these appear at the end of the list with an empty Key column. Double-click the Key column to assign a key, for example `<C-s>` on Windows/Linux or `<D-s>` on macOS
 
 **Key format** follows Neovim notation:
 - Single characters: `a`, `A`, `/`, `$`, etc.
 - Control combinations: `<C-a>`, `<C-f>`, etc.
+- Cmd combinations (macOS): `<D-s>`, etc.
 - Special keys: `<CR>`, `<Esc>`, `<Tab>`, `<BS>`, etc.
 - Key sequences: `gd`, `zo`, `ZZ`, `[[`, etc.
 

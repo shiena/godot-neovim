@@ -1,0 +1,159 @@
+[
+  {
+    "id": 700,
+    "name": "Ctrl+S bound to action_save saves in normal mode",
+    "text": "extends Node\nvar save_normal = 1",
+    "cursor": [
+      1,
+      0
+    ],
+    "keymap": {
+      "n": {
+        "<C-s>": "action_save"
+      }
+    },
+    "steps": [
+      {
+        "event": "S",
+        "ctrl": true
+      },
+      {
+        "wait": 0.3
+      }
+    ],
+    "expect_saved": true,
+    "expect_text": "extends Node\nvar save_normal = 1",
+    "expect_mode": "n"
+  },
+  {
+    "id": 701,
+    "name": "Ctrl+S bound to action_save saves in insert mode and stays in insert",
+    "text": "extends Node\nvar save_insert = 1",
+    "cursor": [
+      1,
+      0
+    ],
+    "keymap": {
+      "i": {
+        "<C-s>": "action_save"
+      }
+    },
+    "steps": [
+      {
+        "send": "A"
+      },
+      {
+        "event": "S",
+        "ctrl": true
+      },
+      {
+        "wait": 0.3
+      }
+    ],
+    "expect_saved": true,
+    "expect_text": "extends Node\nvar save_insert = 1",
+    "expect_mode": "i"
+  },
+  {
+    "id": 702,
+    "name": "Ctrl+S bound to action_save saves in visual mode and stays in visual",
+    "text": "extends Node\nvar save_visual = 1",
+    "cursor": [
+      1,
+      0
+    ],
+    "keymap": {
+      "v": {
+        "<C-s>": "action_save"
+      }
+    },
+    "steps": [
+      {
+        "send": "v"
+      },
+      {
+        "event": "S",
+        "ctrl": true
+      },
+      {
+        "wait": 0.3
+      }
+    ],
+    "expect_saved": true,
+    "expect_text": "extends Node\nvar save_visual = 1",
+    "expect_mode": "v"
+  },
+  {
+    "id": 703,
+    "name": "Unbound Ctrl+S does not save (action_save has no default key)",
+    "text": "extends Node\nvar save_unbound = 1",
+    "cursor": [
+      1,
+      0
+    ],
+    "steps": [
+      {
+        "event": "S",
+        "ctrl": true
+      },
+      {
+        "wait": 0.3
+      }
+    ],
+    "expect_saved": false,
+    "expect_text": "extends Node\nvar save_unbound = 1",
+    "expect_mode": "n"
+  },
+  {
+    "id": 704,
+    "name": "Cmd+S (<D-s>) bound to action_save saves in normal mode",
+    "text": "extends Node\nvar save_cmd = 1",
+    "cursor": [
+      1,
+      0
+    ],
+    "keymap": {
+      "n": {
+        "<D-s>": "action_save"
+      }
+    },
+    "steps": [
+      {
+        "event": "S",
+        "meta": true
+      },
+      {
+        "wait": 0.3
+      }
+    ],
+    "expect_saved": true,
+    "expect_text": "extends Node\nvar save_cmd = 1",
+    "expect_mode": "n"
+  },
+  {
+    "id": 705,
+    "name": "Unbound Cmd+S is not sent to Neovim as 's' in normal mode",
+    "text": "extends Node\nvar save_cmd_unbound = 1",
+    "cursor": [
+      1,
+      0
+    ],
+    "steps": [
+      {
+        "event": "S",
+        "meta": true,
+        "unicode": 0
+      },
+      {
+        "wait": 0.3
+      }
+    ],
+    "expect_saved": false,
+    "expect_text": "extends Node\nvar save_cmd_unbound = 1",
+    "expect_mode": "n",
+    "expect_cursor": [
+      1,
+      0
+    ]
+  }
+]

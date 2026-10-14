@@ -38,7 +38,9 @@ impl GodotNeovimPlugin {
         self.mark_input_handled();
         let mut dict = VarDictionary::new();
         dict.set(KEY_NEEDS_DISPATCH, true);
-        dict.set(KEY_MODE, &GString::from(&self.current_mode));
+        // Normalize long mode names ("visual", "insert", ...) to the short
+        // keymap keys; otherwise "visual" falls back to the normal keymap.
+        dict.set(KEY_MODE, &self.get_current_mode_impl());
         dict.set(KEY_RESOLVED_KEY, &GString::from(resolved_key));
         dict
     }
@@ -72,6 +74,11 @@ impl GodotNeovimPlugin {
         if key_event.is_command_or_control_pressed() && keycode == Key::SLASH {
             self.action_toggle_comment_impl();
             return self.dispatch_pass_through();
+        }
+
+        // ----- Custom-bound modifier keys (<C-s>, <D-s>, ...) / Cmd pass-through -----
+        if let Some(result) = self.resolve_custom_modified_key(key_event) {
+            return result;
         }
 
         // ----- Ctrl+key combinations → dispatch to GDScript keymap -----
@@ -187,6 +194,35 @@ impl GodotNeovimPlugin {
 
         // Key couldn't be converted - ignore
         self.dispatch_handled()
+    }
+
+    // =====================================================================
+    // Helper: Dispatch modifier keys bound in the normal/visual keymap
+    // =====================================================================
+    /// Keys like <C-s> or <D-s> that the user bound to an action in the keymap
+    /// editor are dispatched through the keymap. Unbound Meta (Cmd/Win)
+    /// combinations pass through to Godot: Neovim has no use for them, and
+    /// converting them would drop the modifier (Cmd+S would be sent as `s`).
+    fn resolve_custom_modified_key(
+        &self,
+        key_event: &Gd<godot::classes::InputEventKey>,
+    ) -> Option<VarDictionary> {
+        if self.is_alt_composed_unicode(key_event) {
+            return None;
+        }
+        let notation = self.modified_key_notation(key_event)?;
+        let custom = if Self::is_visual_mode(&self.current_mode) {
+            &self.custom_visual_keys
+        } else {
+            &self.custom_normal_keys
+        };
+        if custom.contains(&notation) {
+            return Some(self.dispatch_key(&notation));
+        }
+        if key_event.is_meta_pressed() {
+            return Some(self.dispatch_pass_through());
+        }
+        None
     }
 
     // =====================================================================
@@ -1121,6 +1157,26 @@ impl GodotNeovimPlugin {
             self.sync_buffer_to_neovim_during_insert();
             self.pending_insert_register = true;
             return self.dispatch_handled();
+        }
+
+        // ----- 3b. Meta (Cmd/Win) keys : keymap if bound, else Godot -----
+        // Checked before the Ctrl/Alt path, whose notation ignores Meta.
+        // Unbound combinations (Cmd+C, Cmd+S, ...) go to Godot untouched: no
+        // macro recording and no replace-mode overwrite, since they insert no
+        // text.
+        if key_event.is_meta_pressed() {
+            if let Some(nvim_key) = self.modified_key_notation(key_event) {
+                let custom = if overwrite {
+                    &self.custom_replace_keys
+                } else {
+                    &self.custom_insert_keys
+                };
+                if custom.contains(&nvim_key) {
+                    self.sync_buffer_to_neovim_during_insert();
+                    return self.dispatch_key(&nvim_key);
+                }
+            }
+            return self.dispatch_pass_through();
         }
 
         // ----- 4 & 5. Ctrl/Alt modified keys -----

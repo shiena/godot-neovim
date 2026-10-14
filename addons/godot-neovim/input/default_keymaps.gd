@@ -6,6 +6,7 @@
 ## Key format follows Neovim notation:
 ## - Single chars: "a", "A", "0", "$", etc.
 ## - Control: "<C-a>", "<C-f>", etc.
+## - Cmd (macOS) / Win key: "<D-s>", etc.
 ## - Special: "<CR>", "<Esc>", "<Tab>", etc.
 ## - Sequences: "gg", "gd", "ZZ", etc.
 class_name GodotNeovimDefaultKeymaps
@@ -166,3 +167,12 @@ static func get_replace_keymap() -> Dictionary:
 		"<C-o>": "action_send_keys",
 		"<C-v>": "action_send_keys",
 	}
+
+
+## Actions that have no default key binding.
+## The keymap editor lists them with an empty key so users can assign one
+## (e.g. "<C-s>" on Windows/Linux or "<D-s>" on macOS for action_save).
+static func get_unbound_actions() -> PackedStringArray:
+	return [
+		"action_save",
+	]

@@ -181,14 +181,16 @@ func _load_custom_keymaps_from_settings() -> void:
 			_apply_mode_changes(mode_key, data[mode_key])
 
 
-## Report insert/replace-mode keys with non-default bindings to Rust.
-## The Rust dispatcher sends unlisted Ctrl/Alt keys to Neovim synchronously
-## (preserving keystroke ordering with same-frame plain characters) and only
-## routes the listed keys through the deferred GDScript dispatch.
+## Report keys with non-default bindings to Rust.
+## In insert/replace mode the Rust dispatcher sends unlisted Ctrl/Alt keys to
+## Neovim synchronously (preserving keystroke ordering with same-frame plain
+## characters) and only routes the listed keys through the deferred GDScript
+## dispatch. In normal/visual mode the listed modifier keys (e.g. "<C-s>",
+## "<D-s>") are dispatched instead of being sent to Neovim.
 func _push_custom_dispatch_keys() -> void:
 	if not plugin:
 		return
-	for mode in ["i", "R"]:
+	for mode in ["n", "v", "i", "R"]:
 		var custom := PackedStringArray()
 		var keymap: Dictionary = keymaps.get(mode, {})
 		for key in keymap:

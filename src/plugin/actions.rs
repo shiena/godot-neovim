@@ -370,6 +370,12 @@ impl GodotNeovimPlugin {
     // Save / Close (ZZ, ZQ)
     // =========================================================================
 
+    /// Save the current file (:w). Unbound by default; users can assign a key
+    /// such as <C-s> or <D-s> from the keymap editor.
+    pub(super) fn action_save_impl(&mut self) {
+        self.cmd_save();
+    }
+
     /// Save and close (ZZ / :wq)
     pub(super) fn action_save_and_close_impl(&mut self) {
         self.cmd_save_and_close();

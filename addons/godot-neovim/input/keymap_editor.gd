@@ -201,6 +201,8 @@ func _on_tree_gui_input(event: InputEvent) -> void:
 			return
 
 		var key_str: String = selected.get_text(0)
+		if key_str.is_empty():
+			return  # Unassigned action row: nothing to remove
 		var is_custom: bool = selected.get_text(2) != ""
 
 		var mode_changes: Dictionary = changes[current_display_mode]
@@ -258,7 +260,12 @@ func _on_tree_item_edited() -> void:
 	# Key column edited - look up action from current data
 	var default_map: Dictionary = _get_default_keymap_for_current_mode()
 
-	var action: String = set_dict.get(old_key, default_map.get(old_key, "action_send_keys"))
+	var action: String
+	if old_key.is_empty():
+		# Unassigned action row: the action is stored in column 1's metadata
+		action = item.get_metadata(1)
+	else:
+		action = set_dict.get(old_key, default_map.get(old_key, "action_send_keys"))
 
 	# If old key was a custom override, remove it
 	if set_dict.has(old_key):
@@ -316,6 +323,23 @@ func _refresh_tree() -> void:
 			item.set_text(2, "*")
 		item.set_selectable(2, false)
 
+	# List actions with no key so a key can be assigned by editing the Key column
+	var bound_actions: Dictionary = {}
+	for key in all_keys:
+		bound_actions[all_keys[key]["action"]] = true
+	for action in GodotNeovimDefaultKeymaps.get_unbound_actions():
+		if bound_actions.has(action):
+			continue
+		var item := tree.create_item(root)
+		item.set_text(0, "")
+		item.set_editable(0, true)
+		item.set_metadata(0, "")
+		item.set_tooltip_text(0, "Double-click to assign a key")
+		item.set_text(1, _display_action_name(action))
+		item.set_metadata(1, action)
+		item.set_editable(1, false)
+		item.set_selectable(2, false)
+
 
 ## Look up the default keymap for the mode currently shown in the editor.
 func _get_default_keymap_for_current_mode() -> Dictionary:
@@ -351,8 +375,14 @@ const VALID_SPECIAL_KEYS: PackedStringArray = [
 	"Bar", "Bslash", "LT",
 ]
 
-## Valid modifier prefixes.
-const VALID_MODIFIERS: PackedStringArray = ["C", "A", "S", "C-A", "C-S", "A-S", "C-A-S"]
+## Valid modifier prefixes, in the C-A-S-D order the plugin generates.
+## D is the Cmd key on macOS (Win key on Windows/Linux).
+const VALID_MODIFIERS: PackedStringArray = [
+	"C", "A", "S", "D",
+	"C-A", "C-S", "C-D", "A-S", "A-D", "S-D",
+	"C-A-S", "C-A-D", "C-S-D", "A-S-D",
+	"C-A-S-D",
+]
 
 ## Printable characters valid as single-key bindings.
 const VALID_SINGLE_CHARS := (

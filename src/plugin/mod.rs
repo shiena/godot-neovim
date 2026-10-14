@@ -388,6 +388,14 @@ pub struct GodotNeovimPlugin {
     /// Replace-mode counterpart of custom_insert_keys.
     #[init(val = std::collections::HashSet::new())]
     custom_replace_keys: std::collections::HashSet<String>,
+    /// Normal-mode keys whose keymap binding differs from action_send_keys.
+    /// Only modifier combinations (<C-x>, <A-x>, <D-x>) are looked up: they
+    /// are dispatched through the keymap instead of being sent to Neovim.
+    #[init(val = std::collections::HashSet::new())]
+    custom_normal_keys: std::collections::HashSet<String>,
+    /// Visual-mode counterpart of custom_normal_keys.
+    #[init(val = std::collections::HashSet::new())]
+    custom_visual_keys: std::collections::HashSet<String>,
 }
 
 #[godot_api]
@@ -908,12 +916,14 @@ impl GodotNeovimPlugin {
         self.sync_manager.end_nvim_change();
     }
 
-    /// Register insert/replace-mode keys whose keymap binding differs from
-    /// the default action_send_keys. Called by godot_neovim_input.gd whenever
-    /// keymaps are (re)loaded or changed. Keys in this set are dispatched
-    /// through the GDScript keymap (call_deferred); all other Ctrl/Alt keys
-    /// in insert/replace mode are sent to Neovim synchronously so a plain
+    /// Register keys whose keymap binding differs from the default
+    /// action_send_keys. Called by godot_neovim_input.gd whenever keymaps are
+    /// (re)loaded or changed. Keys in this set are dispatched through the
+    /// GDScript keymap (call_deferred); all other Ctrl/Alt keys in
+    /// insert/replace mode are sent to Neovim synchronously so a plain
     /// character typed in the same frame cannot overtake the command.
+    /// For normal/visual mode ("n"/"v") only modifier combinations are looked
+    /// up, so that e.g. <C-s> or <D-s> can be bound without a Rust change.
     #[func]
     fn set_custom_dispatch_keys(&mut self, mode: GString, keys: PackedStringArray) {
         let set: std::collections::HashSet<String> =
@@ -924,6 +934,8 @@ impl GodotNeovimPlugin {
             set
         );
         match mode.to_string().as_str() {
+            "n" => self.custom_normal_keys = set,
+            "v" => self.custom_visual_keys = set,
             "i" => self.custom_insert_keys = set,
             "R" => self.custom_replace_keys = set,
             other => {
@@ -2035,6 +2047,12 @@ impl GodotNeovimPlugin {
     #[func]
     fn action_open_documentation(&mut self) {
         self.action_open_documentation_impl();
+    }
+
+    /// Save the current file (:w)
+    #[func]
+    fn action_save(&mut self) {
+        self.action_save_impl();
     }
 
     /// Save and close (ZZ / :wq)

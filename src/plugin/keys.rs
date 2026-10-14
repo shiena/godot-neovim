@@ -32,6 +32,75 @@ impl GodotNeovimPlugin {
         !kc.eq_ignore_ascii_case(&uc)
     }
 
+    /// Convert a Ctrl/Alt/Meta-modified key event to Neovim notation for
+    /// keymap lookup, e.g. Ctrl+S → `<C-s>`, Cmd+S (macOS) → `<D-s>`,
+    /// Ctrl+Shift+S → `<C-S-s>`. Modifiers are emitted in C-A-S-D order to
+    /// match the keymap editor's accepted notation.
+    ///
+    /// Letters and digits are resolved from the keycode rather than the
+    /// unicode value, because the OS may report no character (or a control
+    /// character) while Ctrl/Cmd is held.
+    /// Returns None for unmodified keys and modifier-only presses.
+    pub(super) fn modified_key_notation(&self, event: &Gd<InputEventKey>) -> Option<String> {
+        let ctrl = event.is_ctrl_pressed();
+        let alt = event.is_alt_pressed();
+        let meta = event.is_meta_pressed();
+        let shift = event.is_shift_pressed();
+        if !(ctrl || alt || meta) {
+            return None;
+        }
+
+        let keycode = event.get_keycode();
+        let ord = keycode.ord();
+        let base = match keycode {
+            Key::ESCAPE => "Esc".to_string(),
+            Key::ENTER => "CR".to_string(),
+            Key::TAB => "Tab".to_string(),
+            Key::BACKSPACE => "BS".to_string(),
+            Key::DELETE => "Del".to_string(),
+            Key::UP => "Up".to_string(),
+            Key::DOWN => "Down".to_string(),
+            Key::LEFT => "Left".to_string(),
+            Key::RIGHT => "Right".to_string(),
+            Key::HOME => "Home".to_string(),
+            Key::END => "End".to_string(),
+            Key::PAGEUP => "PageUp".to_string(),
+            Key::PAGEDOWN => "PageDown".to_string(),
+            Key::SPACE => "Space".to_string(),
+            _ if (Key::A.ord()..=Key::Z.ord()).contains(&ord)
+                || (Key::KEY_0.ord()..=Key::KEY_9.ord()).contains(&ord) =>
+            {
+                let c = char::from_u32(ord as u32)?.to_ascii_lowercase();
+                c.to_string()
+            }
+            _ => {
+                // Punctuation: the unicode value already reflects Shift.
+                let c = char::from_u32(event.get_unicode()).filter(|c| !c.is_control())?;
+                return Some(Self::format_modified_key(
+                    ctrl,
+                    alt,
+                    false,
+                    meta,
+                    &c.to_string(),
+                ));
+            }
+        };
+        // Shift is significant for letters/digits and special keys.
+        Some(Self::format_modified_key(ctrl, alt, shift, meta, &base))
+    }
+
+    fn format_modified_key(ctrl: bool, alt: bool, shift: bool, meta: bool, base: &str) -> String {
+        let mut s = String::from("<");
+        for (on, m) in [(ctrl, "C-"), (alt, "A-"), (shift, "S-"), (meta, "D-")] {
+            if on {
+                s.push_str(m);
+            }
+        }
+        s.push_str(base);
+        s.push('>');
+        s
+    }
+
     /// Convert Godot key event to Neovim key string
     pub(super) fn key_event_to_nvim_string(&self, event: &Gd<InputEventKey>) -> Option<String> {
         let keycode = event.get_keycode();
