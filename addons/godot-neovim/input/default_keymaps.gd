@@ -120,6 +120,8 @@ static func get_visual_keymap() -> Dictionary:
 
 
 ## Insert mode keymap.
+## Custom action_escape bindings are resolved synchronously in Rust, including
+## printable sequences such as kj. Other plain-character bindings pass through.
 ## The Rust dispatcher only routes Ctrl/Alt + letter keys here (see
 ## process_insert_key_event_impl). Plain characters and unmodified specials
 ## fall through to Godot directly, Ctrl/Alt + nav/delete keys (BS, Del,

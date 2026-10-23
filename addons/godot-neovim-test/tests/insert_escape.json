@@ -1,0 +1,61 @@
+[
+  {
+    "id": 800,
+    "name": "Insert kj Escape removes the prefix and exits",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keymap": {"i": {"kj": "action_escape"}},
+    "steps": [{"send": "A"}, {"event": "K"}, {"event": "J"}],
+    "expect_text": "hello",
+    "expect_mode": "n"
+  },
+  {
+    "id": 801,
+    "name": "Unmatched insert Escape prefix remains ordinary text",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keymap": {"i": {"kj": "action_escape"}},
+    "steps": [{"send": "A"}, {"event": "K"}, {"event": "X"}],
+    "expect_text": "hellokx",
+    "expect_mode": "i"
+  },
+  {
+    "id": 802,
+    "name": "Expired insert Escape prefix remains ordinary text",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keymap": {"i": {"kj": "action_escape"}},
+    "steps": [{"send": "A"}, {"event": "K"}, {"wait": 1.1}, {"event": "J"}],
+    "expect_text": "hellokj",
+    "expect_mode": "i"
+  },
+  {
+    "id": 803,
+    "name": "Repeated insert Escape prefix preserves the unmatched character",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keymap": {"i": {"kj": "action_escape"}},
+    "steps": [{"send": "A"}, {"event": "K"}, {"event": "K"}, {"event": "J"}],
+    "expect_text": "hellok",
+    "expect_mode": "n"
+  },
+  {
+    "id": 804,
+    "name": "Cursor movement cancels the insert Escape sequence",
+    "text": "hello",
+    "cursor": [0, 0],
+    "keymap": {"i": {"kj": "action_escape"}},
+    "steps": [{"send": "A"}, {"event": "K"}, {"event": "LEFT"}, {"event": "J"}],
+    "expect_text": "hellojk",
+    "expect_mode": "i"
+  },
+  {
+    "id": 805,
+    "name": "Unbound kj remains ordinary insert text",
+    "text": "hello",
+    "cursor": [0, 0],
+    "steps": [{"send": "A"}, {"event": "K"}, {"event": "J"}],
+    "expect_text": "hellokj",
+    "expect_mode": "i"
+  }
+]

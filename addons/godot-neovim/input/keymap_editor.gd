@@ -168,7 +168,7 @@ func _on_import_pressed() -> void:
 		item.set_text(2, nvim_maps[key])
 
 	dialog.confirmed.connect(func():
-		var mode_changes: Dictionary = changes[current_display_mode]
+		var mode_changes: Dictionary = changes[mode]
 		var set_dict: Dictionary = mode_changes["set"]
 		var item := root.get_first_child()
 		var count := 0
@@ -176,8 +176,11 @@ func _on_import_pressed() -> void:
 			if item.is_checked(0):
 				var lhs: String = item.get_text(1)
 				var rhs: String = item.get_text(2)
-				# Import as action_send_keys mapping (sends rhs to Neovim)
-				set_dict[lhs] = "action_send_keys"
+				# Insert text is handled by Godot, so Escape must be resolved locally.
+				if mode == "i" and rhs.to_lower() in ["<esc>", "<c-[>"]:
+					set_dict[lhs] = "action_escape"
+				else:
+					set_dict[lhs] = "action_send_keys"
 				count += 1
 			item = item.get_next()
 		if count > 0:
@@ -327,7 +330,10 @@ func _refresh_tree() -> void:
 	var bound_actions: Dictionary = {}
 	for key in all_keys:
 		bound_actions[all_keys[key]["action"]] = true
-	for action in GodotNeovimDefaultKeymaps.get_unbound_actions():
+	var unbound_actions := GodotNeovimDefaultKeymaps.get_unbound_actions()
+	if current_display_mode == "i":
+		unbound_actions.append("action_escape")
+	for action in unbound_actions:
 		if bound_actions.has(action):
 			continue
 		var item := tree.create_item(root)
@@ -335,6 +341,8 @@ func _refresh_tree() -> void:
 		item.set_editable(0, true)
 		item.set_metadata(0, "")
 		item.set_tooltip_text(0, "Double-click to assign a key")
+		if action == "action_escape":
+			item.set_tooltip_text(0, "Assign an Insert-mode Escape key or sequence (e.g. kj). Type each key within one second. The prefix appears as text until the sequence completes. Works with Neovim clean enabled.")
 		item.set_text(1, _display_action_name(action))
 		item.set_metadata(1, action)
 		item.set_editable(1, false)

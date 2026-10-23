@@ -9,6 +9,7 @@ mod editing;
 mod editor;
 pub(crate) mod filetype;
 mod input;
+mod insert_escape;
 mod keys;
 mod macros;
 mod marks;
@@ -385,6 +386,9 @@ pub struct GodotNeovimPlugin {
     /// Neovim synchronously to preserve keystroke ordering (see dispatch.rs).
     #[init(val = std::collections::HashSet::new())]
     custom_insert_keys: std::collections::HashSet<String>,
+    /// Insert-mode Escape bindings and the contiguous text typed so far.
+    insert_escape_keys: Vec<String>,
+    insert_escape_pending: Option<insert_escape::PendingEscape>,
     /// Replace-mode counterpart of custom_insert_keys.
     #[init(val = std::collections::HashSet::new())]
     custom_replace_keys: std::collections::HashSet<String>,
@@ -429,6 +433,12 @@ impl IEditorPlugin for GodotNeovimPlugin {
     fn process(&mut self, _delta: f64) {
         if !self.plugin_active {
             return;
+        }
+
+        if self.insert_escape_pending.is_some()
+            && (!self.is_insert_mode() || !self.editor_has_focus())
+        {
+            self.insert_escape_pending = None;
         }
 
         // Event-driven reset for closing_all_tabs flag
@@ -604,6 +614,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
             .clone()
             .try_cast::<godot::classes::InputEventMouseButton>()
         {
+            self.insert_escape_pending = None;
             // Only handle left mouse button when editor has focus
             if mouse_event.get_button_index() == godot::global::MouseButton::LEFT
                 && self.editor_has_focus()
@@ -957,6 +968,18 @@ impl GodotNeovimPlugin {
                 );
             }
         }
+    }
+
+    /// Escape sequences are resolved synchronously before Godot inserts text.
+    #[func]
+    fn set_insert_escape_keys(&mut self, keys: PackedStringArray) {
+        self.insert_escape_pending = None;
+        self.insert_escape_keys = keys.as_slice().iter().map(|key| key.to_string()).collect();
+    }
+
+    #[func]
+    fn action_escape(&mut self) {
+        self.send_escape();
     }
 
     /// Sync mouse selection to Neovim on mouse release
@@ -1478,6 +1501,7 @@ impl GodotNeovimPlugin {
             .clone()
             .try_cast::<godot::classes::InputEventMouseButton>()
         {
+            self.insert_escape_pending = None;
             if mouse_event.get_button_index() == godot::global::MouseButton::LEFT {
                 if mouse_event.is_pressed() {
                     self.mouse_dragging = true;
@@ -1692,6 +1716,7 @@ impl GodotNeovimPlugin {
         let Ok(mouse_event) = event.try_cast::<godot::classes::InputEventMouseButton>() else {
             return;
         };
+        self.insert_escape_pending = None;
 
         if mouse_event.get_button_index() == godot::global::MouseButton::LEFT
             && self.editor_has_focus()
