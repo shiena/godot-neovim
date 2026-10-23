@@ -190,6 +190,12 @@ func _load_custom_keymaps_from_settings() -> void:
 func _push_custom_dispatch_keys() -> void:
 	if not plugin:
 		return
+	var escape_keys := PackedStringArray()
+	for key in keymaps.get("i", {}):
+		var action = keymaps["i"][key]
+		if action is String and action == "action_escape":
+			escape_keys.append(key)
+	plugin.call_deferred(&"set_insert_escape_keys", escape_keys)
 	for mode in ["n", "v", "i", "R"]:
 		var custom := PackedStringArray()
 		var keymap: Dictionary = keymaps.get(mode, {})

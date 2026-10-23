@@ -63,6 +63,7 @@ impl GodotNeovimPlugin {
         &mut self,
         key_event: &Gd<godot::classes::InputEventKey>,
     ) -> VarDictionary {
+        self.insert_escape_pending = None;
         // =====================================================================
         // Normal/Visual mode key processing
         // (Mode routing is done by input() before calling this)
@@ -1088,6 +1089,7 @@ impl GodotNeovimPlugin {
         &mut self,
         key_event: &Gd<godot::classes::InputEventKey>,
     ) -> VarDictionary {
+        self.insert_escape_pending = None;
         self.process_insert_replace_key_event(key_event, true)
     }
 
@@ -1107,7 +1109,12 @@ impl GodotNeovimPlugin {
 
         // ----- 0. Pending <C-r>{register} : consume next key as register name -----
         if self.pending_insert_register {
+            self.insert_escape_pending = None;
             return self.handle_pending_insert_register(key_event);
+        }
+
+        if !overwrite && self.resolve_insert_escape(key_event) {
+            return self.dispatch_handled();
         }
 
         // ----- 1a. Escape / Ctrl+[ : exit insert/replace mode -----

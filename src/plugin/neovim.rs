@@ -687,6 +687,8 @@ impl GodotNeovimPlugin {
     pub(super) fn send_escape(&mut self) {
         use crate::neovim::BufEvent;
 
+        self.insert_escape_pending = None;
+
         crate::verbose_print!("[godot-neovim] send_escape");
 
         // Leaving insert/replace mode invalidates a pending <C-r> register
