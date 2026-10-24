@@ -43,7 +43,8 @@
 ## [br][b]Block/Method Jumps[/b][br]
 ## [code][{ ]}[/code] - Previous/Next unmatched {[br]
 ## [code][( ])[/code] - Previous/Next unmatched ([br]
-## [code][m ]m[/code] - Previous/Next method start (requires treesitter, not available for GDScript)[br]
+## [code][m ]m[/code] - Previous/Next method start
+## (requires treesitter, not available for GDScript)[br]
 ##
 ## [br][b]Operators[/b][br]
 ## [code]d{motion}[/code] - Delete[br]
@@ -178,7 +179,8 @@
 ##
 ## [br][b]Settings[/b][br]
 ## Configure via [code]Editor > Editor Settings > Godot Neovim[/code].[br]
-## [i]Note: Enable "Advanced Settings" toggle in Editor Settings to see the godot_neovim section.[/i][br]
+## [i]Note: Enable "Advanced Settings" toggle in Editor Settings
+## to see the godot_neovim section.[/i][br]
 ## [code]neovim_executable_path[/code] - Path to Neovim executable[br]
 ## [code]neovim_clean[/code] - Equivalent to --clean startup option (default: true)[br]
 ## [code]timeoutlen[/code] - Time (ms) to wait for a mapped sequence to complete (advanced)[br]
