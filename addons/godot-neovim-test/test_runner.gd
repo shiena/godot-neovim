@@ -440,7 +440,7 @@ static func _strip_trailing_newlines(text: String) -> String:
 
 # ---- Failure diagnostics ----
 
-func _log_failure_diagnostics(t: Dictionary, result: Dictionary) -> void:
+func _log_failure_diagnostics(_t: Dictionary, result: Dictionary) -> void:
 	for key in result.diff:
 		var d: Dictionary = result.diff[key]
 		_log("    [color=red]%s[/color]: expected=%s actual=%s" % [

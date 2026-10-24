@@ -1,0 +1,4 @@
+# Keep related declarations together, as in godot-servo.
+# All other rules retain the gdtoolkit defaults.
+disable:
+  - class-definitions-order

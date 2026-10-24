@@ -132,9 +132,10 @@ func _format_key(key: String) -> String:
 		"<Space>":
 			return "SPC"
 		_:
-			if key.begins_with("<") and key.ends_with(">"):
-				return key.substr(1, key.length() - 2)
-			return key
+			return (
+				key.substr(1, key.length() - 2)
+				if key.begins_with("<") and key.ends_with(">") else key
+			)
 
 
 func _update_label() -> void:

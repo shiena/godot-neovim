@@ -115,7 +115,9 @@ func _on_reset_pressed() -> void:
 	changes[current_display_mode] = {"set": {}, "removed": []}
 	_save_and_apply()
 	_refresh_tree()
-	status_label.text = "Reset %s mode to defaults" % MODE_LABELS.get(current_display_mode, current_display_mode)
+	status_label.text = "Reset %s mode to defaults" % MODE_LABELS.get(
+		current_display_mode, current_display_mode
+	)
 
 
 func _on_import_pressed() -> void:
@@ -342,7 +344,12 @@ func _refresh_tree() -> void:
 		item.set_metadata(0, "")
 		item.set_tooltip_text(0, "Double-click to assign a key")
 		if action == "action_escape":
-			item.set_tooltip_text(0, "Assign an Insert-mode Escape key or sequence (e.g. kj). Type each key within one second. The prefix appears as text until the sequence completes. Works with Neovim clean enabled.")
+			item.set_tooltip_text(0,
+				"Assign an Insert-mode Escape key or sequence (e.g. kj). "
+				+ "Type each key within one second. "
+				+ "The prefix appears as text until the sequence completes. "
+				+ "Works with Neovim clean enabled."
+			)
 		item.set_text(1, _display_action_name(action))
 		item.set_metadata(1, action)
 		item.set_editable(1, false)
