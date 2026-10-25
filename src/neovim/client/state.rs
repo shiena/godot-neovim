@@ -62,8 +62,8 @@ impl NeovimClient {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
-            let nvim_lock = neovim_arc.lock().await;
-            if let Some(neovim) = nvim_lock.as_ref() {
+            let nvim = neovim_arc.lock().await.as_ref().cloned();
+            if let Some(neovim) = nvim.as_ref() {
                 if let Err(e) = neovim.ui_try_resize(width, height).await {
                     // Log error but don't fail - resize is best-effort
                     crate::verbose_print!("[godot-neovim] Failed to resize UI: {}", e);

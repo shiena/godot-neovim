@@ -12,7 +12,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 godot = { version = "0.5", features = ["api-4-4"] }
-nvim-rs = { version = "0.9", features = ["use_tokio"] }
+# Pin the godot-neovim branch's cancellation fix for reproducible builds.
+nvim-rs = { git = "https://github.com/shiena/nvim-rs", rev = "51396b237ae70d900e61b2ffc023043780f2ad77", features = ["use_tokio"] }
 tokio = { version = "1.54.1", features = ["full"] }
 futures = "0.3"
 rmpv = "1.3"
