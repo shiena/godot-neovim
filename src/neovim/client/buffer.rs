@@ -13,8 +13,8 @@ impl NeovimClient {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
-            let nvim_lock = neovim_arc.lock().await;
-            if let Some(neovim) = nvim_lock.as_ref() {
+            let nvim = neovim_arc.lock().await.as_ref().cloned();
+            if let Some(neovim) = nvim.as_ref() {
                 // Convert lines to Lua array
                 let lines_value: Vec<Value> = lines.into_iter().map(Value::from).collect();
                 let args = vec![Value::from(0i64), Value::Array(lines_value)];
@@ -50,8 +50,8 @@ impl NeovimClient {
             let result = tokio::time::timeout(
                 std::time::Duration::from_millis(RPC_EXTENDED_TIMEOUT_MS),
                 async {
-                    let nvim_lock = neovim_arc.lock().await;
-                    let Some(neovim) = nvim_lock.as_ref() else {
+                    let nvim = neovim_arc.lock().await.as_ref().cloned();
+                    let Some(neovim) = nvim.as_ref() else {
                         return Err("Neovim not connected".to_string());
                     };
                     let mut opts = vec![(Value::from("unmodified"), Value::from(unmodified))];
@@ -126,8 +126,8 @@ impl NeovimClient {
             let result = tokio::time::timeout(
                 std::time::Duration::from_millis(RPC_EXTENDED_TIMEOUT_MS),
                 async {
-                    let nvim_lock = neovim_arc.lock().await;
-                    if let Some(neovim) = nvim_lock.as_ref() {
+                    let nvim = neovim_arc.lock().await.as_ref().cloned();
+                    if let Some(neovim) = nvim.as_ref() {
                         // Prepare arguments
                         let lines_value = match lines {
                             Some(l) => Value::Array(l.into_iter().map(Value::from).collect()),
@@ -188,8 +188,8 @@ impl NeovimClient {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
-            let nvim_lock = neovim_arc.lock().await;
-            if let Some(neovim) = nvim_lock.as_ref() {
+            let nvim = neovim_arc.lock().await.as_ref().cloned();
+            if let Some(neovim) = nvim.as_ref() {
                 let args = vec![
                     Value::from(0i64), // current buffer
                     Value::from(use_spaces),
@@ -269,8 +269,8 @@ impl NeovimClient {
         self.runtime.block_on(async {
             let result =
                 tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
-                    let nvim_lock = neovim_arc.lock().await;
-                    if let Some(neovim) = nvim_lock.as_ref() {
+                    let nvim = neovim_arc.lock().await.as_ref().cloned();
+                    if let Some(neovim) = nvim.as_ref() {
                         let buf = neovim
                             .get_current_buf()
                             .await

@@ -9,8 +9,8 @@ impl NeovimClient {
         let cmd = cmd.to_string();
 
         self.runtime.block_on(async {
-            let nvim_lock = neovim_arc.lock().await;
-            if let Some(neovim) = nvim_lock.as_ref() {
+            let nvim = neovim_arc.lock().await.as_ref().cloned();
+            if let Some(neovim) = nvim.as_ref() {
                 neovim
                     .command(&cmd)
                     .await
@@ -28,8 +28,8 @@ impl NeovimClient {
         let lua_code = lua_code.to_string();
 
         self.runtime.block_on(async {
-            let nvim_lock = neovim_arc.lock().await;
-            if let Some(neovim) = nvim_lock.as_ref() {
+            let nvim = neovim_arc.lock().await.as_ref().cloned();
+            if let Some(neovim) = nvim.as_ref() {
                 neovim
                     .exec_lua(&lua_code, vec![])
                     .await
@@ -50,8 +50,8 @@ impl NeovimClient {
         let lua_code = lua_code.to_string();
 
         self.runtime.block_on(async {
-            let nvim_lock = neovim_arc.lock().await;
-            if let Some(neovim) = nvim_lock.as_ref() {
+            let nvim = neovim_arc.lock().await.as_ref().cloned();
+            if let Some(neovim) = nvim.as_ref() {
                 neovim
                     .exec_lua(&lua_code, args)
                     .await

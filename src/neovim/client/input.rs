@@ -11,8 +11,8 @@ impl NeovimClient {
         self.runtime.block_on(async {
             let result =
                 tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
-                    let nvim_lock = neovim_arc.lock().await;
-                    if let Some(neovim) = nvim_lock.as_ref() {
+                    let nvim = neovim_arc.lock().await.as_ref().cloned();
+                    if let Some(neovim) = nvim.as_ref() {
                         // nvim_input returns bytes written, but we only care about success
                         neovim
                             .input(&keys)

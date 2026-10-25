@@ -12,10 +12,15 @@ impl NeovimClient {
             // Use timeout to avoid blocking on operator-pending commands
             let result =
                 tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
-                    let nvim_lock = neovim_arc.lock().await;
-                    if let Some(neovim) = nvim_lock.as_ref() {
-                        let window = neovim.get_current_win().await.ok()?;
-                        window.get_cursor().await.ok()
+                    let nvim = neovim_arc.lock().await.as_ref().cloned();
+                    if let Some(neovim) = nvim.as_ref() {
+                        let value = neovim
+                            .call("nvim_win_get_cursor", vec![Value::from(0)])
+                            .await
+                            .ok()?
+                            .ok()?;
+                        let pos = value.as_array()?;
+                        Some((pos.first()?.as_i64()?, pos.get(1)?.as_i64()?))
                     } else {
                         None
                     }
@@ -38,10 +43,19 @@ impl NeovimClient {
             // Use timeout to avoid blocking
             let result =
                 tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
-                    let nvim_lock = neovim_arc.lock().await;
-                    if let Some(neovim) = nvim_lock.as_ref() {
-                        let window = neovim.get_current_win().await.ok()?;
-                        window.set_cursor((line, col)).await.ok()?;
+                    let nvim = neovim_arc.lock().await.as_ref().cloned();
+                    if let Some(neovim) = nvim.as_ref() {
+                        neovim
+                            .call(
+                                "nvim_win_set_cursor",
+                                vec![
+                                    Value::from(0),
+                                    Value::Array(vec![Value::from(line), Value::from(col)]),
+                                ],
+                            )
+                            .await
+                            .ok()?
+                            .ok()?;
                         Some(())
                     } else {
                         None
@@ -66,31 +80,26 @@ impl NeovimClient {
         self.runtime.block_on(async {
             let result =
                 tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
-                    let nvim_lock = neovim_arc.lock().await;
-                    let neovim = nvim_lock.as_ref()?;
+                    let nvim = neovim_arc.lock().await.as_ref().cloned();
+                    let neovim = nvim.as_ref()?;
 
-                    // Get visual start position using getpos("v")
-                    let visual_start = neovim
-                        .call_function("getpos", vec![rmpv::Value::from("v")])
+                    // Read both endpoints in one request and one editor callback.
+                    let positions = neovim
+                        .exec_lua("return {vim.fn.getpos('v'), vim.fn.getpos('.')}", vec![])
                         .await
                         .ok()?;
-
-                    // Get current cursor position using getpos(".")
-                    let cursor_pos = neovim
-                        .call_function("getpos", vec![rmpv::Value::from(".")])
-                        .await
-                        .ok()?;
+                    let positions = positions.as_array()?;
 
                     // Parse positions: [bufnum, lnum, col, off] (1-indexed)
-                    let parse_pos = |val: rmpv::Value| -> Option<(i64, i64)> {
+                    let parse_pos = |val: &rmpv::Value| -> Option<(i64, i64)> {
                         let arr = val.as_array()?;
                         let line = arr.get(1)?.as_i64()? - 1; // Convert to 0-indexed
                         let col = arr.get(2)?.as_i64()? - 1; // Convert to 0-indexed
                         Some((line, col))
                     };
 
-                    let start = parse_pos(visual_start)?;
-                    let end = parse_pos(cursor_pos)?;
+                    let start = parse_pos(positions.first()?)?;
+                    let end = parse_pos(positions.get(1)?)?;
 
                     Some((start, end))
                 })
@@ -121,8 +130,8 @@ impl NeovimClient {
         self.runtime.block_on(async {
             let result =
                 tokio::time::timeout(std::time::Duration::from_millis(RPC_TIMEOUT_MS), async {
-                    let nvim_lock = neovim_arc.lock().await;
-                    if let Some(neovim) = nvim_lock.as_ref() {
+                    let nvim = neovim_arc.lock().await.as_ref().cloned();
+                    if let Some(neovim) = nvim.as_ref() {
                         let result = neovim
                             .exec_lua(
                                 "return _G.godot_neovim.set_visual_selection(...)",
