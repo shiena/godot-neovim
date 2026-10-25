@@ -524,7 +524,6 @@ impl Default for NeovimHandler {
     }
 }
 
-#[async_trait::async_trait]
 impl Handler for NeovimHandler {
     type Writer = nvim_rs::compat::tokio::Compat<tokio::process::ChildStdin>;
 
