@@ -155,5 +155,58 @@
       1,
       0
     ]
+  },
+  {
+    "id": 706,
+    "name": ":w saves through the editor File menu",
+    "text": "extends Node\nvar menu_save_w = 1",
+    "cursor": [
+      1,
+      0
+    ],
+    "sync_wait": 0.6,
+    "expect_saved": true,
+    "expect_mode": "n",
+    "steps": [
+      {
+        "event": "Semicolon",
+        "shift": true,
+        "unicode": 58
+      },
+      {
+        "event": "W"
+      },
+      {
+        "event": "Enter"
+      }
+    ]
+  },
+  {
+    "id": 707,
+    "name": ":wa saves through the editor File menu",
+    "text": "extends Node\nvar menu_save_wa = 1",
+    "cursor": [
+      1,
+      0
+    ],
+    "sync_wait": 0.6,
+    "expect_saved": true,
+    "expect_mode": "n",
+    "steps": [
+      {
+        "event": "Semicolon",
+        "shift": true,
+        "unicode": 58
+      },
+      {
+        "event": "W"
+      },
+      {
+        "event": "A"
+      },
+      {
+        "event": "Enter"
+      }
+    ]
   }
 ]

@@ -602,57 +602,16 @@ impl GodotNeovimPlugin {
                 class_name
             );
 
-            // Check for HSplitContainer - this contains both shader_list (ItemList) and shader_tabs
-            // The shader path is stored in the ItemList's tooltip
-            if class_name == "HSplitContainer" {
-                use godot::classes::ItemList;
-
-                let child_count = node.get_child_count();
-                for i in 0..child_count {
-                    if let Some(child) = node.get_child(i) {
-                        let child_class = child.get_class().to_string();
-                        crate::verbose_print!(
-                            "[godot-neovim]   HSplitContainer child {}: {} ({})",
-                            i,
-                            child.get_name(),
-                            child_class
-                        );
-
-                        // Look for ItemList (shader_list)
-                        if child_class == "ItemList" {
-                            if let Ok(item_list) = child.try_cast::<ItemList>() {
-                                // Get the selected item index
-                                let selected_items = item_list.get_selected_items();
-                                crate::verbose_print!(
-                                    "[godot-neovim]   ItemList selected items: {:?}",
-                                    selected_items.to_vec()
-                                );
-
-                                if !selected_items.is_empty() {
-                                    if let Some(selected_idx) = selected_items.get(0) {
-                                        // The tooltip contains the full shader path
-                                        let tooltip =
-                                            item_list.get_item_tooltip(selected_idx).to_string();
-                                        crate::verbose_print!(
-                                            "[godot-neovim]   ItemList item {} tooltip: '{}'",
-                                            selected_idx,
-                                            tooltip
-                                        );
-
-                                        if !tooltip.is_empty()
-                                            && (tooltip.ends_with(".gdshader")
-                                                || tooltip.ends_with(".shader")
-                                                || tooltip.ends_with(".gdshaderinc"))
-                                        {
-                                            crate::verbose_print!(
-                                                "[godot-neovim] Found shader path from ItemList: {}",
-                                                tooltip
-                                            );
-                                            return Some(tooltip);
-                                        }
-                                    }
-                                }
-                            }
+            // Accept both the legacy split and the shared 4.8 document container.
+            if matches!(
+                class_name.as_str(),
+                "HSplitContainer" | "DocumentEditorContainer"
+            ) {
+                if let Some(list) = super::editor_tree::document_list(&node) {
+                    if let Some(index) = list.get_selected_items().get(0) {
+                        let path = list.get_item_tooltip(index).to_string();
+                        if path.starts_with("res://") {
+                            return Some(path);
                         }
                     }
                 }
@@ -883,17 +842,7 @@ impl GodotNeovimPlugin {
 
         // Look for ShaderTextEditor (contains CodeEdit for shaders)
         if class_name == "ShaderTextEditor" {
-            // ShaderTextEditor > CodeEdit
-            let child_count = node.get_child_count();
-            for i in 0..child_count {
-                if let Some(child) = node.get_child(i) {
-                    if let Ok(code_edit) = child.try_cast::<CodeEdit>() {
-                        if code_edit.is_visible_in_tree() {
-                            return Some(code_edit);
-                        }
-                    }
-                }
-            }
+            return super::editor_tree::visible_code_edit(&node);
         }
 
         // Recursively search children

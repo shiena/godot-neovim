@@ -3,63 +3,43 @@
 
 use super::super::{EditorType, GodotNeovimPlugin};
 use super::simulate_ctrl_w;
-use godot::classes::{EditorInterface, MenuButton, Node, PopupMenu};
+use godot::classes::EditorInterface;
 use godot::prelude::*;
 
-/// ScriptEditor File menu IDs (from Godot source: editor/script_editor.cpp)
-#[allow(dead_code)]
-mod file_menu {
-    pub const SAVE: i64 = 5;
-    pub const SAVE_AS: i64 = 6;
-    pub const SAVE_ALL: i64 = 7;
-    // Note: CLOSE ID varies by Godot version, using Ctrl+W simulation instead
-    pub const CLOSE_ALL: i64 = 16;
-}
+use super::super::editor_tree;
 
-/// Find the ScriptEditor's File menu PopupMenu
-fn find_script_editor_file_menu() -> Option<Gd<PopupMenu>> {
-    let editor = EditorInterface::singleton();
-    let script_editor = editor.get_script_editor()?;
-    let script_editor_node: Gd<Node> = script_editor.upcast();
-
-    // Structure: ScriptEditor -> VBoxContainer -> HBoxContainer (menu_hb) -> MenuButton (File)
-    let children = script_editor_node.get_children();
-    for i in 0..children.len() {
-        let child = children.get(i)?;
-        if child.is_class("VBoxContainer") {
-            let vbox_children = child.get_children();
-            for j in 0..vbox_children.len() {
-                let vbox_child = vbox_children.get(j)?;
-                if vbox_child.is_class("HBoxContainer") {
-                    let hbox_children = vbox_child.get_children();
-                    for k in 0..hbox_children.len() {
-                        let hbox_child = hbox_children.get(k)?;
-                        if hbox_child.is_class("MenuButton") {
-                            let menu_button: Gd<MenuButton> = hbox_child.cast();
-                            return menu_button.get_popup();
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Emit a menu signal on ScriptEditor's File menu
-fn emit_file_menu_signal(menu_id: i64) -> bool {
-    if let Some(mut popup) = find_script_editor_file_menu() {
-        popup.call_deferred(
-            "emit_signal",
-            &["id_pressed".to_variant(), menu_id.to_variant()],
-        );
-        true
-    } else {
-        false
-    }
+/// Resolve actions from the live menu instead of version-specific numeric IDs.
+fn emit_file_menu_signal(shortcut: &str) -> bool {
+    let Some(editor) = EditorInterface::singleton().get_script_editor() else {
+        return false;
+    };
+    editor_tree::find_menu(&editor.upcast(), shortcut)
+        .is_some_and(|popup| editor_tree::emit_menu_action(popup, shortcut))
 }
 
 impl GodotNeovimPlugin {
+    fn emit_current_file_menu_action(&self, shortcut: &str) -> bool {
+        if self.current_editor_type != EditorType::Shader {
+            return emit_file_menu_signal(shortcut);
+        }
+        let Some(editor) = self.current_editor.as_ref() else {
+            return false;
+        };
+        let mut ancestor = editor.get_parent();
+        while let Some(node) = ancestor {
+            if matches!(
+                node.get_class().to_string().as_str(),
+                "DocumentEditorContainer" | "ScriptEditor" | "HSplitContainer"
+            ) {
+                if let Some(popup) = editor_tree::find_menu(&node, shortcut) {
+                    return editor_tree::emit_menu_action(popup, shortcut);
+                }
+            }
+            ancestor = node.get_parent();
+        }
+        false
+    }
+
     /// Forward an Ex command to Neovim for execution
     /// Used for commands that need Neovim's undo/redo integration:
     /// - :s/old/new/g, :%s/old/new/g (substitute)
@@ -194,7 +174,7 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// :w - Save the current file via ScriptEditor's File menu
+    /// :w - Save the current file via its editor's File menu
     /// This triggers Godot's internal save processing, including EditorPlugin hooks
     pub(in crate::plugin) fn cmd_save(&self) {
         if self.current_editor.is_none() {
@@ -207,13 +187,10 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        if emit_file_menu_signal(file_menu::SAVE) {
-            crate::verbose_print!(
-                "[godot-neovim] :w - emit_signal(id_pressed, {})",
-                file_menu::SAVE
-            );
+        if self.emit_current_file_menu_action("script_editor/save") {
+            crate::verbose_print!("[godot-neovim] :w - queued script_editor/save");
         } else {
-            godot_warn!("[godot-neovim] :w - Could not find File menu in ScriptEditor");
+            godot_warn!("[godot-neovim] :w - Could not find File menu in the active editor");
         }
     }
 
@@ -225,11 +202,8 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        if emit_file_menu_signal(file_menu::SAVE_ALL) {
-            crate::verbose_print!(
-                "[godot-neovim] :wa - emit_signal(id_pressed, {})",
-                file_menu::SAVE_ALL
-            );
+        if emit_file_menu_signal("script_editor/save_all") {
+            crate::verbose_print!("[godot-neovim] :wa - queued script_editor/save_all");
         } else {
             godot_warn!("[godot-neovim] :wa - Could not find File menu in ScriptEditor");
         }
@@ -369,11 +343,8 @@ impl GodotNeovimPlugin {
         }
 
         // Emit save signal (deferred)
-        if emit_file_menu_signal(file_menu::SAVE) {
-            crate::verbose_print!(
-                "[godot-neovim] :wq/ZZ - emit_signal(id_pressed, {})",
-                file_menu::SAVE
-            );
+        if self.emit_current_file_menu_action("script_editor/save") {
+            crate::verbose_print!("[godot-neovim] :wq/ZZ - queued script_editor/save");
         } else {
             godot_warn!("[godot-neovim] :wq/ZZ - Could not find File menu for save");
             return;
@@ -627,11 +598,8 @@ impl GodotNeovimPlugin {
         self.closing_all_tabs = true;
 
         // Close all script tabs
-        if emit_file_menu_signal(file_menu::CLOSE_ALL) {
-            crate::verbose_print!(
-                "[godot-neovim] :qa - emit_signal(id_pressed, {})",
-                file_menu::CLOSE_ALL
-            );
+        if emit_file_menu_signal("script_editor/close_all") {
+            crate::verbose_print!("[godot-neovim] :qa - queued script_editor/close_all");
         } else {
             godot_warn!("[godot-neovim] :qa - Could not find File menu in ScriptEditor");
             self.closing_all_tabs = false;
@@ -652,111 +620,31 @@ impl GodotNeovimPlugin {
             return;
         };
 
-        // Find ShaderEditor's TabContainer and collect shader paths
-        let shader_paths = self.collect_shader_paths(&editor_node);
-
-        if shader_paths.is_empty() {
-            crate::verbose_print!("[godot-neovim] :qa - No shader tabs to close");
+        let Some(container) = editor_tree::find_shader_container(&editor_node) else {
             return;
-        }
-
-        let tab_count = shader_paths.len();
-        crate::verbose_print!("[godot-neovim] :qa - Closing {} shader tab(s)", tab_count);
-
-        // Delete shader buffers from Neovim (use Shader type for shader_neovim)
-        for path in &shader_paths {
-            self.delete_neovim_buffer(path, EditorType::Shader);
-        }
-
-        // Close shader tabs using file_menu's "Close" (id=8) repeatedly
-        // We can't access context_menu's Close All because it's only populated when shown
-        if let Some(mut popup) = self.find_shader_file_menu_popup(&editor_node) {
-            // FILE_MENU_CLOSE = 8 in ShaderEditorPlugin (Godot 4.6)
-            const SHADER_FILE_MENU_CLOSE: i64 = 8;
-
-            // Queue up close operations for each tab
-            for i in 0..tab_count {
-                popup.call_deferred(
-                    "emit_signal",
-                    &[
-                        "id_pressed".to_variant(),
-                        SHADER_FILE_MENU_CLOSE.to_variant(),
-                    ],
-                );
-                crate::verbose_print!(
-                    "[godot-neovim] :qa - queued close for tab {} (id={})",
-                    i,
-                    SHADER_FILE_MENU_CLOSE
-                );
-            }
-        } else {
-            crate::verbose_print!("[godot-neovim] :qa - ShaderEditor file_menu not found");
-        }
-    }
-
-    /// Find ShaderEditor's file_menu popup (PopupMenu)
-    /// The file_menu is a MenuButton with text "File" in ShaderEditor's UI
-    fn find_shader_file_menu_popup(
-        &self,
-        node: &Gd<godot::classes::Node>,
-    ) -> Option<Gd<godot::classes::PopupMenu>> {
-        let class_name = node.get_class().to_string();
-
-        // Look for HSplitContainer that contains ItemList (this is files_split)
-        if class_name == "HSplitContainer" {
-            // Check if this is files_split (has ItemList child)
-            let has_item_list = (0..node.get_child_count()).any(|i| {
-                node.get_child(i)
-                    .is_some_and(|c| c.get_class() == "ItemList")
-            });
-
-            if has_item_list {
-                // This is files_split, search for file_menu MenuButton within entire subtree
-                if let Some(popup) = self.find_file_menu_button(node) {
-                    return Some(popup);
+        };
+        let Some(list) = editor_tree::document_list(&container) else {
+            return;
+        };
+        let Some(popup) = editor_tree::find_menu(&container, "script_editor/close_file") else {
+            return;
+        };
+        let tab_count = list.get_item_count();
+        for index in 0..tab_count {
+            let path = list.get_item_tooltip(index).to_string();
+            if path.starts_with("res://") {
+                if let Some(path) = self.convert_res_path_to_absolute(&path) {
+                    self.delete_neovim_buffer(&path, EditorType::Shader);
                 }
             }
         }
 
-        // Recursively search children
-        for i in 0..node.get_child_count() {
-            if let Some(child) = node.get_child(i) {
-                if let Some(found) = self.find_shader_file_menu_popup(&child) {
-                    return Some(found);
-                }
+        // 4.8 exposes Close All in the File menu. Legacy versions expose only Close.
+        if !editor_tree::emit_menu_action(popup.clone(), "script_editor/close_all") {
+            for _ in 0..tab_count {
+                editor_tree::emit_menu_action(popup.clone(), "script_editor/close_file");
             }
         }
-
-        None
-    }
-
-    /// Find MenuButton with text "File" in a subtree
-    fn find_file_menu_button(
-        &self,
-        node: &Gd<godot::classes::Node>,
-    ) -> Option<Gd<godot::classes::PopupMenu>> {
-        let class_name = node.get_class().to_string();
-
-        if class_name == "MenuButton" {
-            if let Ok(menu_button) = node.clone().try_cast::<MenuButton>() {
-                let text = menu_button.get_text().to_string();
-                if text == "File" {
-                    crate::verbose_print!("[godot-neovim] Found ShaderEditor file_menu");
-                    return menu_button.get_popup();
-                }
-            }
-        }
-
-        // Recursively search children
-        for i in 0..node.get_child_count() {
-            if let Some(child) = node.get_child(i) {
-                if let Some(found) = self.find_file_menu_button(&child) {
-                    return Some(found);
-                }
-            }
-        }
-
-        None
     }
 
     /// Find EditorNode from a Control
@@ -771,62 +659,6 @@ impl GodotNeovimPlugin {
                 return Some(current);
             }
             current = current.get_parent()?;
-        }
-    }
-
-    /// Collect all shader paths from ShaderEditor's ItemList
-    fn collect_shader_paths(&self, editor_node: &Gd<godot::classes::Node>) -> Vec<String> {
-        let mut paths = Vec::new();
-
-        // Search for HSplitContainer containing ItemList with shader paths
-        self.find_shader_item_list(editor_node, &mut paths);
-
-        paths
-    }
-
-    /// Recursively find ItemList in ShaderEditor and collect shader paths
-    fn find_shader_item_list(&self, node: &Gd<godot::classes::Node>, paths: &mut Vec<String>) {
-        let class_name = node.get_class().to_string();
-
-        // Look for HSplitContainer (files_split in ShaderEditor)
-        if class_name == "HSplitContainer" {
-            use godot::classes::ItemList;
-
-            let child_count = node.get_child_count();
-            for i in 0..child_count {
-                if let Some(child) = node.get_child(i) {
-                    if child.get_class() == "ItemList" {
-                        if let Ok(item_list) = child.try_cast::<ItemList>() {
-                            // Collect all shader paths from ItemList tooltips
-                            let item_count = item_list.get_item_count();
-                            for idx in 0..item_count {
-                                let tooltip = item_list.get_item_tooltip(idx).to_string();
-                                if !tooltip.is_empty()
-                                    && (tooltip.ends_with(".gdshader")
-                                        || tooltip.ends_with(".shader")
-                                        || tooltip.ends_with(".gdshaderinc"))
-                                {
-                                    // Convert res:// path to absolute path for Neovim
-                                    if let Some(abs_path) =
-                                        self.convert_res_path_to_absolute(&tooltip)
-                                    {
-                                        paths.push(abs_path);
-                                    }
-                                }
-                            }
-                            return;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Recursively search children
-        let child_count = node.get_child_count();
-        for i in 0..child_count {
-            if let Some(child) = node.get_child(i) {
-                self.find_shader_item_list(&child, paths);
-            }
         }
     }
 

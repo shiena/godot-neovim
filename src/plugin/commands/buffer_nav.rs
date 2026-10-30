@@ -137,8 +137,9 @@ impl GodotNeovimPlugin {
                     // Switch tabs
                     node.call("set_current_tab", &[new_idx.to_variant()]);
 
-                    // Also update the ItemList selection (shader_list)
-                    // ItemList is a sibling of TabContainer in HSplitContainer
+                    // Legacy editors require updating the sibling shader_list manually.
+                    // In 4.8, DocumentEditorContainer handles tab_changed and updates
+                    // its nested DocumentList, whose order may differ from tab order.
                     if let Some(parent) = node.get_parent() {
                         if parent.get_class() == "HSplitContainer" {
                             let child_count = parent.get_child_count();
