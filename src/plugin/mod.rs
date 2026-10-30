@@ -7,6 +7,7 @@ mod actions;
 mod commands;
 mod editing;
 mod editor;
+mod editor_tree;
 pub(crate) mod filetype;
 mod input;
 mod insert_escape;
