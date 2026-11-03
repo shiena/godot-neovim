@@ -7,7 +7,8 @@ use godot::prelude::*;
 impl GodotNeovimPlugin {
     /// Switch to Neovim buffer for the current file
     /// Creates buffer if not exists, initializes content if new
-    /// Returns (line, col, keep_godot_cursor): Neovim's cursor, and whether
+    /// Returns (line, col, keep_godot_cursor): zero-based line and byte column,
+    /// and whether
     /// Godot's cursor should win instead (new buffer, or Godot edited the file
     /// while it was not current — e.g. a connected signal's new callback)
     pub(super) fn switch_to_neovim_buffer(&mut self) -> Option<(i64, i64, bool)> {
@@ -199,14 +200,9 @@ impl GodotNeovimPlugin {
                 ))
             }
             Err(e) => {
-                let error_str = e.to_string();
-                // Check if this is a timeout or connection error
-                if error_str.contains("Timeout")
-                    || error_str.contains("timeout")
-                    || error_str.contains("Failed to")
-                {
+                if e.requires_recovery() {
                     drop(client);
-                    if self.record_timeout_error() {
+                    if self.record_connection_failure() {
                         self.show_recovery_dialog();
                     }
                 }
@@ -293,13 +289,7 @@ impl GodotNeovimPlugin {
                 }
             }
             Err(e) => {
-                let error_str = e.to_string();
-                // Check if this is a timeout or connection error
-                if (error_str.contains("Timeout")
-                    || error_str.contains("timeout")
-                    || error_str.contains("Failed to"))
-                    && self.record_timeout_error()
-                {
+                if e.requires_recovery() && self.record_connection_failure() {
                     self.show_recovery_dialog();
                 }
                 godot_error!("[godot-neovim] Failed to update buffer: {}", e);
@@ -579,14 +569,7 @@ impl GodotNeovimPlugin {
         drop(client);
 
         if let Err(e) = cursor_result {
-            let error_str = e.to_string();
-            // Check if this is a timeout or connection error
-            // "Timeout" = RPC timeout, "Failed to" = Neovim process died
-            if (error_str.contains("Timeout")
-                || error_str.contains("timeout")
-                || error_str.contains("Failed to"))
-                && self.record_timeout_error()
-            {
+            if e.requires_recovery() && self.record_connection_failure() {
                 self.show_recovery_dialog();
             }
             godot_error!("[godot-neovim] Failed to sync cursor: {}", e);

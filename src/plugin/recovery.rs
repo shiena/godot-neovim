@@ -9,9 +9,9 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 impl GodotNeovimPlugin {
-    /// Record a timeout error and check if recovery should be triggered.
+    /// Count a recoverable connection failure and check the dialog threshold.
     /// Returns true if the recovery dialog should be shown.
-    pub(super) fn record_timeout_error(&mut self) -> bool {
+    pub(super) fn record_connection_failure(&mut self) -> bool {
         if self.recovery_dialog_open {
             return false;
         }

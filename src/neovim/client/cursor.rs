@@ -1,11 +1,11 @@
 //! Cursor and visual selection operations
 
-use super::{NeovimClient, RPC_TIMEOUT_MS};
+use super::{ClientError, NeovimClient, RPC_TIMEOUT_MS};
 use rmpv::Value;
 
 impl NeovimClient {
     /// Get cursor position (1-indexed line, 0-indexed column) with timeout
-    pub fn get_cursor(&self) -> Result<(i64, i64), String> {
+    pub fn get_cursor(&self) -> Result<(i64, i64), ClientError> {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -17,26 +17,28 @@ impl NeovimClient {
                         let value = neovim
                             .call("nvim_win_get_cursor", vec![Value::from(0)])
                             .await
-                            .ok()?
-                            .ok()?;
-                        let pos = value.as_array()?;
-                        Some((pos.first()?.as_i64()?, pos.get(1)?.as_i64()?))
+                            .map_err(|e| ClientError::rpc("get cursor", e))?
+                            .map_err(|e| ClientError::rpc("get cursor", e.into()))?;
+                        let parse = || {
+                            let pos = value.as_array()?;
+                            Some((pos.first()?.as_i64()?, pos.get(1)?.as_i64()?))
+                        };
+                        parse().ok_or(ClientError::InvalidResponse("Invalid cursor position"))
                     } else {
-                        None
+                        Err(ClientError::NotConnected)
                     }
                 })
                 .await;
 
             match result {
-                Ok(Some(pos)) => Ok(pos),
-                Ok(None) => Err("Failed to get cursor".to_string()),
-                Err(_) => Err("Timeout getting cursor".to_string()),
+                Ok(inner) => inner,
+                Err(_) => Err(ClientError::Timeout("getting cursor")),
             }
         })
     }
 
     /// Set cursor position with timeout
-    pub fn set_cursor(&self, line: i64, col: i64) -> Result<(), String> {
+    pub fn set_cursor(&self, line: i64, col: i64) -> Result<(), ClientError> {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -54,19 +56,18 @@ impl NeovimClient {
                                 ],
                             )
                             .await
-                            .ok()?
-                            .ok()?;
-                        Some(())
+                            .map_err(|e| ClientError::rpc("set cursor", e))?
+                            .map_err(|e| ClientError::rpc("set cursor", e.into()))?;
+                        Ok(())
                     } else {
-                        None
+                        Err(ClientError::NotConnected)
                     }
                 })
                 .await;
 
             match result {
-                Ok(Some(())) => Ok(()),
-                Ok(None) => Err("Failed to set cursor".to_string()),
-                Err(_) => Err("Timeout setting cursor".to_string()),
+                Ok(inner) => inner,
+                Err(_) => Err(ClientError::Timeout("setting cursor")),
             }
         })
     }
@@ -124,7 +125,7 @@ impl NeovimClient {
         from_col: i64,
         to_line: i64,
         to_col: i64,
-    ) -> Result<String, String> {
+    ) -> Result<String, ClientError> {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -143,7 +144,7 @@ impl NeovimClient {
                                 ],
                             )
                             .await
-                            .map_err(|e| format!("Failed to set visual selection: {}", e))?;
+                            .map_err(|e| ClientError::rpc("set visual selection", e))?;
 
                         // Parse result { mode }
                         if let Value::Map(map) = result {
@@ -159,14 +160,14 @@ impl NeovimClient {
                         }
                         Ok("v".to_string())
                     } else {
-                        Err("Neovim not connected".to_string())
+                        Err(ClientError::NotConnected)
                     }
                 })
                 .await;
 
             match result {
                 Ok(inner) => inner,
-                Err(_) => Err("Timeout setting visual selection".to_string()),
+                Err(_) => Err(ClientError::Timeout("setting visual selection")),
             }
         })
     }

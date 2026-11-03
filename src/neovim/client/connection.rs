@@ -28,6 +28,7 @@ impl NeovimClient {
         let has_updates = handler.get_updates_flag();
         Ok(Self {
             runtime,
+            child: None,
             neovim: Arc::new(Mutex::new(None)),
             handler,
             nvim_path,
@@ -61,10 +62,11 @@ impl NeovimClient {
             addons_path
         );
 
-        let io_handle = self.runtime.block_on(async {
+        let (io_handle, child) = self.runtime.block_on(async {
             let mut cmd = create_nvim_command(&nvim_path, clean);
+            cmd.kill_on_drop(true);
 
-            let (neovim, io_handler, _child) = create::new_child_cmd(&mut cmd, handler).await?;
+            let (neovim, io_handler, child) = create::new_child_cmd(&mut cmd, handler).await?;
 
             // Attach UI to receive redraw events
             // ext_multigrid enables win_viewport events for viewport synchronization
@@ -139,10 +141,11 @@ impl NeovimClient {
             *nvim_lock = Some(neovim);
 
             crate::verbose_print!("[godot-neovim] Neovim started successfully");
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(io_handler)
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>((io_handler, child))
         })?;
 
         self.io_handle = Some(io_handle);
+        self.child = Some(child);
 
         // Create unbounded channel for key input (no key drops)
         let (tx, mut rx) = unbounded_channel::<String>();
@@ -218,30 +221,32 @@ impl NeovimClient {
         Ok(())
     }
 
-    /// Stop Neovim process
     pub fn stop(&mut self) {
-        // Abort the key input handler first
-        if let Some(handle) = self.key_input_handle.take() {
-            handle.abort();
-            crate::verbose_print!("[godot-neovim] Key input handler aborted");
-        }
-        // Clear the key input sender
+        let input_task = self.key_input_handle.take();
+        let io_task = self.io_handle.take();
         self.key_input_tx = None;
-
-        // Abort the IO handler to prevent blocking on read
-        if let Some(handle) = self.io_handle.take() {
-            handle.abort();
-            crate::verbose_print!("[godot-neovim] IO handler aborted");
+        if let Some(task) = &input_task {
+            task.abort();
         }
-
-        // Clear the neovim instance without sending quit command
-        // (IO is already aborted, command would timeout anyway)
-        let neovim_arc = self.neovim.clone();
+        if let Some(task) = &io_task {
+            task.abort();
+        }
+        let mut child = self.child.take();
         self.runtime.block_on(async {
-            let mut nvim_lock = neovim_arc.lock().await;
-            nvim_lock.take();
+            // Await cancellation so old tasks release their RPC handles.
+            if let Some(task) = input_task {
+                let _ = task.await;
+            }
+            if let Some(task) = io_task {
+                let _ = task.await;
+            }
+            self.neovim.lock().await.take();
+            if let Some(child) = child.as_mut() {
+                if let Err(error) = child.kill().await {
+                    eprintln!("[godot-neovim] Failed to stop Neovim: {error}");
+                }
+            }
         });
-        crate::verbose_print!("[godot-neovim] Neovim stopped");
     }
 }
 
@@ -312,4 +317,70 @@ pub(super) async fn get_neovim_version(neovim: &Neovim<Writer>) -> Option<Neovim
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
+    use tokio::io::AsyncReadExt;
+
+    #[test]
+    fn stop_waits_for_tasks_and_child_and_is_idempotent() {
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        let nvim_path = std::env::var("NVIMRS_TEST_BIN").unwrap_or_else(|_| "nvim".into());
+        let mut child = runtime.block_on(async {
+            create_nvim_command(&nvim_path, true)
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap()
+        });
+        assert!(child.try_wait().unwrap().is_none());
+        let mut stdout = child.stdout.take().unwrap();
+        let handler = NeovimHandler::new();
+        let mut client = NeovimClient {
+            runtime,
+            child: Some(child),
+            neovim: Arc::new(Mutex::new(None)),
+            state: handler.get_state(),
+            has_updates: handler.get_updates_flag(),
+            handler,
+            nvim_path,
+            clean: true,
+            io_handle: None,
+            key_input_tx: None,
+            key_input_handle: None,
+            keys_processed: Arc::new(AtomicU64::new(0)),
+            keys_processed_seen: AtomicU64::new(0),
+        };
+        struct MarkDropped(Arc<AtomicU64>);
+        impl Drop for MarkDropped {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicU64::new(0));
+        let guard = MarkDropped(dropped.clone());
+        client.key_input_handle = Some(client.runtime.spawn(async move {
+            let _guard = guard;
+            std::future::pending::<()>().await;
+        }));
+        let guard = MarkDropped(dropped.clone());
+        client.io_handle = Some(client.runtime.spawn(async move {
+            let _guard = guard;
+            std::future::pending().await
+        }));
+        client.stop();
+        assert_eq!(dropped.load(Ordering::SeqCst), 2);
+        assert!(client.child.is_none());
+        client.runtime.block_on(async {
+            let mut output = Vec::new();
+            tokio::time::timeout(Duration::from_secs(3), stdout.read_to_end(&mut output))
+                .await
+                .expect("The stopped process must close stdout")
+                .unwrap();
+        });
+        client.stop();
+    }
 }

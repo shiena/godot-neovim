@@ -1,10 +1,10 @@
 //! Key input: input, send_keys, channels
 
-use super::{NeovimClient, RPC_TIMEOUT_MS};
+use super::{ClientError, NeovimClient, RPC_TIMEOUT_MS};
 
 impl NeovimClient {
     /// Send keys to Neovim with timeout
-    pub fn input(&self, keys: &str) -> Result<(), String> {
+    pub fn input(&self, keys: &str) -> Result<(), ClientError> {
         let neovim_arc = self.neovim.clone();
         let keys = keys.to_string();
 
@@ -18,16 +18,16 @@ impl NeovimClient {
                             .input(&keys)
                             .await
                             .map(|_| ())
-                            .map_err(|e| format!("Failed to send input: {}", e))
+                            .map_err(|e| ClientError::rpc("send input", e))
                     } else {
-                        Err("Neovim not connected".to_string())
+                        Err(ClientError::NotConnected)
                     }
                 })
                 .await;
 
             match result {
                 Ok(inner) => inner,
-                Err(_) => Err("Timeout sending input".to_string()),
+                Err(_) => Err(ClientError::Timeout("sending input")),
             }
         })
     }

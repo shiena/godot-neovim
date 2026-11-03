@@ -11,7 +11,9 @@
 mod buffer;
 mod connection;
 mod cursor;
+mod error;
 mod execution;
+pub use error::ClientError;
 mod input;
 mod state;
 
@@ -160,6 +162,7 @@ pub struct IndentOptions {
 /// Manages connection to Neovim process
 pub struct NeovimClient {
     pub(super) runtime: Runtime,
+    pub(super) child: Option<tokio::process::Child>,
     pub(super) neovim: Arc<Mutex<Option<Neovim<Writer>>>>,
     pub(super) handler: NeovimHandler,
     pub(super) nvim_path: String,
@@ -169,14 +172,12 @@ pub struct NeovimClient {
     pub(super) state: Arc<Mutex<NeovimState>>,
     /// Flag indicating new updates from redraw events
     pub(super) has_updates: Arc<AtomicBool>,
-    /// IO handler task - must be kept alive for events to be received
-    #[allow(dead_code)]
+    /// Retained so stop() can cancel and join the IO task.
     pub(super) io_handle:
         Option<tokio::task::JoinHandle<Result<(), Box<nvim_rs::error::LoopError>>>>,
     /// Key input channel sender (unbounded for no key drops)
     pub(super) key_input_tx: Option<UnboundedSender<String>>,
-    /// Key input processor task handle
-    #[allow(dead_code)]
+    /// Retained so stop() can cancel and join the input task.
     pub(super) key_input_handle: Option<tokio::task::JoinHandle<()>>,
     /// Monotonic counter of keys confirmed processed by Neovim's main loop.
     /// The key-input worker increments this only after (a) nvim_input accepted
@@ -204,8 +205,5 @@ impl Default for NeovimClient {
 impl Drop for NeovimClient {
     fn drop(&mut self) {
         self.stop();
-        // Force non-blocking runtime shutdown to avoid hanging
-        // Note: This consumes self.runtime, but we're in drop so that's fine
-        crate::verbose_print!("[godot-neovim] Shutting down runtime");
     }
 }

@@ -1,15 +1,15 @@
 //! Buffer operations: buffer_update, switch_to_buffer, attach
 
 use super::{
-    ExternalSyncResult, ExternalSyncStatus, IndentOptions, NeovimClient, SwitchBufferResult,
-    RPC_EXTENDED_TIMEOUT_MS, RPC_TIMEOUT_MS,
+    ClientError, ExternalSyncResult, ExternalSyncStatus, IndentOptions, NeovimClient,
+    SwitchBufferResult, RPC_EXTENDED_TIMEOUT_MS, RPC_TIMEOUT_MS,
 };
 use rmpv::Value;
 
 impl NeovimClient {
     /// Update buffer content (preserves undo history for 'u' command)
     /// Uses Lua function to properly manage undo history
-    pub fn buffer_update(&self, lines: Vec<String>) -> Result<i64, String> {
+    pub fn buffer_update(&self, lines: Vec<String>) -> Result<i64, ClientError> {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -22,14 +22,14 @@ impl NeovimClient {
                 let result = neovim
                     .exec_lua("return _G.godot_neovim.buffer_update(...)", args)
                     .await
-                    .map_err(|e| format!("Failed to update buffer: {}", e))?;
+                    .map_err(|e| ClientError::rpc("update buffer", e))?;
 
                 // Return changedtick
                 result
                     .as_i64()
-                    .ok_or_else(|| "Invalid changedtick returned".to_string())
+                    .ok_or_else(|| ClientError::InvalidResponse("Invalid changedtick returned"))
             } else {
-                Err("Neovim not connected".to_string())
+                Err(ClientError::NotConnected)
             }
         })
     }
@@ -43,7 +43,7 @@ impl NeovimClient {
         lines: Vec<String>,
         expected_tick: Option<i64>,
         unmodified: bool,
-    ) -> Result<ExternalSyncResult, String> {
+    ) -> Result<ExternalSyncResult, ClientError> {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -52,7 +52,7 @@ impl NeovimClient {
                 async {
                     let nvim = neovim_arc.lock().await.as_ref().cloned();
                     let Some(neovim) = nvim.as_ref() else {
-                        return Err("Neovim not connected".to_string());
+                        return Err(ClientError::NotConnected);
                     };
                     let mut opts = vec![(Value::from("unmodified"), Value::from(unmodified))];
                     if let Some(tick) = expected_tick {
@@ -63,7 +63,7 @@ impl NeovimClient {
                     let result = neovim
                         .exec_lua("return _G.godot_neovim.sync_external_lines(...)", args)
                         .await
-                        .map_err(|e| format!("Failed to sync external edit: {}", e))?;
+                        .map_err(|e| ClientError::rpc("sync external edit", e))?;
                     Self::parse_external_sync_result(result)
                 },
             )
@@ -71,14 +71,16 @@ impl NeovimClient {
 
             match result {
                 Ok(inner) => inner,
-                Err(_) => Err("Timeout syncing external edit".to_string()),
+                Err(_) => Err(ClientError::Timeout("syncing external edit")),
             }
         })
     }
 
-    fn parse_external_sync_result(result: Value) -> Result<ExternalSyncResult, String> {
+    fn parse_external_sync_result(result: Value) -> Result<ExternalSyncResult, ClientError> {
         let Value::Map(map) = result else {
-            return Err("Expected table result from sync_external_lines".to_string());
+            return Err(ClientError::InvalidResponse(
+                "Expected table result from sync_external_lines",
+            ));
         };
         let mut status = None;
         let mut tick = None;
@@ -104,7 +106,9 @@ impl NeovimClient {
                 tick,
                 line_count,
             }),
-            _ => Err("Invalid result from sync_external_lines".to_string()),
+            _ => Err(ClientError::InvalidResponse(
+                "Invalid result from sync_external_lines",
+            )),
         }
     }
 
@@ -118,7 +122,7 @@ impl NeovimClient {
         lines: Option<Vec<String>>,
         indent_opts: Option<IndentOptions>,
         unmodified: bool,
-    ) -> Result<SwitchBufferResult, String> {
+    ) -> Result<SwitchBufferResult, ClientError> {
         let neovim_arc = self.neovim.clone();
         let path = path.to_string();
 
@@ -164,13 +168,13 @@ impl NeovimClient {
                         let result = neovim
                             .exec_lua("return _G.godot_neovim.switch_to_buffer(...)", args)
                             .await
-                            .map_err(|e| format!("Failed to switch buffer: {}", e))?;
+                            .map_err(|e| ClientError::rpc("switch buffer", e))?;
 
                         // Parse result table
                         // { bufnr, tick, is_new, content_updated, line_count, attached, cursor }
                         Self::parse_switch_buffer_result(result)
                     } else {
-                        Err("Neovim not connected".to_string())
+                        Err(ClientError::NotConnected)
                     }
                 },
             )
@@ -178,13 +182,17 @@ impl NeovimClient {
 
             match result {
                 Ok(inner) => inner,
-                Err(_) => Err("Timeout switching buffer".to_string()),
+                Err(_) => Err(ClientError::Timeout("switching buffer")),
             }
         })
     }
 
     /// Set indent options for the current buffer
-    pub fn set_indent_options(&self, use_spaces: bool, indent_size: i32) -> Result<(), String> {
+    pub fn set_indent_options(
+        &self,
+        use_spaces: bool,
+        indent_size: i32,
+    ) -> Result<(), ClientError> {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -199,17 +207,17 @@ impl NeovimClient {
                 neovim
                     .exec_lua("_G.godot_neovim.set_indent_options(...)", args)
                     .await
-                    .map_err(|e| format!("Failed to set indent options: {}", e))?;
+                    .map_err(|e| ClientError::rpc("set indent options", e))?;
 
                 Ok(())
             } else {
-                Err("Neovim not connected".to_string())
+                Err(ClientError::NotConnected)
             }
         })
     }
 
     /// Parse the result from switch_to_buffer Lua function
-    fn parse_switch_buffer_result(result: rmpv::Value) -> Result<SwitchBufferResult, String> {
+    fn parse_switch_buffer_result(result: rmpv::Value) -> Result<SwitchBufferResult, ClientError> {
         if let Value::Map(map) = result {
             let mut bufnr: Option<i64> = None;
             let mut tick: Option<i64> = None;
@@ -255,15 +263,19 @@ impl NeovimClient {
                     attached: a,
                     cursor: c,
                 }),
-                _ => Err("Invalid result from switch_to_buffer".to_string()),
+                _ => Err(ClientError::InvalidResponse(
+                    "Invalid result from switch_to_buffer",
+                )),
             }
         } else {
-            Err("Expected table result from switch_to_buffer".to_string())
+            Err(ClientError::InvalidResponse(
+                "Expected table result from switch_to_buffer",
+            ))
         }
     }
 
     /// Attach to current buffer for change notifications
-    pub fn buf_attach_current(&self) -> Result<bool, String> {
+    pub fn buf_attach_current(&self) -> Result<bool, ClientError> {
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -274,23 +286,23 @@ impl NeovimClient {
                         let buf = neovim
                             .get_current_buf()
                             .await
-                            .map_err(|e| format!("Failed to get buffer: {}", e))?;
+                            .map_err(|e| ClientError::rpc("get buffer", e))?;
 
                         // Attach to buffer with send_buffer=false (we only want notifications)
                         let attached = buf
                             .attach(false, vec![])
                             .await
-                            .map_err(|e| format!("Failed to attach: {}", e))?;
+                            .map_err(|e| ClientError::rpc("attach", e))?;
                         Ok(attached)
                     } else {
-                        Err("Neovim not connected".to_string())
+                        Err(ClientError::NotConnected)
                     }
                 })
                 .await;
 
             match result {
                 Ok(inner) => inner,
-                Err(_) => Err("Timeout attaching to buffer".to_string()),
+                Err(_) => Err(ClientError::Timeout("attaching to buffer")),
             }
         })
     }

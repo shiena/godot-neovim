@@ -43,18 +43,21 @@ struct JsonRpcError {
     message: String,
 }
 
+struct Connection {
+    stream: TcpStream,
+    initialized: bool,
+}
+
 pub struct GodotLspClient {
-    stream: Mutex<Option<TcpStream>>,
+    connection: Mutex<Option<Connection>>,
     request_id: AtomicI64,
-    initialized: std::sync::atomic::AtomicBool,
 }
 
 impl GodotLspClient {
     pub fn new() -> Self {
         Self {
-            stream: Mutex::new(None),
+            connection: Mutex::new(None),
             request_id: AtomicI64::new(1),
-            initialized: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -69,26 +72,30 @@ impl GodotLspClient {
             .map_err(|e| format!("Failed to set timeout: {}", e))?;
 
         *self
-            .stream
+            .connection
             .lock()
-            .map_err(|e| format!("Failed to acquire lock: {}", e))? = Some(stream);
+            .map_err(|e| format!("Failed to acquire lock: {}", e))? = Some(Connection {
+            stream,
+            initialized: false,
+        });
         Ok(())
     }
 
     /// Disconnect from LSP server
     pub fn disconnect(&self) {
-        if let Ok(mut guard) = self.stream.lock() {
-            if let Some(stream) = guard.take() {
-                // Shutdown the stream to unblock any pending reads
-                let _ = stream.shutdown(std::net::Shutdown::Both);
+        if let Ok(mut guard) = self.connection.lock() {
+            if let Some(connection) = guard.take() {
+                let _ = connection.stream.shutdown(std::net::Shutdown::Both);
             }
         }
-        self.initialized.store(false, Ordering::SeqCst);
         crate::verbose_print!("[godot-neovim] LSP disconnected");
     }
 
     pub fn initialize(&self, root_uri: &str) -> Result<(), String> {
-        if self.initialized.load(Ordering::SeqCst) {
+        // Keep initialization tied to this connection even if reconnect is requested.
+        let mut guard = self.connection.lock().map_err(|e| e.to_string())?;
+        let connection = guard.as_mut().ok_or("Not connected to LSP server")?;
+        if connection.initialized {
             return Ok(());
         }
 
@@ -112,7 +119,8 @@ impl GodotLspClient {
 
         crate::verbose_print!("[godot-neovim] LSP: Sending initialize request...");
 
-        let _result: InitializeResult = self.send_request(
+        let _result: InitializeResult = self.send_request_on(
+            &mut connection.stream,
             "initialize",
             Some(serde_json::to_value(params).map_err(|e| format!("Failed to serialize: {}", e))?),
         )?;
@@ -120,9 +128,9 @@ impl GodotLspClient {
         crate::verbose_print!("[godot-neovim] LSP: Initialize response received");
 
         // Send initialized notification
-        self.send_notification("initialized", Some(json!({})))?;
+        Self::send_notification_on(&mut connection.stream, "initialized", Some(json!({})))?;
 
-        self.initialized.store(true, Ordering::SeqCst);
+        connection.initialized = true;
         crate::verbose_print!("[godot-neovim] LSP: Initialization complete");
         Ok(())
     }
@@ -207,18 +215,32 @@ impl GodotLspClient {
     }
 
     pub fn is_connected(&self) -> bool {
-        self.stream
+        self.connection
             .lock()
             .map(|guard| guard.is_some())
             .unwrap_or(false)
     }
 
     pub fn is_initialized(&self) -> bool {
-        self.initialized.load(Ordering::SeqCst)
+        self.connection
+            .lock()
+            .map(|guard| guard.as_ref().is_some_and(|c| c.initialized))
+            .unwrap_or(false)
     }
 
     fn send_request<T: for<'de> Deserialize<'de>>(
         &self,
+        method: &str,
+        params: Option<Value>,
+    ) -> Result<T, String> {
+        let mut guard = self.connection.lock().map_err(|e| e.to_string())?;
+        let connection = guard.as_mut().ok_or("Not connected to LSP server")?;
+        self.send_request_on(&mut connection.stream, method, params)
+    }
+
+    fn send_request_on<T: for<'de> Deserialize<'de>>(
+        &self,
+        stream: &mut TcpStream,
         method: &str,
         params: Option<Value>,
     ) -> Result<T, String> {
@@ -235,14 +257,6 @@ impl GodotLspClient {
         let message = format!("Content-Length: {}\r\n\r\n{}", body.len(), body);
 
         crate::verbose_print!("[godot-neovim] LSP request: {} (id={})", method, id);
-
-        let mut guard = self
-            .stream
-            .lock()
-            .map_err(|e| format!("Failed to acquire lock: {}", e))?;
-        let stream = guard
-            .as_mut()
-            .ok_or_else(|| "Not connected to LSP server".to_string())?;
 
         // Write request
         stream
@@ -288,6 +302,16 @@ impl GodotLspClient {
     }
 
     fn send_notification(&self, method: &str, params: Option<Value>) -> Result<(), String> {
+        let mut guard = self.connection.lock().map_err(|e| e.to_string())?;
+        let connection = guard.as_mut().ok_or("Not connected to LSP server")?;
+        Self::send_notification_on(&mut connection.stream, method, params)
+    }
+
+    fn send_notification_on(
+        stream: &mut TcpStream,
+        method: &str,
+        params: Option<Value>,
+    ) -> Result<(), String> {
         let notification = JsonRpcNotification {
             jsonrpc: "2.0",
             method: method.to_string(),
@@ -296,14 +320,6 @@ impl GodotLspClient {
 
         let body = serde_json::to_string(&notification).map_err(|e| e.to_string())?;
         let message = format!("Content-Length: {}\r\n\r\n{}", body.len(), body);
-
-        let mut guard = self
-            .stream
-            .lock()
-            .map_err(|e| format!("Failed to acquire lock: {}", e))?;
-        let stream = guard
-            .as_mut()
-            .ok_or_else(|| "Not connected to LSP server".to_string())?;
 
         stream
             .write_all(message.as_bytes())
