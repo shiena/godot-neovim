@@ -1,10 +1,10 @@
 //! Command and Lua execution
 
-use super::NeovimClient;
+use super::{ClientError, NeovimClient};
 
 impl NeovimClient {
     /// Execute Neovim command
-    pub fn command(&self, cmd: &str) -> Result<(), String> {
+    pub fn command(&self, cmd: &str) -> Result<(), ClientError> {
         let neovim_arc = self.neovim.clone();
         let cmd = cmd.to_string();
 
@@ -14,30 +14,17 @@ impl NeovimClient {
                 neovim
                     .command(&cmd)
                     .await
-                    .map_err(|e| format!("Failed to execute command: {}", e))?;
+                    .map_err(|e| ClientError::rpc("execute command", e))?;
                 Ok(())
             } else {
-                Err("Neovim not connected".to_string())
+                Err(ClientError::NotConnected)
             }
         })
     }
 
     /// Execute Lua code and return the result
-    pub fn execute_lua_with_result(&self, lua_code: &str) -> Result<rmpv::Value, String> {
-        let neovim_arc = self.neovim.clone();
-        let lua_code = lua_code.to_string();
-
-        self.runtime.block_on(async {
-            let nvim = neovim_arc.lock().await.as_ref().cloned();
-            if let Some(neovim) = nvim.as_ref() {
-                neovim
-                    .exec_lua(&lua_code, vec![])
-                    .await
-                    .map_err(|e| format!("Failed to execute Lua: {}", e))
-            } else {
-                Err("Neovim not connected".to_string())
-            }
-        })
+    pub fn execute_lua_with_result(&self, lua_code: &str) -> Result<rmpv::Value, ClientError> {
+        self.execute_lua_with_args(lua_code, vec![])
     }
 
     /// Execute Lua code with arguments and return the result
@@ -45,7 +32,7 @@ impl NeovimClient {
         &self,
         lua_code: &str,
         args: Vec<rmpv::Value>,
-    ) -> Result<rmpv::Value, String> {
+    ) -> Result<rmpv::Value, ClientError> {
         let neovim_arc = self.neovim.clone();
         let lua_code = lua_code.to_string();
 
@@ -55,16 +42,16 @@ impl NeovimClient {
                 neovim
                     .exec_lua(&lua_code, args)
                     .await
-                    .map_err(|e| format!("Failed to execute Lua: {}", e))
+                    .map_err(|e| ClientError::rpc("execute Lua", e))
             } else {
-                Err("Neovim not connected".to_string())
+                Err(ClientError::NotConnected)
             }
         })
     }
 
     /// Debug: Get current indent settings from Neovim
     #[allow(dead_code)]
-    pub fn debug_get_indent_settings(&self) -> Result<String, String> {
+    pub fn debug_get_indent_settings(&self) -> Result<String, ClientError> {
         let lua_code = r#"
             return string.format(
                 "expandtab=%s shiftwidth=%d tabstop=%d softtabstop=%d",
