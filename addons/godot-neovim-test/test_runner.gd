@@ -414,7 +414,10 @@ func _get_current_script_path() -> String:
 ## Put the original content back into the buffer and save it through the
 ## plugin, so the editor's in-memory script matches the file again.
 func _restore_file(path: String, original: String) -> void:
-	if FileAccess.get_file_as_string(path) == original:
+	# Godot saves scripts with LF even when the original file used CRLF.
+	# Ignore that difference to avoid triggering an external-change dialog.
+	var normalized_original := original.replace("\r\n", "\n")
+	if FileAccess.get_file_as_string(path).replace("\r\n", "\n") == normalized_original:
 		return
 	var code_edit := _get_code_edit()
 	if code_edit:
@@ -424,7 +427,7 @@ func _restore_file(path: String, original: String) -> void:
 		await get_tree().create_timer(0.15).timeout
 		plugin.action_save()
 		await get_tree().create_timer(0.3).timeout
-	if FileAccess.get_file_as_string(path) != original:
+	if FileAccess.get_file_as_string(path).replace("\r\n", "\n") != normalized_original:
 		_log("[color=yellow]Could not restore %s through the editor; writing it directly[/color]" % path)
 		var f := FileAccess.open(path, FileAccess.WRITE)
 		if f:

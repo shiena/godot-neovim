@@ -111,19 +111,15 @@ impl NeovimClient {
             // Initialize godot_neovim Lua module
             // Prefer external plugin if addons_path is provided
             if let Some(ref path) = addons_path_owned {
-                // Escape backslashes for Lua string (Windows paths)
-                let lua_path = path.replace('\\', "/");
-                let init_code = format!(
-                    r#"
+                let init_code = r#"
                     -- Add addons path to runtimepath
-                    vim.opt.runtimepath:append("{}")
+                    local path = ...
+                    vim.opt.runtimepath:append(path)
                     -- Load the godot_neovim module
                     require('godot_neovim')
-                    "#,
-                    lua_path
-                );
+                    "#;
                 neovim
-                    .exec_lua(&init_code, vec![])
+                    .exec_lua(init_code, vec![rmpv::Value::from(path.as_str())])
                     .await
                     .map_err(|e| format!("Failed to load Lua plugin from {}: {}", path, e))?;
                 crate::verbose_print!(
