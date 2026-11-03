@@ -78,12 +78,10 @@ impl GodotNeovimPlugin {
             if !option_name.is_empty() {
                 // Use nvim_get_option_value API for reliable option retrieval
                 // Use buf=0 to get the current buffer's option (for buffer-local options like filetype)
-                let lua_cmd = format!(
-                    "return vim.api.nvim_get_option_value('{}', {{ buf = 0 }})",
-                    option_name
-                );
-                crate::verbose_print!("[godot-neovim] Querying option: {}", lua_cmd);
-                match client.execute_lua_with_result(&lua_cmd) {
+                let lua_cmd =
+                    "local name = ...; return vim.api.nvim_get_option_value(name, { buf = 0 })";
+                crate::verbose_print!("[godot-neovim] Querying option: {}", option_name);
+                match client.execute_lua_with_args(lua_cmd, vec![rmpv::Value::from(option_name)]) {
                     Ok(result) => {
                         let value_str = if result.is_str() {
                             result.as_str().unwrap_or("").to_string()

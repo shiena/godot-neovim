@@ -71,10 +71,20 @@ impl GodotNeovimPlugin {
             return;
         };
 
-        // Use bwipeout to completely remove buffer (including undo history)
-        // This matches vscode-neovim's behavior with force=true
-        let cmd = format!("silent! bwipeout! {}", path);
-        if let Err(e) = client.command(&cmd) {
+        // Match the exact buffer name so paths are never interpreted as Ex
+        // commands or buffer-name patterns. Missing buffers are a no-op.
+        let lua_code = r#"
+            local path = ...
+            local absolute_path = vim.fn.fnamemodify(path, ':p')
+            for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
+                local name = vim.api.nvim_buf_get_name(buffer)
+                if name == path or name == absolute_path then
+                    vim.api.nvim_buf_delete(buffer, { force = true })
+                    return
+                end
+            end
+        "#;
+        if let Err(e) = client.execute_lua_with_args(lua_code, vec![rmpv::Value::from(path)]) {
             crate::verbose_print!("[godot-neovim] Failed to delete buffer {}: {}", path, e);
         } else {
             crate::verbose_print!(
