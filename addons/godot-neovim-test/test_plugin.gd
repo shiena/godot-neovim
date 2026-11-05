@@ -85,7 +85,9 @@ func _autorun() -> void:
 			if ce_restore:
 				ce_restore.set_text(FileAccess.get_file_as_string(restore_path))
 	print("[godot-neovim-test] autorun: done, quitting")
-	get_tree().quit()
+	var failed: bool = runner.results.is_empty() or runner.results.any(
+		func(result: Dictionary) -> bool: return not result.get("passed", false))
+	get_tree().quit(1 if failed else 0)
 
 
 func _exit_tree() -> void:
