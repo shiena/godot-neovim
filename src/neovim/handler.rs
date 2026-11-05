@@ -5,7 +5,7 @@ use rmpv::Value;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 /// Shared state between handler and plugin
 #[derive(Debug, Default)]
@@ -17,7 +17,7 @@ pub struct NeovimState {
     /// Grid ID for cursor
     pub cursor_grid: i64,
     /// Actual cursor position (line, col) - line is 0-indexed, col is byte position
-    /// This comes from CursorMoved autocmd and is the true buffer position
+    /// Updated by CursorMoved and win_viewport notifications.
     pub actual_cursor: Option<(i64, i64)>,
     /// Viewport top line (0-indexed) - first visible line from win_viewport
     pub viewport_topline: i64,
@@ -59,6 +59,7 @@ pub enum BufEvent {
 /// Handler for Neovim RPC notifications and requests
 #[derive(Clone)]
 pub struct NeovimHandler {
+    command_barrier: Arc<Notify>,
     /// Shared state updated by redraw events
     state: Arc<Mutex<NeovimState>>,
     /// Flag indicating new updates are available
@@ -72,6 +73,7 @@ pub struct NeovimHandler {
 impl NeovimHandler {
     pub fn new() -> Self {
         Self {
+            command_barrier: Arc::new(Notify::new()),
             state: Arc::new(Mutex::new(NeovimState {
                 mode: "n".to_string(),
                 cursor: (0, 0),
@@ -88,6 +90,10 @@ impl NeovimHandler {
             buf_events: Arc::new(Mutex::new(VecDeque::new())),
             has_buf_events: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn command_barrier(&self) -> Arc<Notify> {
+        self.command_barrier.clone()
     }
 
     /// Get a clone of the state Arc for sharing with plugin
@@ -357,8 +363,6 @@ impl NeovimHandler {
             _ => return,
         };
 
-        crate::verbose_print!("[godot-neovim] BufEnter: buf={}, path={}", buf, path);
-
         let mut events = self.buf_events.lock().await;
         events.push_back(BufEvent::BufEnter { _buf: buf, path });
         self.has_buf_events.store(true, Ordering::SeqCst);
@@ -366,8 +370,6 @@ impl NeovimHandler {
 
     /// Parse godot_save_buffer notification from Lua BufWriteCmd autocmd
     async fn handle_godot_save_buffer(&self, _args: Vec<Value>) {
-        crate::verbose_print!("[godot-neovim] godot_save_buffer");
-
         let mut events = self.buf_events.lock().await;
         events.push_back(BufEvent::SaveBuffer);
         self.has_buf_events.store(true, Ordering::SeqCst);
@@ -406,12 +408,6 @@ impl NeovimHandler {
             }
         }
 
-        crate::verbose_print!(
-            "[godot-neovim] godot_close_buffer: bang={}, all={}",
-            bang,
-            all
-        );
-
         let mut events = self.buf_events.lock().await;
         events.push_back(BufEvent::CloseBuffer { bang, all });
         self.has_buf_events.store(true, Ordering::SeqCst);
@@ -419,8 +415,6 @@ impl NeovimHandler {
 
     /// Parse godot_save_and_close notification from Lua :wq command
     async fn handle_godot_save_and_close(&self, _args: Vec<Value>) {
-        crate::verbose_print!("[godot-neovim] godot_save_and_close");
-
         let mut events = self.buf_events.lock().await;
         events.push_back(BufEvent::SaveAndClose);
         self.has_buf_events.store(true, Ordering::SeqCst);
@@ -428,8 +422,6 @@ impl NeovimHandler {
 
     /// Parse godot_save_all_and_close notification from Lua :wqa command
     async fn handle_godot_save_all_and_close(&self, _args: Vec<Value>) {
-        crate::verbose_print!("[godot-neovim] godot_save_all_and_close");
-
         let mut events = self.buf_events.lock().await;
         events.push_back(BufEvent::SaveAllAndClose);
         self.has_buf_events.store(true, Ordering::SeqCst);
@@ -479,28 +471,14 @@ impl NeovimHandler {
                             } => {
                                 // Update viewport and cursor from win_viewport
                                 // curline/curcol are the buffer positions (more accurate than grid_cursor_goto)
-                                crate::verbose_print!(
-                                    "[godot-neovim] win_viewport: topline={}, botline={}, curline={}, curcol={}",
-                                    topline, botline, curline, curcol
-                                );
-                                let viewport_changed = state.viewport_topline != topline
-                                    || state.viewport_botline != botline;
-                                let cursor_changed = state.viewport_curline != curline
-                                    || state.viewport_curcol != curcol;
-
                                 // Always update state and set flag when win_viewport event arrives
                                 // Even if values are the same, we need to use win_viewport cursor
                                 // instead of grid_cursor_goto (which gives screen-relative position with ext_multigrid)
-                                if viewport_changed || cursor_changed {
-                                    crate::verbose_print!(
-                                        "[godot-neovim] win_viewport changed: viewport={}, cursor={}",
-                                        viewport_changed, cursor_changed
-                                    );
-                                }
                                 state.viewport_topline = topline;
                                 state.viewport_botline = botline;
                                 state.viewport_curline = curline;
                                 state.viewport_curcol = curcol;
+                                state.actual_cursor = Some((curline, curcol));
                                 // Always set flag so take_viewport() returns data
                                 // This ensures we use win_viewport cursor instead of grid_cursor_goto
                                 state.viewport_changed = true;
@@ -539,6 +517,7 @@ impl Handler for NeovimHandler {
             "nvim_buf_lines_event" => self.handle_buf_lines_event(args).await,
             "nvim_buf_changedtick_event" => self.handle_buf_changedtick_event(args).await,
             "nvim_buf_detach_event" => self.handle_buf_detach_event(args).await,
+            "godot_command_barrier" => self.command_barrier.notify_one(),
             "godot_buf_lines" => self.handle_godot_buf_lines(args).await,
             "godot_cursor_moved" => self.handle_godot_cursor_moved(args).await,
             "godot_modified_changed" => self.handle_godot_modified_changed(args).await,

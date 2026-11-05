@@ -2,13 +2,14 @@
 //!
 //! This module organizes the NeovimClient into submodules:
 //! - connection: Process management (new, start, stop)
-//! - state: State polling (take_state, take_viewport, poll)
+//! - state: Shared state and viewport
 //! - input: Key input (input, send_keys, channels)
 //! - buffer: Buffer operations (buffer_update, switch_to_buffer, attach)
 //! - cursor: Cursor and visual selection
 //! - execution: Command and Lua execution
 
 mod buffer;
+mod commands;
 mod connection;
 mod cursor;
 mod error;
@@ -161,6 +162,8 @@ pub struct IndentOptions {
 
 /// Manages connection to Neovim process
 pub struct NeovimClient {
+    commands: Option<commands::CommandQueue>,
+    pending_resize: std::cell::Cell<Option<(i64, i64)>>,
     pub(super) runtime: Runtime,
     pub(super) child: Option<tokio::process::Child>,
     pub(super) neovim: Arc<Mutex<Option<Neovim<Writer>>>>,

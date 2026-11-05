@@ -4,6 +4,7 @@ use std::{error::Error, fmt};
 #[derive(Debug)]
 pub enum ClientError {
     NotConnected,
+    Busy,
     Timeout(&'static str),
     Disconnected {
         operation: &'static str,
@@ -36,6 +37,7 @@ impl ClientError {
 impl fmt::Display for ClientError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Busy => write!(f, "Neovim command is still running"),
             Self::NotConnected => write!(f, "Neovim not connected"),
             Self::Timeout(operation) => write!(f, "Timeout {operation}"),
             Self::Disconnected { operation, source } | Self::Rpc { operation, source } => {

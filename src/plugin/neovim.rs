@@ -82,6 +82,16 @@ impl GodotNeovimPlugin {
             indent_size
         );
 
+        if client.commands_pending() {
+            if self.pending_switch_path != self.current_script_path {
+                self.pending_switch_input.clear();
+            }
+            self.pending_switch_path = self.current_script_path.clone();
+            self.pending_neovim_switch = true;
+            return None;
+        }
+        self.pending_neovim_switch = false;
+
         // Switch to buffer (creates if not exists)
         // Note: Don't pass indent_opts here - they must be set AFTER filetype
         let nvim_line_count = lines.len() as i32;
@@ -337,6 +347,11 @@ impl GodotNeovimPlugin {
             self.pending_godot_edit_sync.get_or_insert(0);
             return;
         };
+        if client.commands_pending() {
+            drop(client);
+            self.pending_godot_edit_sync.get_or_insert(0);
+            return;
+        }
         let result = client.sync_external_lines(lines, expected_tick, unmodified);
         drop(client);
 
@@ -491,6 +506,11 @@ impl GodotNeovimPlugin {
 
     /// Sync cursor position from Godot editor to Neovim
     pub(super) fn sync_cursor_to_neovim(&mut self) {
+        if self.current_commands_pending() {
+            self.pending_cursor_sync = true;
+            return;
+        }
+        self.pending_cursor_sync = false;
         // Skip if buffer not yet initialized (e.g., during hot reload)
         if self.sync_manager.get_line_count() == 0 {
             crate::verbose_print!(
@@ -592,6 +612,11 @@ impl GodotNeovimPlugin {
     /// buffered in pending_keys_after_exit and sent together after exit completes.
     /// This prevents key loss during mode transitions (vscode-neovim style).
     pub(super) fn send_keys(&mut self, keys: &str) -> bool {
+        if self.pending_neovim_switch {
+            self.pending_switch_input
+                .push(super::async_commands::PendingInput::Keys(keys.to_owned()));
+            return true;
+        }
         crate::verbose_print!("[godot-neovim] send_keys: {}", keys);
 
         // Clear user_cursor_sync flag when sending keys
@@ -773,8 +798,6 @@ impl GodotNeovimPlugin {
             };
             if let Some(neovim) = neovim_ref {
                 if let Ok(client) = neovim.try_lock() {
-                    client.poll();
-
                     // Drain buffer events (they're echoes of our sync)
                     if client.has_buf_events() {
                         let events_arc = client.get_buf_events();
@@ -930,11 +953,6 @@ impl GodotNeovimPlugin {
                 return;
             };
 
-            // Poll the runtime to process async events (including redraw).
-            // This also gives the key-input worker task a chance to drain queued
-            // keys and call nvim_input, advancing keys_processed below.
-            client.poll();
-
             // Collect buffer events
             let buf_events: Vec<BufEvent> = if client.has_buf_events() {
                 let events_arc = client.get_buf_events();
@@ -1023,7 +1041,10 @@ impl GodotNeovimPlugin {
 
             // If pending keys and no response for threshold time, treat as timeout
             // This is a clear indication that Neovim is unresponsive, so show dialog directly
-            if self.pending_key_count >= 3 && elapsed >= no_response_threshold {
+            if self.pending_key_count >= 3
+                && elapsed >= no_response_threshold
+                && !self.current_commands_pending()
+            {
                 crate::verbose_print!(
                     "[godot-neovim] No response for {} keys over {:?} - triggering recovery",
                     self.pending_key_count,

@@ -18,15 +18,19 @@ use super::CREATE_NO_WINDOW;
 
 impl NeovimClient {
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        // Use current-thread runtime so all tasks run on the same thread
-        // This ensures io_handler is processed during block_on calls
-        let runtime = Builder::new_current_thread().enable_all().build()?;
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("godot-neovim-rpc")
+            .enable_all()
+            .build()?;
         let nvim_path = settings::get_neovim_path();
         let clean = settings::get_neovim_clean();
         let handler = NeovimHandler::new();
         let state = handler.get_state();
         let has_updates = handler.get_updates_flag();
         Ok(Self {
+            commands: None,
+            pending_resize: std::cell::Cell::new(None),
             runtime,
             child: None,
             neovim: Arc::new(Mutex::new(None)),
@@ -62,7 +66,7 @@ impl NeovimClient {
             addons_path
         );
 
-        let (io_handle, child) = self.runtime.block_on(async {
+        let (io_handle, child, neovim) = self.runtime.block_on(async {
             let mut cmd = create_nvim_command(&nvim_path, clean);
             cmd.kill_on_drop(true);
 
@@ -138,12 +142,17 @@ impl NeovimClient {
             }
 
             let mut nvim_lock = neovim_arc.lock().await;
-            *nvim_lock = Some(neovim);
+            *nvim_lock = Some(neovim.clone());
 
             crate::verbose_print!("[godot-neovim] Neovim started successfully");
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>((io_handler, child))
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>((io_handler, child, neovim))
         })?;
 
+        self.commands = Some(super::commands::CommandQueue::new(
+            &self.runtime,
+            neovim,
+            self.handler.command_barrier(),
+        ));
         self.io_handle = Some(io_handle);
         self.child = Some(child);
 
@@ -222,6 +231,8 @@ impl NeovimClient {
     }
 
     pub fn stop(&mut self) {
+        self.commands = None;
+        self.pending_resize.set(None);
         let input_task = self.key_input_handle.take();
         let io_task = self.io_handle.take();
         self.key_input_tx = None;
@@ -340,6 +351,8 @@ mod tests {
         let mut stdout = child.stdout.take().unwrap();
         let handler = NeovimHandler::new();
         let mut client = NeovimClient {
+            commands: None,
+            pending_resize: std::cell::Cell::new(None),
             runtime,
             child: Some(child),
             neovim: Arc::new(Mutex::new(None)),

@@ -372,7 +372,7 @@ impl GodotNeovimPlugin {
 
     /// Try to get focused CodeEdit directly from any window's viewport
     /// This works for floating windows where the CodeEdit is not a child of ScriptEditor
-    fn get_focused_code_edit_direct(&self) -> Option<Gd<CodeEdit>> {
+    pub(super) fn get_focused_code_edit_direct(&self) -> Option<Gd<CodeEdit>> {
         let editor = EditorInterface::singleton();
         let base_control = editor.get_base_control()?;
 
@@ -698,6 +698,9 @@ impl GodotNeovimPlugin {
 
     /// Check if editor has focus, updating current_editor if a different CodeEdit has focus
     pub(super) fn editor_has_focus(&mut self) -> bool {
+        if self.pending_neovim_switch {
+            return false;
+        }
         // First check if current_editor has focus
         if let Some(ref editor) = self.current_editor {
             if editor.is_instance_valid() && editor.has_focus() {
