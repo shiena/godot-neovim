@@ -1,0 +1,106 @@
+[
+  {
+    "id": 9000,
+    "name": "slow Ex command keeps editor frames running and accepts movement",
+    "initial_path": "res://addons/godot-neovim-test/sandbox.gd",
+    "text": "aaa\nbbb\nccc",
+    "cursor": [0, 0],
+    "steps": [
+      {"ex": "set number | sleep 500m"},
+      {"frame_probe": 0.15},
+      {"send": "j"},
+      {"wait": 0.6}
+    ],
+    "expect_cursor": [1, 0],
+    "expect_text": "aaa\nbbb\nccc",
+    "expect_max_command_submit_ms": 150,
+    "expect_min_probe_frames": 3,
+    "expect_max_probe_gap_ms": 150
+  },
+  {
+    "id": 9001,
+    "name": "input releases an Ex command waiting for a character",
+    "initial_path": "res://addons/godot-neovim-test/sandbox.gd",
+    "text": "aaa\nbbb\nccc",
+    "cursor": [0, 0],
+    "steps": [
+      {"ex": "set number | call getchar()"},
+      {"frame_probe": 0.15},
+      {"send": "x"},
+      {"send": "j"}
+    ],
+    "expect_cursor": [1, 0],
+    "expect_text": "aaa\nbbb\nccc",
+    "expect_max_command_submit_ms": 150,
+    "expect_min_probe_frames": 3
+  },
+  {
+    "id": 9002,
+    "name": "buffer switch holds input until the slow command completes",
+    "initial_path": "res://addons/godot-neovim-test/sandbox.gd",
+    "text": "aaa\nbbb\nccc",
+    "cursor": [0, 0],
+    "steps": [
+      {"ex": "set number | sleep 500m"},
+      {"open": "res://addons/godot-neovim-test/sandbox_b.gd", "open_wait": 0.1},
+      {"event": "J"},
+      {"send": "gg"},
+      {"event": "J"},
+      {"frame_probe": 0.15},
+      {"wait": 0.6}
+    ],
+    "expect_cursor": [1, 0],
+    "expect_max_command_submit_ms": 150,
+    "expect_min_probe_frames": 3
+  },
+  {
+    "id": 9003,
+    "name": "queued Ex commands preserve their execution order",
+    "initial_path": "res://addons/godot-neovim-test/sandbox.gd",
+    "text": "aaa\nbbb\nccc",
+    "cursor": [0, 0],
+    "steps": [
+      {"ex": "set number | sleep 300m | normal! j"},
+      {"ex": "set number | normal! j"},
+      {"frame_probe": 0.15},
+      {"wait": 0.4}
+    ],
+    "expect_cursor": [2, 0],
+    "expect_max_command_submit_ms": 150,
+    "expect_min_probe_frames": 3
+  },
+  {
+    "id": 9004,
+    "name": "late edits stay with the previous buffer after switching tabs",
+    "initial_path": "res://addons/godot-neovim-test/sandbox.gd",
+    "text": "aaa\nbbb\nccc",
+    "cursor": [0, 0],
+    "steps": [
+      {"ex": "set number | sleep 400m | normal! dd"},
+      {"open": "res://addons/godot-neovim-test/sandbox_b.gd", "open_wait": 0.1},
+      {"frame_probe": 0.15},
+      {"wait": 0.5},
+      {"open": "res://addons/godot-neovim-test/sandbox.gd"}
+    ],
+    "expect_text": "bbb\nccc",
+    "expect_max_command_submit_ms": 150,
+    "expect_min_probe_frames": 3
+  },
+  {
+    "id": 9005,
+    "name": "returning to the command buffer allows answering getchar",
+    "initial_path": "res://addons/godot-neovim-test/sandbox.gd",
+    "text": "aaa\nbbb\nccc",
+    "cursor": [0, 0],
+    "steps": [
+      {"ex": "set number | call getchar()"},
+      {"open": "res://addons/godot-neovim-test/sandbox_b.gd", "open_wait": 0.1},
+      {"open": "res://addons/godot-neovim-test/sandbox.gd", "open_wait": 0.1},
+      {"send": "x"},
+      {"send": "j"}
+    ],
+    "expect_text": "aaa\nbbb\nccc",
+    "expect_cursor": [1, 0],
+    "expect_max_command_submit_ms": 150
+  }
+]

@@ -21,6 +21,9 @@ extends Node
 ##                            Godot itself inserts a signal callback: caret to
 ##                            the end, insert text there. "path" (optional)
 ##                            targets an open script that is not current.
+##   initial_path  str    Optional: open this script before setting up the case.
+##   steps also accept {"ex": "..."} through the plugin command line and
+##   {"frame_probe": seconds} to measure editor responsiveness.
 ##   interval      float  Optional: delay between keys/events (default 0.05s)
 ##   sync_wait     float  Optional: post-keys Neovim sync wait (default 0.3s)
 ##   category      str    Optional: tag override (defaults to filename stem)
@@ -44,6 +47,9 @@ var plugin: Node
 var test_plugin: EditorPlugin
 var results: Array[Dictionary] = []
 var running: bool = false
+var _max_command_submit_ms: float = 0.0
+var _probe_frames: int = 0
+var _max_probe_gap_ms: float = 0.0
 
 # Diagnostics: ring buffer of recent steps for failure reports
 var _recent_actions: Array[String] = []
@@ -129,9 +135,14 @@ func _run_cases(cases: Array) -> void:
 func _run_single(t: Dictionary) -> void:
 	_log("TEST %d: %s ..." % [t.id, t.name])
 	_recent_actions.clear()
+	_max_command_submit_ms = 0.0
+	_probe_frames = 0
+	_max_probe_gap_ms = 0.0
 
 	# 1. Ensure normal mode + clean buffer setup
 	await _reset_to_normal()
+	if t.has("initial_path"):
+		await _run_step({"open": t.initial_path}, 0.05)
 	await _setup_buffer(t)
 
 	# 2. Set cursor
@@ -182,7 +193,33 @@ func _run_single(t: Dictionary) -> void:
 # ---- Step execution ----
 
 func _run_step(step: Dictionary, interval: float) -> void:
-	if step.has("send"):
+	if step.has("ex"):
+		_record_recent("ex", str(step.ex))
+		plugin.action_open_command_line()
+		var viewport := EditorInterface.get_base_control().get_viewport()
+		for character in String(step.ex):
+			var key := InputEventKey.new()
+			key.pressed = true
+			key.unicode = character.unicode_at(0)
+			key.keycode = character.to_upper().unicode_at(0)
+			viewport.push_input(key)
+		var enter := InputEventKey.new()
+		enter.pressed = true
+		enter.keycode = KEY_ENTER
+		var started := Time.get_ticks_usec()
+		viewport.push_input(enter)
+		_max_command_submit_ms = maxf(_max_command_submit_ms, (Time.get_ticks_usec() - started) / 1000.0)
+		await get_tree().process_frame
+	elif step.has("frame_probe"):
+		var deadline := Time.get_ticks_msec() + int(float(step.frame_probe) * 1000)
+		var previous := Time.get_ticks_usec()
+		while Time.get_ticks_msec() < deadline:
+			await get_tree().process_frame
+			var now := Time.get_ticks_usec()
+			_max_probe_gap_ms = maxf(_max_probe_gap_ms, (now - previous) / 1000.0)
+			previous = now
+			_probe_frames += 1
+	elif step.has("send"):
 		_record_recent("send", str(step.send))
 		plugin.action_send_keys(step.send)
 		await get_tree().create_timer(interval).timeout
@@ -297,6 +334,17 @@ func _check(t: Dictionary) -> Dictionary:
 		"passed": true,
 		"diff": {},
 	}
+	if t.has("expect_max_command_submit_ms"):
+		result["metrics"] = {"command_submit_ms": _max_command_submit_ms, "probe_frames": _probe_frames, "max_probe_gap_ms": _max_probe_gap_ms}
+	if t.has("expect_max_command_submit_ms") and _max_command_submit_ms > float(t.expect_max_command_submit_ms):
+		result.passed = false
+		result.diff["command_submit_ms"] = {"expected": t.expect_max_command_submit_ms, "actual": _max_command_submit_ms}
+	if t.has("expect_min_probe_frames") and _probe_frames < int(t.expect_min_probe_frames):
+		result.passed = false
+		result.diff["probe_frames"] = {"expected": t.expect_min_probe_frames, "actual": _probe_frames}
+	if t.has("expect_max_probe_gap_ms") and _max_probe_gap_ms > float(t.expect_max_probe_gap_ms):
+		result.passed = false
+		result.diff["probe_gap_ms"] = {"expected": t.expect_max_probe_gap_ms, "actual": _max_probe_gap_ms}
 	var code_edit := _get_code_edit()
 	if not code_edit:
 		result.passed = false
