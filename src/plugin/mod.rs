@@ -442,6 +442,15 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
+        // Shader and external editors have no ScriptEditor change signal.
+        // Detect their focus changes before a count/operator key can leave
+        // Neovim waiting for input while the buffer-switch RPC is pending.
+        if !self.closing_all_tabs
+            && !self.script_changed_pending.get()
+            && !self.current_commands_pending()
+        {
+            self.editor_has_focus();
+        }
         self.process_command_results();
         self.retry_pending_neovim_switch();
 

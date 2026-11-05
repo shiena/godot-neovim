@@ -22,6 +22,7 @@ extends Node
 ##                            the end, insert text there. "path" (optional)
 ##                            targets an open script that is not current.
 ##   initial_path  str    Optional: open this script before setting up the case.
+##   ui_case       str    Optional: run a named editor UI fixture instead of steps.
 ##   steps also accept {"ex": "..."} through the plugin command line and
 ##   {"frame_probe": seconds} to measure editor responsiveness.
 ##   interval      float  Optional: delay between keys/events (default 0.05s)
@@ -133,6 +134,21 @@ func _run_cases(cases: Array) -> void:
 
 
 func _run_single(t: Dictionary) -> void:
+	if t.has("ui_case"):
+		var suite = preload("res://addons/godot-neovim-test/editor_ui_tests.gd").new()
+		add_child(suite)
+		var result: Dictionary = await suite.run_case(t, plugin, test_plugin)
+		if not result.has("passed"):
+			result = {
+				"id": t.id, "name": t.name, "category": "editor_ui", "passed": false,
+				"diff": {"error": "Editor UI fixture did not complete; see the Godot log."}
+			}
+		results.append(result)
+		_log("  %s: %s" % ["PASS" if result.passed else "FAIL", t.name])
+		if not result.passed:
+			_log(JSON.stringify(result.diff))
+		suite.queue_free()
+		return
 	_log("TEST %d: %s ..." % [t.id, t.name])
 	_recent_actions.clear()
 	_max_command_submit_ms = 0.0

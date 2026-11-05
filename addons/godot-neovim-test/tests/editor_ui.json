@@ -1,0 +1,47 @@
+[
+  {
+    "id": 1000,
+    "name": "Shader input reaches the shader CodeEdit",
+    "ui_case": "shader_edit"
+  },
+  {
+    "id": 1001,
+    "name": "Shader :w saves the active shader",
+    "ui_case": "shader_save"
+  },
+  {
+    "id": 1002,
+    "name": "Shader :wa saves both shader tabs",
+    "ui_case": "shader_save_all"
+  },
+  {
+    "id": 1003,
+    "name": "Shader gt and gT select the expected editor",
+    "ui_case": "shader_tabs"
+  },
+  {
+    "id": 1004,
+    "name": "Shader :q closes only the active tab",
+    "ui_case": "shader_close"
+  },
+  {
+    "id": 1005,
+    "name": "Plain text editing and :w use the text file",
+    "ui_case": "text_edit_save"
+  },
+  {
+    "id": 1006,
+    "name": "External CodeEdit receives normal and insert input",
+    "ui_case": "external_edit"
+  },
+  {
+    "id": 1007,
+    "name": "Floating CodeEdit ignores a hidden tab",
+    "ui_case": "floating_edit"
+  },
+  {
+    "id": 1008,
+    "name": "TextEdit and LineEdit keep native text input",
+    "ui_case": "native_text_controls"
+  }
+]
