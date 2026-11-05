@@ -378,7 +378,10 @@ impl GodotNeovimPlugin {
 
         // First try the main viewport
         let main_viewport = base_control.get_viewport()?;
-        if let Some(focus_owner) = main_viewport.gui_get_focus_owner() {
+        if let Some(focus_owner) = main_viewport
+            .gui_get_focus_owner()
+            .filter(|c| c.is_visible_in_tree() && c.get_window().is_some_and(|w| w.has_focus()))
+        {
             if let Ok(code_edit) = focus_owner.try_cast::<CodeEdit>() {
                 return Some(code_edit);
             }
@@ -415,7 +418,10 @@ impl GodotNeovimPlugin {
             let window_has_focus = window.has_focus();
 
             // First try gui_get_focus_owner
-            if let Some(focus_owner) = window.gui_get_focus_owner() {
+            if let Some(focus_owner) = window
+                .gui_get_focus_owner()
+                .filter(|c| window_has_focus && c.is_visible_in_tree())
+            {
                 if let Ok(code_edit) = focus_owner.try_cast::<CodeEdit>() {
                     return Some(code_edit);
                 }
@@ -424,7 +430,7 @@ impl GodotNeovimPlugin {
             // If window has focus (OS-level), search for any CodeEdit in this window
             // Float windows won't report gui_get_focus_owner correctly when called from main window
             if window_has_focus {
-                if let Some(code_edit) = self.find_first_code_edit_in_node(window.upcast()) {
+                if let Some(code_edit) = super::editor_tree::visible_code_edit(&window.upcast()) {
                     return Some(code_edit);
                 }
             }
@@ -435,26 +441,6 @@ impl GodotNeovimPlugin {
         for i in 0..count {
             if let Some(child) = node.get_child(i) {
                 if let Some(code_edit) = self.find_focused_code_edit_in_subwindows(child) {
-                    return Some(code_edit);
-                }
-            }
-        }
-
-        None
-    }
-
-    /// Recursively find the first CodeEdit in a node tree (for focused windows)
-    fn find_first_code_edit_in_node(&self, node: Gd<Node>) -> Option<Gd<CodeEdit>> {
-        // Check if this node is a CodeEdit
-        if let Ok(code_edit) = node.clone().try_cast::<CodeEdit>() {
-            return Some(code_edit);
-        }
-
-        // Search children
-        let count = node.get_child_count();
-        for i in 0..count {
-            if let Some(child) = node.get_child(i) {
-                if let Some(code_edit) = self.find_first_code_edit_in_node(child) {
                     return Some(code_edit);
                 }
             }
@@ -703,7 +689,11 @@ impl GodotNeovimPlugin {
         }
         // First check if current_editor has focus
         if let Some(ref editor) = self.current_editor {
-            if editor.is_instance_valid() && editor.has_focus() {
+            if editor.is_instance_valid()
+                && editor.is_visible_in_tree()
+                && editor.has_focus()
+                && editor.get_window().is_some_and(|w| w.has_focus())
+            {
                 // Update float window connection if needed (checks internally if already connected)
                 self.update_float_window_connection();
                 return true;
@@ -768,15 +758,12 @@ impl GodotNeovimPlugin {
                 None => true,
             };
 
-            // Save previous type before changing (for buffer sync decision)
-            let previous_type = self.current_editor_type;
-
             if in_script_editor {
                 if is_different {
+                    let type_changed = self.current_editor_type != EditorType::Script;
                     crate::verbose_print!(
                         "[godot-neovim] Switching to focused CodeEdit (float/dock change)"
                     );
-                    let type_changed = previous_type != EditorType::Script;
                     self.current_editor = Some(focused_code_edit);
                     self.current_editor_type = EditorType::Script;
                     self.connect_caret_changed_signal();
@@ -784,11 +771,14 @@ impl GodotNeovimPlugin {
                     self.connect_resized_signal();
                     self.reposition_mode_label();
 
-                    if type_changed {
-                        crate::verbose_print!(
-                            "[godot-neovim] ScriptEditor: triggering buffer sync (from {:?})",
-                            previous_type
-                        );
+                    let is_text_file = EditorInterface::singleton()
+                        .get_script_editor()
+                        .is_some_and(|e| e.get_current_script().is_none());
+                    // Ordinary scripts already have a change signal. Avoid
+                    // a second switch that would reset an externally edited
+                    // buffer's cursor after its first synchronization.
+                    if type_changed || is_text_file {
+                        self.expected_script_path = None;
                         self.handle_script_changed();
                     }
                 } else {
