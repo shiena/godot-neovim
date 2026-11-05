@@ -28,7 +28,7 @@ impl NeovimClient {
                 // Return changedtick
                 result
                     .as_i64()
-                    .ok_or_else(|| ClientError::InvalidResponse("Invalid changedtick returned"))
+                    .ok_or(ClientError::InvalidResponse("Invalid changedtick returned"))
             } else {
                 Err(ClientError::NotConnected)
             }
