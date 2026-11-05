@@ -335,10 +335,18 @@ func _check(t: Dictionary) -> Dictionary:
 		"diff": {},
 	}
 	if t.has("expect_max_command_submit_ms"):
-		result["metrics"] = {"command_submit_ms": _max_command_submit_ms, "probe_frames": _probe_frames, "max_probe_gap_ms": _max_probe_gap_ms}
-	if t.has("expect_max_command_submit_ms") and _max_command_submit_ms > float(t.expect_max_command_submit_ms):
+		result["metrics"] = {
+			"command_submit_ms": _max_command_submit_ms,
+			"probe_frames": _probe_frames,
+			"max_probe_gap_ms": _max_probe_gap_ms,
+		}
+	if (t.has("expect_max_command_submit_ms")
+			and _max_command_submit_ms > float(t.expect_max_command_submit_ms)):
 		result.passed = false
-		result.diff["command_submit_ms"] = {"expected": t.expect_max_command_submit_ms, "actual": _max_command_submit_ms}
+		result.diff["command_submit_ms"] = {
+			"expected": t.expect_max_command_submit_ms,
+			"actual": _max_command_submit_ms,
+		}
 	if t.has("expect_min_probe_frames") and _probe_frames < int(t.expect_min_probe_frames):
 		result.passed = false
 		result.diff["probe_frames"] = {"expected": t.expect_min_probe_frames, "actual": _probe_frames}
