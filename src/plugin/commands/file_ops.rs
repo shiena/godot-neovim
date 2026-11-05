@@ -151,7 +151,7 @@ impl GodotNeovimPlugin {
         }
     }
 
-    /// :wa/:wall - Save all open scripts via ScriptEditor's File menu
+    /// :wa/:wall - Save all documents in the active editor's File menu
     /// This triggers Godot's internal save_all processing, including EditorPlugin hooks
     pub(in crate::plugin) fn cmd_save_all(&self) {
         if self.current_editor_type == EditorType::Unknown {
@@ -159,8 +159,24 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        if emit_file_menu_signal("script_editor/save_all") {
+        if self.emit_current_file_menu_action("script_editor/save_all") {
             crate::verbose_print!("[godot-neovim] :wa - queued script_editor/save_all");
+        } else if self.current_editor_type == EditorType::Shader {
+            // Legacy shader editors have Save but no Save All menu entry.
+            let mut ancestor = self.current_editor.as_ref().and_then(|e| e.get_parent());
+            while let Some(node) = ancestor {
+                ancestor = node.get_parent();
+                if let Ok(mut tabs) = node.try_cast::<godot::classes::TabContainer>() {
+                    let original = tabs.get_current_tab();
+                    for index in 0..tabs.get_tab_count() {
+                        tabs.call_deferred("set_current_tab", &[index.to_variant()]);
+                        self.emit_current_file_menu_action("script_editor/save");
+                    }
+                    tabs.call_deferred("set_current_tab", &[original.to_variant()]);
+                    return;
+                }
+            }
+            godot_warn!("[godot-neovim] :wa - Could not find shader tabs");
         } else {
             godot_warn!("[godot-neovim] :wa - Could not find File menu in ScriptEditor");
         }
@@ -370,7 +386,7 @@ impl GodotNeovimPlugin {
             }
         }
 
-        // Handle ShaderEditor differently - close via TabContainer
+        // Handle ShaderEditor through its own File menu.
         if self.current_editor_type == EditorType::Shader {
             self.close_shader_tab();
             return;
@@ -384,9 +400,14 @@ impl GodotNeovimPlugin {
         crate::verbose_print!("[godot-neovim] :q - Close triggered (Ctrl+W)");
     }
 
-    /// Close the current shader tab using Ctrl+W (same as ScriptEditor)
-    /// ShaderEditor also responds to Ctrl+W when it has focus
+    /// Close the current shader tab through its File menu.
     fn close_shader_tab(&mut self) {
+        // Queue the action on this editor's menu before clearing its identity.
+        // A synthetic Ctrl+W may reach a different window or script editor.
+        if !self.emit_current_file_menu_action("script_editor/close_file") {
+            godot_warn!("[godot-neovim] :q - Could not find shader File menu");
+            return;
+        }
         // Disconnect from signals BEFORE clearing editor reference
         // to avoid accessing freed CodeEdit instance
         self.disconnect_caret_changed_signal();
@@ -411,14 +432,11 @@ impl GodotNeovimPlugin {
         self.current_editor = None;
         self.current_editor_type = EditorType::Unknown;
 
-        // Use Ctrl+W to close the shader tab - Godot's ShaderEditor handles this
-        simulate_ctrl_w();
-
         // Set flag to grab focus on shader editor after close
         // This ensures we focus the remaining shader tab's CodeEdit
         self.focus_shader_after_close = true;
 
-        crate::verbose_print!("[godot-neovim] :q - Shader tab close triggered (Ctrl+W)");
+        crate::verbose_print!("[godot-neovim] :q - Shader tab close queued");
     }
 
     /// ZQ - Close without saving (discard changes)
