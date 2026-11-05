@@ -63,49 +63,8 @@ impl GodotNeovimPlugin {
             return;
         };
 
-        // Execute the command in Neovim
-        let full_cmd = format!(":{}", cmd);
-        crate::verbose_print!("[godot-neovim] Forwarding to Neovim: {}", full_cmd);
-
-        // For :set commands with ?, get the option value directly via Neovim API
-        if cmd.starts_with("set ") && cmd.contains('?') {
-            // Extract option name from "set optname?" format
-            let option_name = cmd
-                .strip_prefix("set ")
-                .and_then(|s| s.strip_suffix('?'))
-                .unwrap_or("");
-
-            if !option_name.is_empty() {
-                // Use nvim_get_option_value API for reliable option retrieval
-                // Use buf=0 to get the current buffer's option (for buffer-local options like filetype)
-                let lua_cmd =
-                    "local name = ...; return vim.api.nvim_get_option_value(name, { buf = 0 })";
-                crate::verbose_print!("[godot-neovim] Querying option: {}", option_name);
-                match client.execute_lua_with_args(lua_cmd, vec![rmpv::Value::from(option_name)]) {
-                    Ok(result) => {
-                        let value_str = if result.is_str() {
-                            result.as_str().unwrap_or("").to_string()
-                        } else if result.is_bool() {
-                            result.as_bool().map_or("".to_string(), |b| b.to_string())
-                        } else if result.is_i64() {
-                            result.as_i64().map_or("".to_string(), |n| n.to_string())
-                        } else {
-                            format!("{:?}", result)
-                        };
-                        crate::verbose_print!("[godot-neovim] Option result: {:?}", result);
-                        godot_print!("[godot-neovim] {}={}", option_name, value_str);
-                    }
-                    Err(e) => {
-                        godot_warn!(
-                            "[godot-neovim] Failed to get option '{}': {}",
-                            option_name,
-                            e
-                        );
-                    }
-                }
-            }
-        } else if let Err(e) = client.command(&full_cmd) {
-            godot_warn!("[godot-neovim] Neovim command failed: {}", e);
+        if let Err(error) = client.queue_command(cmd) {
+            godot_warn!("[godot-neovim] Cannot queue command: {}", error);
         }
     }
 

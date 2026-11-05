@@ -5,6 +5,7 @@ use super::{ClientError, NeovimClient};
 impl NeovimClient {
     /// Execute Neovim command
     pub fn command(&self, cmd: &str) -> Result<(), ClientError> {
+        self.ensure_rpc_ready()?;
         let neovim_arc = self.neovim.clone();
         let cmd = cmd.to_string();
 
@@ -33,6 +34,7 @@ impl NeovimClient {
         lua_code: &str,
         args: Vec<rmpv::Value>,
     ) -> Result<rmpv::Value, ClientError> {
+        self.ensure_rpc_ready()?;
         let neovim_arc = self.neovim.clone();
         let lua_code = lua_code.to_string();
 

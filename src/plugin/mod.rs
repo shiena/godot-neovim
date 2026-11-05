@@ -4,6 +4,7 @@
 const VERSION: &str = env!("BUILD_VERSION");
 
 mod actions;
+mod async_commands;
 mod commands;
 mod editing;
 mod editor;
@@ -122,6 +123,11 @@ impl HelpQuery {
 #[class(tool, init, base=EditorPlugin)]
 pub struct GodotNeovimPlugin {
     base: Base<EditorPlugin>,
+    pending_neovim_switch: bool,
+    pending_cursor_sync: bool,
+    pending_switch_path: String,
+    pending_switch_input: Vec<async_commands::PendingInput>,
+
     /// Neovim client for ScriptEditor
     #[init(val = None)]
     script_neovim: Option<Mutex<NeovimClient>>,
@@ -436,6 +442,9 @@ impl IEditorPlugin for GodotNeovimPlugin {
             return;
         }
 
+        self.process_command_results();
+        self.retry_pending_neovim_switch();
+
         if self.insert_escape_pending.is_some()
             && (!self.is_insert_mode() || !self.editor_has_focus())
         {
@@ -596,6 +605,10 @@ impl IEditorPlugin for GodotNeovimPlugin {
 
     fn input(&mut self, event: Gd<godot::classes::InputEvent>) {
         if !self.plugin_active {
+            return;
+        }
+
+        if self.defer_input_during_switch(&event) {
             return;
         }
 
@@ -1268,7 +1281,26 @@ impl GodotNeovimPlugin {
     }
 
     #[func]
+    fn send_deferred_keys(&mut self, keys: GString) {
+        self.send_keys(&keys.to_string());
+    }
+
+    #[func]
     fn handle_script_changed_deferred(&mut self) {
+        if self.current_commands_pending() {
+            let path = self.expected_script_path.clone().unwrap_or_default();
+            if !path.is_empty() && path == self.current_script_path {
+                self.clear_pending_neovim_switch();
+                return;
+            }
+            if self.pending_switch_path != path {
+                self.pending_switch_input.clear();
+            }
+            self.pending_switch_path = path;
+            self.pending_neovim_switch = true;
+            return;
+        }
+
         // Check if this operation is stale (a newer switch was initiated)
         // This prevents processing outdated switches during rapid tab changes
         if self.pending_switch_id != self.script_switch_id {
@@ -1426,7 +1458,11 @@ impl GodotNeovimPlugin {
 
         // Switch to Neovim buffer for this file (creates if not exists)
         // Returns cursor position from Neovim and whether buffer was newly created
-        if let Some((line, col, keep_godot_cursor)) = self.switch_to_neovim_buffer() {
+        let cursor = self.switch_to_neovim_buffer();
+        if self.pending_neovim_switch {
+            return;
+        }
+        if let Some((line, col, keep_godot_cursor)) = cursor {
             if keep_godot_cursor {
                 // New buffer (Godot startup): Godot restores cursor from the
                 // previous session. Godot-edited buffer: Godot placed the caret
@@ -1476,6 +1512,10 @@ impl GodotNeovimPlugin {
                 }
             }
         }
+        // Editor discovery can flag the same switch we have just completed.
+        if self.expected_script_path.is_none() {
+            self.script_changed_pending.set(false);
+        }
     }
 
     /// Handle input from CodeEdit's gui_input signal
@@ -1486,6 +1526,10 @@ impl GodotNeovimPlugin {
         // Only process if this is a float window
         // Main window input is handled by EditorPlugin.input()
         if !self.is_in_float_window() {
+            return;
+        }
+
+        if self.defer_input_during_switch(&event) {
             return;
         }
 
@@ -2303,6 +2347,7 @@ impl GodotNeovimPlugin {
 
     /// Clean up the plugin. Called by plugin.gd via set_plugin_active(false) or from exit_tree().
     fn deactivate_plugin_impl(&mut self) {
+        self.clear_pending_neovim_switch();
         crate::verbose_print!("[godot-neovim] Plugin deactivating");
 
         // Disable process() first

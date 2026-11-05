@@ -1,64 +1,49 @@
-//! State management: poll, take_state, viewport
+//! Shared state and viewport updates
 
 use super::NeovimClient;
 use std::sync::atomic::Ordering;
 
 impl NeovimClient {
     /// Take pending updates (clears the flag) and return current state
-    /// Prefers actual_cursor (from CursorMoved autocmd) over grid cursor (from redraw)
-    /// because actual_cursor is byte position, while grid cursor is screen position
+    /// Keep buffer coordinates across redraws that only update the screen grid.
     pub fn take_state(&self) -> Option<(String, (i64, i64))> {
+        let state = self.state.try_lock().ok()?;
         if !self.has_updates.swap(false, Ordering::SeqCst) {
             return None;
         }
-
-        // Try to get state without blocking
-        self.runtime.block_on(async {
-            let mut state = self.state.lock().await;
-            // Prefer actual_cursor (byte position) over grid cursor (screen position)
-            // This is important for files with tab characters
-            let cursor = if let Some(actual) = state.actual_cursor.take() {
-                actual
-            } else {
-                state.cursor
-            };
-            Some((state.mode.clone(), cursor))
-        })
+        let cursor = state.actual_cursor.unwrap_or(state.cursor);
+        Some((state.mode.clone(), cursor))
     }
 
-    /// Take viewport changes (topline, botline, curline, curcol) if viewport has changed
-    /// Returns None if viewport hasn't changed since last call
-    /// The curline/curcol are the buffer cursor positions from win_viewport
     pub fn take_viewport(&self) -> Option<(i64, i64, i64, i64)> {
-        self.runtime.block_on(async {
-            let mut state = self.state.lock().await;
-            if state.viewport_changed {
-                state.viewport_changed = false;
-                Some((
-                    state.viewport_topline,
-                    state.viewport_botline,
-                    state.viewport_curline,
-                    state.viewport_curcol,
-                ))
-            } else {
-                None
-            }
-        })
+        let mut state = self.state.try_lock().ok()?;
+        if !state.viewport_changed {
+            return None;
+        }
+        state.viewport_changed = false;
+        Some((
+            state.viewport_topline,
+            state.viewport_botline,
+            state.viewport_curline,
+            state.viewport_curcol,
+        ))
     }
 
-    /// Force viewport_changed flag to true
-    /// Used after buffer switch to ensure next viewport event is processed
-    /// even if the values haven't changed from previous buffer
     pub fn force_viewport_changed(&self) {
-        self.runtime.block_on(async {
-            let mut state = self.state.lock().await;
-            state.viewport_changed = true;
-        })
+        let state = self.state.clone();
+        self.runtime.spawn(async move {
+            state.lock().await.viewport_changed = true;
+        });
     }
 
     /// Resize Neovim's UI to match Godot editor's visible area
     /// This is important for viewport commands (zz, zt, zb) to work correctly
     pub fn ui_try_resize(&self, width: i64, height: i64) {
+        if self.commands_pending() {
+            self.pending_resize.set(Some((width, height)));
+            return;
+        }
+        self.pending_resize.set(None);
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -78,19 +63,6 @@ impl NeovimClient {
         });
     }
 
-    /// Poll the runtime to process pending async events (like redraw notifications)
-    /// This must be called regularly (e.g., every frame) to receive events
-    pub fn poll(&self) {
-        self.runtime.block_on(async {
-            // Give the runtime a chance to process IO events
-            // 1ms allows enough time for:
-            // 1. spawn() tasks to execute (input_async)
-            // 2. Neovim to process input and send redraw events
-            // 3. IO handler to receive and process events
-            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-        });
-    }
-
     /// Number of keys Neovim's main loop has confirmed processing since the
     /// last call (see keys_processed in mod.rs for what "confirmed" means).
     /// The baseline is stored on this client, so counters of different Neovim
@@ -107,9 +79,64 @@ impl NeovimClient {
     /// Take pending debug messages from Lua
     /// Returns empty Vec if no messages
     pub fn take_debug_messages(&self) -> Vec<String> {
-        self.runtime.block_on(async {
-            let mut state = self.state.lock().await;
-            std::mem::take(&mut state.debug_messages)
-        })
+        self.state
+            .try_lock()
+            .map(|mut state| std::mem::take(&mut state.debug_messages))
+            .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::neovim::NeovimHandler;
+    use std::sync::{atomic::AtomicU64, Arc};
+    use tokio::sync::Mutex;
+
+    fn client() -> NeovimClient {
+        let handler = NeovimHandler::new();
+        NeovimClient {
+            commands: None,
+            pending_resize: std::cell::Cell::new(None),
+            runtime: tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap(),
+            child: None,
+            neovim: Arc::new(Mutex::new(None)),
+            state: handler.get_state(),
+            has_updates: handler.get_updates_flag(),
+            handler,
+            nvim_path: String::new(),
+            clean: true,
+            io_handle: None,
+            key_input_tx: None,
+            key_input_handle: None,
+            keys_processed: Arc::new(AtomicU64::new(0)),
+            keys_processed_seen: AtomicU64::new(0),
+        }
+    }
+
+    #[test]
+    fn grid_only_redraw_keeps_the_last_buffer_cursor() {
+        let client = client();
+        client.state.blocking_lock().actual_cursor = Some((1, 0));
+        client.has_updates.store(true, Ordering::SeqCst);
+        assert_eq!(client.take_state().unwrap().1, (1, 0));
+
+        // A line-number gutter shifts the screen column, not the buffer column.
+        client.state.blocking_lock().cursor = (1, 4);
+        client.has_updates.store(true, Ordering::SeqCst);
+        assert_eq!(client.take_state().unwrap().1, (1, 0));
+    }
+
+    #[test]
+    fn contended_state_preserves_the_update_for_the_next_frame() {
+        let client = client();
+        let state = client.state.blocking_lock();
+        client.has_updates.store(true, Ordering::SeqCst);
+        assert!(client.take_state().is_none());
+        drop(state);
+        assert!(client.take_state().is_some());
+        assert!(client.take_state().is_none());
     }
 }

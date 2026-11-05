@@ -10,6 +10,7 @@ impl NeovimClient {
     /// Update buffer content (preserves undo history for 'u' command)
     /// Uses Lua function to properly manage undo history
     pub fn buffer_update(&self, lines: Vec<String>) -> Result<i64, ClientError> {
+        self.ensure_rpc_ready()?;
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -44,6 +45,7 @@ impl NeovimClient {
         expected_tick: Option<i64>,
         unmodified: bool,
     ) -> Result<ExternalSyncResult, ClientError> {
+        self.ensure_rpc_ready()?;
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -123,6 +125,7 @@ impl NeovimClient {
         indent_opts: Option<IndentOptions>,
         unmodified: bool,
     ) -> Result<SwitchBufferResult, ClientError> {
+        self.ensure_rpc_ready()?;
         let neovim_arc = self.neovim.clone();
         let path = path.to_string();
 
@@ -193,6 +196,7 @@ impl NeovimClient {
         use_spaces: bool,
         indent_size: i32,
     ) -> Result<(), ClientError> {
+        self.ensure_rpc_ready()?;
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -276,6 +280,7 @@ impl NeovimClient {
 
     /// Attach to current buffer for change notifications
     pub fn buf_attach_current(&self) -> Result<bool, ClientError> {
+        self.ensure_rpc_ready()?;
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {

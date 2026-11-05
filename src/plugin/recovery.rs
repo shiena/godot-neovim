@@ -132,6 +132,7 @@ impl GodotNeovimPlugin {
 
     /// Restart the Neovim clients
     pub(super) fn restart_neovim(&mut self) {
+        self.clear_pending_neovim_switch();
         crate::verbose_print!("[godot-neovim] Recovery: Restarting Neovim...");
 
         // Stop existing Neovim clients

@@ -6,6 +6,7 @@ use rmpv::Value;
 impl NeovimClient {
     /// Get cursor position (1-indexed line, 0-indexed column) with timeout
     pub fn get_cursor(&self) -> Result<(i64, i64), ClientError> {
+        self.ensure_rpc_ready()?;
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -39,6 +40,7 @@ impl NeovimClient {
 
     /// Set cursor position with timeout
     pub fn set_cursor(&self, line: i64, col: i64) -> Result<(), ClientError> {
+        self.ensure_rpc_ready()?;
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -76,6 +78,7 @@ impl NeovimClient {
     /// Returns ((start_line, start_col), (end_line, end_col)) - 0-indexed
     /// Returns None if not in visual mode or failed to get selection
     pub fn get_visual_selection(&self) -> Option<((i64, i64), (i64, i64))> {
+        self.ensure_rpc_ready().ok()?;
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {
@@ -126,6 +129,7 @@ impl NeovimClient {
         to_line: i64,
         to_col: i64,
     ) -> Result<String, ClientError> {
+        self.ensure_rpc_ready()?;
         let neovim_arc = self.neovim.clone();
 
         self.runtime.block_on(async {

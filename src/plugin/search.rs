@@ -204,10 +204,6 @@ impl GodotNeovimPlugin {
             return;
         }
 
-        // Poll to ensure Neovim processes the input and updates cursor
-        // This gives Neovim time to execute the search and update state
-        client.poll();
-
         // Get cursor position from Neovim
         match client.get_cursor() {
             Ok((line, col)) => {
