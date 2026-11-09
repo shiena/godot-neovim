@@ -12,8 +12,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 godot = { version = "0.5", features = ["api-4-4"] }
-# Pin the fork's RPC lifecycle fixes for reproducible builds.
-nvim-rs = { git = "https://github.com/shiena/nvim-rs", rev = "8861c507012ce4b8d807c10fbebdcb5a84ecd7e4", features = ["use_tokio"] }
+nvim-rs = { version = "0.10.0", features = ["use_tokio"] }
 tokio = { version = "1.54.1", features = ["full"] }
 futures = "0.3"
 rmpv = "1.3"
