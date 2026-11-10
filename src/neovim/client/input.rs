@@ -5,6 +5,12 @@ use super::{ClientError, NeovimClient, RPC_TIMEOUT_MS};
 impl NeovimClient {
     /// Send keys to Neovim with timeout
     pub fn input(&self, keys: &str) -> Result<(), ClientError> {
+        if self
+            .rpc_timed_out
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err(ClientError::NotConnected);
+        }
         let neovim_arc = self.neovim.clone();
         let keys = keys.to_string();
 
@@ -36,6 +42,12 @@ impl NeovimClient {
     /// Keys are processed in order by a dedicated task
     /// Returns true if key was queued, false if channel is not available
     pub fn send_key_via_channel(&self, keys: &str) -> bool {
+        if self
+            .rpc_timed_out
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return false;
+        }
         if let Some(ref tx) = self.key_input_tx {
             // send() on unbounded channel never blocks and only fails if receiver is dropped
             tx.send(keys.to_string()).is_ok()

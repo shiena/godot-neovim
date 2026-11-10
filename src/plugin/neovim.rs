@@ -473,6 +473,9 @@ impl GodotNeovimPlugin {
                 crate::verbose_print!("[godot-neovim] Insert-mode sync to Neovim (tick={})", tick);
             }
             Err(e) => {
+                if e.requires_recovery() && self.record_connection_failure() {
+                    self.show_recovery_dialog();
+                }
                 crate::verbose_print!("[godot-neovim] Insert-mode sync failed: {}", e);
             }
         }
@@ -952,6 +955,14 @@ impl GodotNeovimPlugin {
             let Ok(client) = neovim.try_lock() else {
                 return;
             };
+
+            if client.rpc_timed_out() {
+                drop(client);
+                if !self.recovery_dialog_open {
+                    self.show_recovery_dialog();
+                }
+                return;
+            }
 
             // Collect buffer events
             let buf_events: Vec<BufEvent> = if client.has_buf_events() {

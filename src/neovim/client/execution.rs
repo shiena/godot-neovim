@@ -9,7 +9,7 @@ impl NeovimClient {
         let neovim_arc = self.neovim.clone();
         let cmd = cmd.to_string();
 
-        self.runtime.block_on(async {
+        self.wait_for_rpc("executing command", async {
             let nvim = neovim_arc.lock().await.as_ref().cloned();
             if let Some(neovim) = nvim.as_ref() {
                 neovim
@@ -38,7 +38,7 @@ impl NeovimClient {
         let neovim_arc = self.neovim.clone();
         let lua_code = lua_code.to_string();
 
-        self.runtime.block_on(async {
+        self.wait_for_rpc("executing Lua", async {
             let nvim = neovim_arc.lock().await.as_ref().cloned();
             if let Some(neovim) = nvim.as_ref() {
                 neovim

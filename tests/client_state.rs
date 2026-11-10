@@ -74,3 +74,31 @@ fn reconnect_requires_initialization_of_the_new_connection() {
     assert!(client.initialize("file:///project").is_err());
     server.join().unwrap();
 }
+
+#[test]
+fn lsp_deadline_covers_trickled_notifications_and_discards_connection() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream);
+        let request = read_message(&mut reader);
+        assert_eq!(request["method"], "textDocument/hover");
+        // Frequent traffic defeats a per-read timeout, but not a request deadline.
+        let body = r#"{"jsonrpc":"2.0","method":"test/progress","params":{}}"#;
+        let message = format!("Content-Length: {}\r\n\r\n{}", body.len(), body);
+        for _ in 0..30 {
+            if reader.get_mut().write_all(message.as_bytes()).is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    });
+    let client = lsp::GodotLspClient::new();
+    client.connect(port).unwrap();
+    let began = std::time::Instant::now();
+    assert!(client.hover("file:///project/test.gd", 0, 0).is_err());
+    assert!(began.elapsed() < Duration::from_secs(2));
+    assert!(!client.is_connected());
+    server.join().unwrap();
+}

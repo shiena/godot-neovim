@@ -30,6 +30,7 @@ impl NeovimClient {
         let has_updates = handler.get_updates_flag();
         Ok(Self {
             commands: None,
+            rpc_timed_out: std::sync::atomic::AtomicBool::new(false),
             pending_resize: std::cell::Cell::new(None),
             runtime,
             child: None,
@@ -54,6 +55,8 @@ impl NeovimClient {
         &mut self,
         addons_path: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.rpc_timed_out
+            .store(false, std::sync::atomic::Ordering::Release);
         let handler = self.handler.clone();
         let neovim_arc = self.neovim.clone();
         let nvim_path = self.nvim_path.clone();
@@ -73,8 +76,8 @@ impl NeovimClient {
 
             let (neovim, io_handler, mut child) = create::new_child_cmd(&mut cmd, handler).await?;
             let stderr_handle = child.stderr.take().map(|stderr| tokio::spawn(drain_stderr(stderr)));
-            // Keep startup failures from detaching the reader task.
-            let stderr_guard = AbortOnDrop(stderr_handle);
+            let initialized = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+
 
             // Attach UI to receive redraw events
             // ext_multigrid enables win_viewport events for viewport synchronization
@@ -149,7 +152,13 @@ impl NeovimClient {
             *nvim_lock = Some(neovim.clone());
 
             crate::verbose_print!("[godot-neovim] Neovim started successfully");
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>((io_handler, child, neovim, stderr_guard.into_inner()))
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+            }).await.unwrap_or_else(|_| Err(Box::new(super::ClientError::Timeout("starting Neovim"))));
+            if let Err(error) = initialized {
+                stop_failed_start(io_handler, stderr_handle, &mut child).await;
+                return Err(error);
+            }
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>((io_handler, child, neovim, stderr_handle))
         })?;
 
         self.commands = Some(super::commands::CommandQueue::new(
@@ -342,19 +351,21 @@ pub(super) async fn get_neovim_version(neovim: &Neovim<Writer>) -> Option<Neovim
     None
 }
 
-// Abort on initialization failure; normal shutdown also joins this task.
-struct AbortOnDrop(Option<tokio::task::JoinHandle<()>>);
-impl AbortOnDrop {
-    fn into_inner(mut self) -> Option<tokio::task::JoinHandle<()>> {
-        self.0.take()
+// Reap the child and join tasks before returning a failed or timed-out startup.
+async fn stop_failed_start(
+    io: tokio::task::JoinHandle<Result<(), Box<nvim_rs::error::LoopError>>>,
+    stderr: Option<tokio::task::JoinHandle<()>>,
+    child: &mut tokio::process::Child,
+) {
+    io.abort();
+    if let Some(task) = &stderr {
+        task.abort();
     }
-}
-impl Drop for AbortOnDrop {
-    fn drop(&mut self) {
-        if let Some(task) = &self.0 {
-            task.abort();
-        }
+    let _ = io.await;
+    if let Some(task) = stderr {
+        let _ = task.await;
     }
+    let _ = child.kill().await;
 }
 
 async fn drain_stderr(mut reader: impl tokio::io::AsyncRead + Unpin) {
@@ -382,6 +393,36 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
     use tokio::io::AsyncReadExt;
+
+    #[tokio::test]
+    async fn failed_start_joins_io_and_reaps_an_unresponsive_child() {
+        let program = std::env::var("NVIMRS_TEST_BIN").unwrap_or_else(|_| "nvim".into());
+        let mut command = create_nvim_command(&program, true);
+        command
+            .args(["--cmd", "lua while true do end"])
+            .kill_on_drop(true);
+        let (nvim, io, mut child) = create::new_child_cmd(&mut command, NeovimHandler::new())
+            .await
+            .unwrap();
+        let stderr = child
+            .stderr
+            .take()
+            .map(|reader| tokio::spawn(drain_stderr(reader)));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), nvim.get_api_info())
+                .await
+                .is_err()
+        );
+        let io_finished = io.abort_handle();
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            stop_failed_start(io, stderr, &mut child),
+        )
+        .await
+        .expect("Failed startup must clean up without waiting for Neovim to cooperate");
+        assert!(io_finished.is_finished());
+        assert!(child.try_wait().unwrap().is_some());
+    }
 
     #[tokio::test]
     async fn stderr_drain_handles_more_than_pipe_capacity_without_newlines() {
@@ -412,6 +453,7 @@ mod tests {
         let handler = NeovimHandler::new();
         let mut client = NeovimClient {
             commands: None,
+            rpc_timed_out: std::sync::atomic::AtomicBool::new(false),
             pending_resize: std::cell::Cell::new(None),
             runtime,
             child: Some(child),
