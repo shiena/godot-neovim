@@ -46,23 +46,8 @@ function M.buffer_register_and_attach(bufnr, lines)
         bufnr = vim.api.nvim_get_current_buf()
     end
 
-    -- Save current undolevels
-    local saved_ul = vim.bo[bufnr].undolevels
-
-    -- Disable undo for this operation
-    vim.bo[bufnr].undolevels = -1
-
-    -- Set buffer content
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-
-    -- Restore undolevels
-    vim.bo[bufnr].undolevels = saved_ul
-
-    -- Clear modified flag (this is initial content)
-    vim.bo[bufnr].modified = false
-
-    -- Get changedtick before attach
-    local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+    -- Keep registration and attachment in one RPC so no edit can arrive between them.
+    local tick = M.buffer_register(bufnr, lines)
 
     -- Attach to buffer with send_buffer=false (we only want future notifications)
     local attached = vim.api.nvim_buf_attach(bufnr, false, {})

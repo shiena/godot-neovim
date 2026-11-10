@@ -930,6 +930,10 @@ impl GodotNeovimPlugin {
     }
 
     /// Process pending updates from Neovim redraw events
+    // Apply one frame in dependency order: collect notifications without holding
+    // the client lock during Godot calls, update liveness, apply text changes,
+    // then resolve mode/cursor/viewport changes. Cursor movement must precede
+    // visual selection because Godot's caret updates can clear the selection.
     pub(super) fn process_neovim_updates(&mut self) {
         use crate::neovim::BufEvent;
 

@@ -1,6 +1,8 @@
-//! Buffer synchronization manager (ComradeNeovim-style)
+//! Tracks Neovim changes and rejects echoes of Godot-to-Neovim pushes.
 //!
-//! Implements changedtick-based synchronization with Neovim as master.
+//! Godot handles native insert-mode edits; Neovim handles modal operations.
+//! A full-buffer push establishes a tick watermark so older Neovim deltas
+//! cannot be applied to Godot content that has already superseded them.
 
 /// Buffer change event from Neovim
 #[derive(Debug, Clone)]

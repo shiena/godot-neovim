@@ -1,3 +1,7 @@
+//! Preserve input order while a command delays switching Neovim buffers.
+//! Drain updates into the old editor before switching, then replay queued
+//! input only if the destination still matches the tab that received it.
+
 use super::GodotNeovimPlugin;
 use godot::prelude::*;
 
@@ -92,6 +96,10 @@ impl GodotNeovimPlugin {
             self.clear_pending_neovim_switch();
             return;
         }
+        self.replay_input_after_buffer_switch();
+    }
+
+    fn replay_input_after_buffer_switch(&mut self) {
         for input in std::mem::take(&mut self.pending_switch_input) {
             match input {
                 PendingInput::Keys(keys) => {

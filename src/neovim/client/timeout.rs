@@ -20,19 +20,23 @@ impl NeovimClient {
             {
                 Ok(result) => result,
                 Err(_) => {
-                    // Cancellation does not undo an RPC already delivered to Neovim.
-                    // Do not apply its late notifications or retry a write against this session.
-                    self.rpc_timed_out.store(true, Ordering::Release);
-                    if let Some(task) = &self.io_handle {
-                        task.abort();
-                    }
-                    if let Some(task) = &self.key_input_handle {
-                        task.abort();
-                    }
+                    self.invalidate_timed_out_session();
                     Err(ClientError::Timeout(operation))
                 }
             }
         })
+    }
+
+    fn invalidate_timed_out_session(&self) {
+        // Cancellation does not undo an RPC already delivered to Neovim.
+        // Do not apply its late notifications or retry a write against this session.
+        self.rpc_timed_out.store(true, Ordering::Release);
+        if let Some(task) = &self.io_handle {
+            task.abort();
+        }
+        if let Some(task) = &self.key_input_handle {
+            task.abort();
+        }
     }
 }
 

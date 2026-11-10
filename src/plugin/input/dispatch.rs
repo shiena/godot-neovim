@@ -1,10 +1,9 @@
 //! Key resolution state machine: process_key_event implementation
 //!
-//! The single input path for normal/visual/insert/replace modes. Multi-key
-//! sequences (prefixes, registers, counts) are resolved here; keys that need
-//! a Godot-side action are returned in a VarDictionary so the caller can
-//! resolve them against a keymap — the GDScript handler when registered
-//! (customizable via default_keymaps.gd), or input/builtin.rs otherwise.
+//! Resolves normal/visual keys after input() routes mode-specific input.
+//! Prefixes, registers, and counts are resolved before single-key actions.
+//! Godot-side actions are returned for keymap dispatch through GDScript or
+//! input/builtin.rs; remaining keys are forwarded to Neovim.
 
 use super::super::GodotNeovimPlugin;
 use godot::classes::Input;
@@ -54,11 +53,7 @@ impl GodotNeovimPlugin {
         dict
     }
 
-    /// Main process_key_event implementation.
-    /// Called by GDScript input handler to resolve a key event.
-    /// Process a key event for normal/visual mode and return dispatch info.
-    /// Called from input() after mode routing (command/search/insert/replace/pending ops)
-    /// has already been handled. Only processes normal/visual mode keys.
+    /// Resolve a normal/visual key after mode routing in input().
     pub(in crate::plugin) fn process_key_event_impl(
         &mut self,
         key_event: &Gd<godot::classes::InputEventKey>,

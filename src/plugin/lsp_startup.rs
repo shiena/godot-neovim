@@ -19,6 +19,20 @@ pub(super) struct PendingLsp {
     text: GString,
 }
 
+impl PendingLsp {
+    // Startup may finish after a tab switch or edit. Replay only at the original location.
+    fn matches_current_editor(&self, plugin: &GodotNeovimPlugin) -> bool {
+        self.path == plugin.current_script_path
+            && self.switch_id == plugin.script_switch_id
+            && plugin.current_editor.as_ref().is_some_and(|editor| {
+                editor.is_instance_valid()
+                    && editor.has_focus()
+                    && self.caret == (editor.get_caret_line(), editor.get_caret_column())
+                    && self.text == editor.get_text()
+            })
+    }
+}
+
 impl GodotNeovimPlugin {
     pub(super) fn ensure_lsp_ready(&mut self, action: LspAction) -> bool {
         let Some(lsp) = &self.godot_lsp else {
@@ -88,15 +102,7 @@ impl GodotNeovimPlugin {
         let Some(pending) = &self.pending_lsp else {
             return;
         };
-        let still_current = pending.path == self.current_script_path
-            && pending.switch_id == self.script_switch_id
-            && self.current_editor.as_ref().is_some_and(|editor| {
-                editor.is_instance_valid()
-                    && editor.has_focus()
-                    && pending.caret == (editor.get_caret_line(), editor.get_caret_column())
-                    && pending.text == editor.get_text()
-            });
-        if !still_current {
+        if !pending.matches_current_editor(self) {
             self.pending_lsp = None;
             return;
         }

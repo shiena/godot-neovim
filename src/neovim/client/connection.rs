@@ -8,6 +8,7 @@ use nvim_rs::create::tokio as create;
 use nvim_rs::{Neovim, UiAttachOptions};
 use std::process::Stdio;
 use std::sync::Arc;
+
 use tokio::process::Command;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::unbounded_channel;
@@ -15,6 +16,8 @@ use tokio::sync::Mutex;
 
 #[cfg(target_os = "windows")]
 use super::CREATE_NO_WINDOW;
+
+const NEOVIM_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl NeovimClient {
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
@@ -75,90 +78,30 @@ impl NeovimClient {
             cmd.kill_on_drop(true);
 
             let (neovim, io_handler, mut child) = create::new_child_cmd(&mut cmd, handler).await?;
-            let stderr_handle = child.stderr.take().map(|stderr| tokio::spawn(drain_stderr(stderr)));
-            let initialized = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let stderr_handle = child
+                .stderr
+                .take()
+                .map(|stderr| tokio::spawn(drain_stderr(stderr)));
+            let initialized = tokio::time::timeout(NEOVIM_STARTUP_TIMEOUT, async {
+                initialize_session(&neovim, addons_path_owned.as_deref()).await?;
+                let mut nvim_lock = neovim_arc.lock().await;
+                *nvim_lock = Some(neovim.clone());
 
-
-            // Attach UI to receive redraw events
-            // ext_multigrid enables win_viewport events for viewport synchronization
-            let mut ui_opts = UiAttachOptions::new();
-            ui_opts.set_rgb(true);
-            ui_opts.set_linegrid_external(true);
-            ui_opts.set_multigrid_external(true);
-            neovim
-                .ui_attach(80, 24, &ui_opts)
-                .await
-                .map_err(|e| format!("Failed to attach UI: {}", e))?;
-
-            crate::verbose_print!("[godot-neovim] UI attached successfully");
-
-            // Disable swap files and handle E325 ATTENTION errors in headless mode
-            // - noswapfile: Don't create new swap files
-            // - shortmess+=A: Suppress swap file warnings
-            // - SwapExists autocmd: Auto-select 'edit anyway' if swap exists
-            neovim
-                .command(
-                    "set noswapfile shortmess+=A | autocmd SwapExists * let v:swapchoice = 'e'",
-                )
-                .await
-                .map_err(|e| format!("Failed to configure swapfile handling: {}", e))?;
-
-            // Check Neovim version before storing
-            let version = get_neovim_version(&neovim).await;
-            let (req_major, req_minor, req_patch) = NEOVIM_REQUIRED_VERSION;
-
-            if let Some(ref ver) = version {
-                crate::verbose_print!("[godot-neovim] Neovim version: {}", ver);
-
-                if !ver.meets_requirement(req_major, req_minor, req_patch) {
-                    let msg = format!(
-                        "Neovim version {} is below minimum required {}.{}.{}. Some features may not work correctly.",
-                        ver, req_major, req_minor, req_patch
-                    );
-                    godot_warn!("[godot-neovim] {}", msg);
-                }
-            } else {
-                crate::verbose_print!("[godot-neovim] Could not determine Neovim version");
-            }
-
-            // Initialize godot_neovim Lua module
-            // Prefer external plugin if addons_path is provided
-            if let Some(ref path) = addons_path_owned {
-                let init_code = r#"
-                    -- Add addons path to runtimepath
-                    local path = ...
-                    vim.opt.runtimepath:append(path)
-                    -- Load the godot_neovim module
-                    require('godot_neovim')
-                    "#;
-                neovim
-                    .exec_lua(init_code, vec![rmpv::Value::from(path.as_str())])
-                    .await
-                    .map_err(|e| format!("Failed to load Lua plugin from {}: {}", path, e))?;
-                crate::verbose_print!(
-                    "[godot-neovim] Lua module loaded from external file: {}",
-                    path
-                );
-            } else {
-                // Fallback to embedded Lua code
-                neovim
-                    .exec_lua(LUA_FALLBACK_CODE, vec![])
-                    .await
-                    .map_err(|e| format!("Failed to initialize Lua module: {}", e))?;
-                crate::verbose_print!("[godot-neovim] Lua module initialized (embedded fallback)");
-            }
-
-            let mut nvim_lock = neovim_arc.lock().await;
-            *nvim_lock = Some(neovim.clone());
-
-            crate::verbose_print!("[godot-neovim] Neovim started successfully");
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
-            }).await.unwrap_or_else(|_| Err(Box::new(super::ClientError::Timeout("starting Neovim"))));
+                crate::verbose_print!("[godot-neovim] Neovim started successfully");
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+            })
+            .await
+            .unwrap_or_else(|_| Err(Box::new(super::ClientError::Timeout("starting Neovim"))));
             if let Err(error) = initialized {
                 stop_failed_start(io_handler, stderr_handle, &mut child).await;
                 return Err(error);
             }
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>((io_handler, child, neovim, stderr_handle))
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>((
+                io_handler,
+                child,
+                neovim,
+                stderr_handle,
+            ))
         })?;
 
         self.commands = Some(super::commands::CommandQueue::new(
@@ -349,6 +292,81 @@ pub(super) async fn get_neovim_version(neovim: &Neovim<Writer>) -> Option<Neovim
     }
 
     None
+}
+
+// Separate session setup from process ownership and failed-start cleanup.
+async fn initialize_session(
+    neovim: &Neovim<Writer>,
+    addons_path: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Attach UI to receive redraw events
+    // ext_multigrid enables win_viewport events for viewport synchronization
+    let mut ui_opts = UiAttachOptions::new();
+    ui_opts.set_rgb(true);
+    ui_opts.set_linegrid_external(true);
+    ui_opts.set_multigrid_external(true);
+    neovim
+        .ui_attach(80, 24, &ui_opts)
+        .await
+        .map_err(|e| format!("Failed to attach UI: {}", e))?;
+
+    crate::verbose_print!("[godot-neovim] UI attached successfully");
+
+    // Disable swap files and handle E325 ATTENTION errors in headless mode
+    // - noswapfile: Don't create new swap files
+    // - shortmess+=A: Suppress swap file warnings
+    // - SwapExists autocmd: Auto-select 'edit anyway' if swap exists
+    neovim
+        .command("set noswapfile shortmess+=A | autocmd SwapExists * let v:swapchoice = 'e'")
+        .await
+        .map_err(|e| format!("Failed to configure swapfile handling: {}", e))?;
+
+    // Check Neovim version before storing
+    let version = get_neovim_version(neovim).await;
+    let (req_major, req_minor, req_patch) = NEOVIM_REQUIRED_VERSION;
+
+    if let Some(ref ver) = version {
+        crate::verbose_print!("[godot-neovim] Neovim version: {}", ver);
+
+        if !ver.meets_requirement(req_major, req_minor, req_patch) {
+            let msg = format!(
+                "Neovim version {} is below minimum required {}.{}.{}. Some features may not work correctly.",
+                ver, req_major, req_minor, req_patch
+            );
+            godot_warn!("[godot-neovim] {}", msg);
+        }
+    } else {
+        crate::verbose_print!("[godot-neovim] Could not determine Neovim version");
+    }
+
+    // Initialize godot_neovim Lua module
+    // Prefer external plugin if addons_path is provided
+    if let Some(path) = addons_path {
+        let init_code = r#"
+                    -- Add addons path to runtimepath
+                    local path = ...
+                    vim.opt.runtimepath:append(path)
+                    -- Load the godot_neovim module
+                    require('godot_neovim')
+                    "#;
+        neovim
+            .exec_lua(init_code, vec![rmpv::Value::from(path)])
+            .await
+            .map_err(|e| format!("Failed to load Lua plugin from {}: {}", path, e))?;
+        crate::verbose_print!(
+            "[godot-neovim] Lua module loaded from external file: {}",
+            path
+        );
+    } else {
+        // Fallback to embedded Lua code
+        neovim
+            .exec_lua(LUA_FALLBACK_CODE, vec![])
+            .await
+            .map_err(|e| format!("Failed to initialize Lua module: {}", e))?;
+        crate::verbose_print!("[godot-neovim] Lua module initialized (embedded fallback)");
+    }
+
+    Ok(())
 }
 
 // Reap the child and join tasks before returning a failed or timed-out startup.
