@@ -178,6 +178,8 @@ pub struct NeovimClient {
     /// Retained so stop() can cancel and join the IO task.
     pub(super) io_handle:
         Option<tokio::task::JoinHandle<Result<(), Box<nvim_rs::error::LoopError>>>>,
+    /// Drain stderr independently so a full pipe cannot stall Neovim.
+    pub(super) stderr_handle: Option<tokio::task::JoinHandle<()>>,
     /// Key input channel sender (unbounded for no key drops)
     pub(super) key_input_tx: Option<UnboundedSender<String>>,
     /// Retained so stop() can cancel and join the input task.

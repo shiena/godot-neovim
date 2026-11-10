@@ -109,6 +109,7 @@ mod tests {
             nvim_path: String::new(),
             clean: true,
             io_handle: None,
+            stderr_handle: None,
             key_input_tx: None,
             key_input_handle: None,
             keys_processed: Arc::new(AtomicU64::new(0)),

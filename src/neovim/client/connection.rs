@@ -40,6 +40,7 @@ impl NeovimClient {
             state,
             has_updates,
             io_handle: None,
+            stderr_handle: None,
             key_input_tx: None,
             key_input_handle: None,
             keys_processed: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -66,11 +67,14 @@ impl NeovimClient {
             addons_path
         );
 
-        let (io_handle, child, neovim) = self.runtime.block_on(async {
+        let (io_handle, child, neovim, stderr_handle) = self.runtime.block_on(async {
             let mut cmd = create_nvim_command(&nvim_path, clean);
             cmd.kill_on_drop(true);
 
-            let (neovim, io_handler, child) = create::new_child_cmd(&mut cmd, handler).await?;
+            let (neovim, io_handler, mut child) = create::new_child_cmd(&mut cmd, handler).await?;
+            let stderr_handle = child.stderr.take().map(|stderr| tokio::spawn(drain_stderr(stderr)));
+            // Keep startup failures from detaching the reader task.
+            let stderr_guard = AbortOnDrop(stderr_handle);
 
             // Attach UI to receive redraw events
             // ext_multigrid enables win_viewport events for viewport synchronization
@@ -145,7 +149,7 @@ impl NeovimClient {
             *nvim_lock = Some(neovim.clone());
 
             crate::verbose_print!("[godot-neovim] Neovim started successfully");
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>((io_handler, child, neovim))
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>((io_handler, child, neovim, stderr_guard.into_inner()))
         })?;
 
         self.commands = Some(super::commands::CommandQueue::new(
@@ -154,6 +158,7 @@ impl NeovimClient {
             self.handler.command_barrier(),
         ));
         self.io_handle = Some(io_handle);
+        self.stderr_handle = stderr_handle;
         self.child = Some(child);
 
         // Create unbounded channel for key input (no key drops)
@@ -235,11 +240,15 @@ impl NeovimClient {
         self.pending_resize.set(None);
         let input_task = self.key_input_handle.take();
         let io_task = self.io_handle.take();
+        let stderr_task = self.stderr_handle.take();
         self.key_input_tx = None;
         if let Some(task) = &input_task {
             task.abort();
         }
         if let Some(task) = &io_task {
+            task.abort();
+        }
+        if let Some(task) = &stderr_task {
             task.abort();
         }
         let mut child = self.child.take();
@@ -249,6 +258,9 @@ impl NeovimClient {
                 let _ = task.await;
             }
             if let Some(task) = io_task {
+                let _ = task.await;
+            }
+            if let Some(task) = stderr_task {
                 let _ = task.await;
             }
             self.neovim.lock().await.take();
@@ -330,12 +342,60 @@ pub(super) async fn get_neovim_version(neovim: &Neovim<Writer>) -> Option<Neovim
     None
 }
 
+// Abort on initialization failure; normal shutdown also joins this task.
+struct AbortOnDrop(Option<tokio::task::JoinHandle<()>>);
+impl AbortOnDrop {
+    fn into_inner(mut self) -> Option<tokio::task::JoinHandle<()>> {
+        self.0.take()
+    }
+}
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        if let Some(task) = &self.0 {
+            task.abort();
+        }
+    }
+}
+
+async fn drain_stderr(mut reader: impl tokio::io::AsyncRead + Unpin) {
+    use tokio::io::AsyncReadExt;
+    // Fixed-size reads also handle output without newlines with bounded memory.
+    let mut buffer = [0; 4096];
+    loop {
+        match reader.read(&mut buffer).await {
+            Ok(0) => break,
+            Ok(count) => eprintln!(
+                "[godot-neovim] Neovim stderr: {}",
+                String::from_utf8_lossy(&buffer[..count])
+            ),
+            Err(error) => {
+                eprintln!("[godot-neovim] Failed to read Neovim stderr: {error}");
+                break;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
     use tokio::io::AsyncReadExt;
+
+    #[tokio::test]
+    async fn stderr_drain_handles_more_than_pipe_capacity_without_newlines() {
+        use tokio::io::AsyncWriteExt;
+        let (mut writer, reader) = tokio::io::duplex(64);
+        let draining = tokio::spawn(drain_stderr(reader));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            writer.write_all(&vec![b'x'; 8192]).await.unwrap();
+            drop(writer);
+            draining.await.unwrap();
+        })
+        .await
+        .expect("stderr output must not fill the pipe and stall the writer");
+    }
 
     #[test]
     fn stop_waits_for_tasks_and_child_and_is_idempotent() {
@@ -362,6 +422,7 @@ mod tests {
             nvim_path,
             clean: true,
             io_handle: None,
+            stderr_handle: None,
             key_input_tx: None,
             key_input_handle: None,
             keys_processed: Arc::new(AtomicU64::new(0)),
@@ -384,8 +445,13 @@ mod tests {
             let _guard = guard;
             std::future::pending().await
         }));
+        let guard = MarkDropped(dropped.clone());
+        client.stderr_handle = Some(client.runtime.spawn(async move {
+            let _guard = guard;
+            std::future::pending::<()>().await;
+        }));
         client.stop();
-        assert_eq!(dropped.load(Ordering::SeqCst), 2);
+        assert_eq!(dropped.load(Ordering::SeqCst), 3);
         assert!(client.child.is_none());
         client.runtime.block_on(async {
             let mut output = Vec::new();
