@@ -11,662 +11,99 @@
 
 ## Overview
 
-godot-neovim integrates Neovim into Godot's script editor, allowing you to use the full power of Neovim for editing GDScript and other files within Godot. Unlike simple vim keybinding emulators, this plugin runs an actual Neovim process and synchronizes the buffer between Godot and Neovim.
+godot-neovim brings Neovim editing to Godot's script editor using a real Neovim process. Edit in Godot while keeping its native completion and IME support.
 
-## Features
+- Vim motions, operators, text objects, registers, and macros
+- Godot integration for saving, navigating files, folding, and documentation
+- Custom key bindings and support for undocked script editors
 
-- Real Neovim backend (not just keybinding emulation)
-- Mode indicator with cursor position (e.g., `NORMAL 123:45`)
-- Cursor synchronization between Godot and Neovim
-- Float window support (undocked script editor panels)
-- Mouse drag selection syncs to Neovim visual mode
-- Support for count prefixes (e.g., `4j`, `10gg`)
-- Support for operator-pending commands (e.g., `gg`, `dd`, `yy`)
-- Ctrl+[ as Escape alternative (terminal standard)
-- Full/half page scrolling (`Ctrl+F`, `Ctrl+B`, `Ctrl+D`, `Ctrl+U`)
-- Word search under cursor (`*`, `#`, `n`, `N`)
-- Character find motions (`f`, `F`, `t`, `T`, `;`, `,`)
-- Line navigation (`0`, `^`, `$`) and paragraph movement (`{`, `}`)
-- Bracket matching (`%`) and go to definition (`gd`)
-- Character editing (`x`, `X`, `r`, `~`) and line operations (`J`, `>>`, `<<`)
-- Configurable Neovim executable path via Editor Settings
-- Path validation on startup and settings change
-- Automatic recovery when Neovim becomes unresponsive
-
-<details>
-<summary><h2>Comparison with GodotVim</h2></summary>
-
-| Category | Feature | godot-neovim | GodotVim |
-|----------|---------|:------------:|:---------:|
-| **Architecture** | Backend | Neovim (RPC) | GDExtension (vim-core) |
-| | Language | Rust | Rust |
-| | Auto-completion | ✅ | ✅ (`Ctrl+N/P/Space`) |
-| **Modes** | Normal, Insert, Visual, V-Line | ✅ | ✅ |
-| | Visual Block | ✅ (`Ctrl+V`, `gv`) | ✅ (with block I/A) |
-| | Replace | ✅ (`R`) | ✅ |
-| | Command-line | ✅ (`:` commands) | ✅ |
-| | Select (`gh`) | ❌ | ✅ |
-| **Navigation** | Basic (hjkl, w, b, e, gg, G) | ✅ | ✅ |
-| | Paragraph/Sentence (`{`, `}`, `(`, `)`) | ✅ | ✅ |
-| | Display lines (`gj`, `gk`, `g0`, `g$`, `g_`) | ✅ | ✅ |
-| | Block jump (`[{`, `]}`, `[(`, `])`) | ✅ | ✅ |
-| | Method jump (`[m`, `]m`) | ⚠️* | ❌ |
-| | Indent jump (`[i`, `]i`) | ❌ | ✅ |
-| | Change list (`g;`, `g,`) | ❌ | ✅ |
-| **Scrolling** | Ctrl+F/B/D/U | ✅ | ✅ |
-| | Ctrl+Y/E, zz/zt/zb, H/M/L | ✅ | ✅ |
-| **Search** | `/`, `?`, `*`, `#`, `n`, `N` | ✅ | ✅ |
-| | Incremental search highlighting | ❌ | ✅ |
-| | `gd` (go to definition) | ✅ | ✅ |
-| | `gx` (open URL) | ✅ | ❌ |
-| | `K` (documentation/hover) | ✅ | ✅ |
-| **Editing** | Basic (x, dd, yy, p, J, etc.) | ✅ | ✅ |
-| | `gp`, `gP`, `[p`, `]p` | ✅ | ❌ |
-| | `Ctrl+A`/`Ctrl+X` (numbers) | ✅ | ❌ |
-| | `ga`, `gq`/`gw` | ✅ | ✅ |
-| | Visual block insert (`I`/`A`) | ❌ | ✅ |
-| | Multi-cursor | ❌ | ✅ (VS Code-style, `<C-S-Down>`, `:addcursor`) |
-| **Insert Mode** | `Ctrl+W`/`Ctrl+U`/`Ctrl+H` (delete) | ✅ | ✅ |
-| | `Ctrl+R` (insert from register) | ✅ | ✅ |
-| | `Ctrl+A` (re-insert last text) | ✅ | ✅ |
-| | `Ctrl+T`/`Ctrl+D` (indent) | ✅ | ✅ |
-| | `Ctrl+O` (one normal command) | ✅ | ✅ |
-| **Text Objects** | Words, quotes, brackets | ✅ | ✅ |
-| | Sentence (`is`, `as`), Paragraph (`ip`, `ap`) | ✅ | ✅ |
-| | Entire buffer (`ie`, `ae`) | ✅ | ✅ |
-| | Indent (`ii`, `ai`) | ❌ | ✅ |
-| **Registers** | Named (`"{a-z}`) | ✅ | ✅ |
-| | Clipboard (`"+`, `"*`) | ✅ | ✅ |
-| | Black hole (`"_`), Yank (`"0`) | ✅ | ✅ |
-| | Numbered (`"1`-`"9`) | ✅ | ✅ |
-| **Marks** | Local (`m{a-z}`, `'{a-z}`, `` `{a-z} ``) | ✅ | ✅ |
-| | Global (`m{A-Z}`) | ❌ | ✅ |
-| **Macros** | `q{a-z}`, `@{a-z}`, `@@` | ✅ | ✅ |
-| **Folding** | `za`, `zo`, `zc`, `zM`, `zR` | ✅ | ✅ |
-| **Ex Commands** | `:w`, `:q`, `:wq`, `:x` | ✅ | ✅ |
-| | `:e`, `:e!`, `:wa`, `:qa` | ✅ | ✅ |
-| | `:%s/old/new/g` | ✅ | ✅ |
-| | `:g/{pattern}/d`, `:v` | ✅ | ✅ |
-| | `:sort`, `:t`, `:m` | ✅ | ✅ |
-| | `:bn`, `:bp`, `:bd`, `:ls` | ✅ | ✅ |
-| | `ZZ`, `ZQ`, `@:`, `Ctrl+G` | ✅ | ❌ |
-| | `:set` (options) | ❌ | ✅ |
-| | `:earlier`, `:later` (undo tree) | ❌ | ✅ |
-| | `:norm`, `:!` (shell) | ❌ | ✅ |
-| **Godot Integration** | `:run`/`:stop` (scene control) | ❌ | ✅ |
-| | Debugger (`:GodotBreakpoint`, step) | ❌ | ✅ |
-| | Dock navigation (`Ctrl+H/J/K/L`) | ❌ | ✅ |
-| | File explorer (FileSystem dock) | ❌ | ✅ (nvim-tree style) |
-| | Editor actions (`:action`, `<Action>` mapping) | ❌ | ✅ |
-| | Zen mode (`:zen`) | ❌ | ✅ |
-| **Other** | Custom key mappings | ✅ (Neovim Keymaps panel) | ✅ (`.godot-vimrc`) |
-| | Neovim config/plugins | ⚠️** | N/A |
-
-\* `[m`/`]m` requires Neovim's treesitter or language-specific support. GDScript is not recognized by Neovim, so these commands may not work as expected.
-
-\** Neovim config (`init.lua`) and plugins are not loaded by default (`neovim_clean = true`). Can be enabled but may cause compatibility issues.
-
-**Summary:**
-- **godot-neovim**: Real Neovim backend with full Ex command support and Godot auto-completion. Requires Neovim 0.9+ installation.
-- **GodotVim**: Self-contained Vim engine (vim-core) with comprehensive Vim emulation (including multi-cursor and undo tree), Godot-specific commands (debugger, scene control, editor actions), and `.godot-vimrc` configuration. No external dependencies.
-
-</details>
+Insert mode uses Godot's native text input, so behavior differs from standalone Neovim. See [limitations and known issues](docs/limitations.md).
 
 ## Requirements
 
 - Godot 4.4 or later
-- Neovim 0.9.0 or later
-- Rust toolchain (for building from source)
+- Neovim 0.9.0 or later, installed on your computer
+- Windows (x64), Linux (x64 or ARM64), or macOS (Intel or Apple Silicon)
 
-## Installation
+Rust is only required to [build from source](docs/development.md#build-from-source).
 
-### From Release (Recommended)
+## Install
 
-1. Download the latest release for your platform
-2. Extract to your Godot project's `addons/godot-neovim/` directory
-3. **macOS only**: Remove the quarantine attribute to avoid Gatekeeper blocking:
+### From the Godot Asset Store
+
+1. Open the Asset Store in the Godot editor.
+2. Search for **godot-neovim** by **shiena** ([asset page](https://store.godotengine.org/asset/shiena/godot-neovim/)).
+3. Download and install the addon into your project.
+
+Continue with [Enable the plugin](#enable-the-plugin). Neovim must be installed separately.
+
+### From GitHub Releases
+
+1. Download the package for your platform from [Releases](https://github.com/shiena/godot-neovim/releases).
+2. Extract the addon into your project's `addons/godot-neovim/` directory.
+
+### Enable the plugin
+
+1. On macOS, remove the quarantine attribute before enabling the plugin:
+
    ```bash
    xattr -rc addons/godot-neovim
    ```
-4. Enable the plugin in `Project > Project Settings > Plugins`
 
-### Building from Source
+2. Enable **godot-neovim** in **Project > Project Settings > Plugins**.
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/shiena/godot-neovim.git
-   cd godot-neovim
-   ```
+If Neovim isn't found, set **Neovim Executable Path** in **Editor > Editor Settings > Godot Neovim**. Enable **Advanced Settings** to see the settings.
 
-2. Build the plugin:
-   ```bash
-   cargo build --release
-   ```
+## Start editing
 
-3. Copy the built library to the addons folder:
-   ```bash
-   # Windows (x64)
-   mkdir -p addons/godot-neovim/bin/windows
-   cp target/release/godot_neovim.dll addons/godot-neovim/bin/windows/
+1. Open a script in Godot. The mode indicator shows the current Neovim mode.
+2. Press `i` to enter Insert mode and edit with Godot's completion.
+3. Press Escape or `Ctrl+[` to return to Normal mode.
 
-   # Linux (x64)
-   mkdir -p addons/godot-neovim/bin/linux
-   cp target/release/libgodot_neovim.so addons/godot-neovim/bin/linux/
+Use your usual Vim motions and editing commands. `:w` saves through Godot, and `:q` closes the current editor tab.
 
-   # Linux (ARM64)
-   mkdir -p addons/godot-neovim/bin/linux-arm64
-   cp target/release/libgodot_neovim.so addons/godot-neovim/bin/linux-arm64/
+For help, run `:help` or press F1 and search for **GodotNeovim**. The full [command reference](docs/commands.md) is available separately.
 
-   # macOS (Apple Silicon)
-   mkdir -p addons/godot-neovim/bin/macos-arm64
-   cp target/release/libgodot_neovim.dylib addons/godot-neovim/bin/macos-arm64/
+## Configure your workflow
 
-   # macOS (Intel)
-   mkdir -p addons/godot-neovim/bin/macos-x86_64
-   cp target/release/libgodot_neovim.dylib addons/godot-neovim/bin/macos-x86_64/
-   ```
+| To | Do this |
+|---|---|
+| Use go to definition (`gd`) | Enable **Use Thread** under **Editor Settings > Network > Language Server**. |
+| Customize key bindings | Open the **Neovim Keymaps** dock. |
+| Load your Neovim configuration | Turn off **Neovim Clean** in **Editor Settings > Godot Neovim**. Some plugins can conflict with Godot integration. |
 
-4. Copy the addons folder to your Godot project:
-   ```bash
-   cp -r addons /path/to/your/godot/project/
-   ```
+By default, **Neovim Clean** is enabled, so your `init.lua` and plugins aren't loaded. Keep this enabled when checking whether a problem comes from your Neovim configuration.
 
-5. Enable the plugin in Godot: `Project > Project Settings > Plugins`
+See [configuration and key mappings](docs/configuration.md) for settings, screenshots, and keymap import instructions.
 
-## Configuration
+## Export your game
 
-All settings are available in `Editor > Editor Settings > Godot Neovim`.
+This is an editor-only addon. Exclude it from every export preset to prevent extension-loading errors in the exported game:
 
-> **Note**: You need to enable **"Advanced Settings"** toggle in the Editor Settings to see the `godot_neovim` section.
+1. Open **Project > Export** and select a preset.
+2. Open the **Resources** tab.
+3. Add `addons/godot-neovim/*` to **Filters to exclude files/folders from project**.
 
-<p align="center">
-  <img src=".github/media/godot-neovim-settings.png" alt="godot-neovim settings" width="800">
-</p>
+See [export details](docs/exporting.md) for error examples and the reason to use this filter.
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| Neovim Executable Path | Path to Neovim executable. The plugin validates this path on startup. | `nvim.exe` (Windows) / `nvim` (macOS/Linux) |
-| Neovim Clean | Equivalent to the `--clean` startup option. When enabled, Neovim starts without loading any config files (init.lua, plugins, etc.). Recommended to keep enabled to avoid plugin compatibility issues. | true |
-| Timeoutlen *(advanced)* | Time in milliseconds to wait for a mapped key sequence to complete. This setting appears when "Advanced Settings" is enabled in Editor Settings. | 1000 |
+## Troubleshooting and limitations
 
-### Go to Definition (gd)
+- **Neovim doesn't start:** Check **Neovim Executable Path** and the required Neovim version.
+- **`gd` asks for Use Thread:** Enable the language server setting described in [configuration](docs/configuration.md#enable-go-to-definition).
+- **Neovim stops responding:** Use the recovery dialog to restart its connection.
+- **An editing command behaves differently:** Check [limitations and known issues](docs/limitations.md), especially native Insert mode and modifier keys.
 
-The `gd` command uses Godot's built-in LSP server for accurate navigation. To enable this feature:
+## More information
 
-1. Open `Editor > Editor Settings`
-2. Navigate to `Network > Language Server`
-3. Enable **Use Thread** option
+- [Command reference](docs/commands.md)
+- [Configuration and key mappings](docs/configuration.md)
+- [Limitations and known issues](docs/limitations.md)
+- [Build instructions, architecture, and roadmap](docs/development.md)
+- [Comparison with GodotVim](docs/comparison.md)
 
-When this setting is disabled, `gd` will show a message prompting you to enable it.
+## Contribute
 
-### Custom Key Mappings
-
-The **Neovim Keymaps** dock panel allows you to customize key bindings without recompiling the plugin. The panel appears in the right dock area (alongside Inspector, Node, etc.) when the plugin is active.
-
-<p align="center">
-  <img src=".github/media/keymaps.png" alt="Neovim Keymaps panel" width="400">
-</p>
-
-**Features:**
-- View all current key bindings for Normal and Visual modes
-- Edit key bindings by double-clicking the Key column
-- Delete bindings with the `Delete` key
-- Reset to defaults with the **Reset** button
-- Import keymaps from Neovim with the **Import from Neovim** button (requires `neovim_clean = false` for user keymaps)
-- Assign keys to actions that have no default binding (such as **save**): these appear at the end of the list with an empty Key column. Double-click the Key column to assign a key, for example `<C-s>` on Windows/Linux or `<D-s>` on macOS
-
-**Key format** follows Neovim notation:
-- Single characters: `a`, `A`, `/`, `$`, etc.
-- Control combinations: `<C-a>`, `<C-f>`, etc.
-- Cmd combinations (macOS): `<D-s>`, etc.
-- Special keys: `<CR>`, `<Esc>`, `<Tab>`, `<BS>`, etc.
-- Key sequences: `gd`, `zo`, `ZZ`, `[[`, etc.
-
-**Validation:**
-- Only valid Neovim key notation is accepted
-- Duplicate keys within the same mode are rejected
-
-Custom mappings are persisted in `Editor Settings` under `godot_neovim/custom_keymaps` and survive editor restarts. Custom overrides are marked with `*` in the panel.
-
-> **Note**: Not all keys are customizable through the panel. Keys handled internally by the Neovim state machine (count prefixes, pending operations like `f`/`t`/`r`, register selection `"`, macro recording `q`/`@`, and operators `>`/`<`) are managed by the plugin's Rust backend.
-
-## Exporting Projects
-
-> [!IMPORTANT]
-> This is an **editor-only** plugin. Its `.gdextension` only declares `editor`-tagged libraries, so it ships no binaries for export platforms (iOS, Android, Web, etc.).
->
-> If you export a project **without excluding this addon**, the `.gdextension` file is still packaged and stays registered in `.godot/extension_list.cfg`. The exported game then tries to load it at startup and fails. For example, a Web build opened in a browser logs:
->
-> ```
-> ERROR: No GDExtension library found for current OS and architecture (web.wasm32)
->        in configuration file: res://addons/godot-neovim/godot-neovim.gdextension
-> ERROR: GDExtension dynamic library not found: 'res://addons/godot-neovim/godot-neovim.gdextension'.
-> ERROR: Error loading extension: 'res://addons/godot-neovim/godot-neovim.gdextension'.
-> ```
->
-> To prevent this, exclude the addon from every export preset:
->
-> 1. Open **Project > Export…**
-> 2. Select your export preset and switch to the **Resources** tab
-> 3. Add `addons/godot-neovim/*` to the **Filters to exclude files/folders from project** field (`exclude_filter` in `export_presets.cfg`)
->
-> On **Godot 4.4+**, excluding via this filter also drops the entry from `extension_list.cfg` automatically ([godotengine/godot#97216](https://github.com/godotengine/godot/pull/97216)), so the exported game no longer attempts to load the extension. Excluding with an `EditorExportPlugin.skip()` does **not** clean up `extension_list.cfg` ([godotengine/godot#99698](https://github.com/godotengine/godot/issues/99698)), which is why the resource filter above is the recommended approach.
-
-## Usage
-
-Once the plugin is enabled:
-
-1. Open any script in Godot's script editor
-2. The mode indicator will appear showing the current Neovim mode
-3. Use Neovim keybindings to edit your code
-
-### In-Editor Help
-
-- Press `F1` in Godot and search for **"GodotNeovim"** to view the command reference
-- Or use `:help` (`:h`) in command-line mode to open the help directly
-
-### Mode Indicator Colors
-
-| Mode    | Color  |
-|---------|--------|
-| NORMAL  | Green  |
-| INSERT  | Blue   |
-| VISUAL  | Orange |
-| COMMAND | Yellow |
-| REPLACE | Red    |
-
-### Supported Commands
-
-<details>
-<summary>Navigation</summary>
-
-| Command | Description |
-|---------|-------------|
-| `h`, `j`, `k`, `l` | Basic cursor movement |
-| `w`, `b`, `e`, `ge` | Word movement |
-| `W`, `B`, `E` | WORD movement (whitespace-delimited) |
-| `0` | Go to start of line |
-| `^` | Go to first non-blank character |
-| `$` | Go to end of line |
-| `gg` | Go to first line |
-| `G` | Go to last line |
-| `H` | Go to top of visible area |
-| `M` | Go to middle of visible area |
-| `L` | Go to bottom of visible area |
-| `{` | Go to previous paragraph |
-| `}` | Go to next paragraph |
-| `%` | Jump to matching bracket |
-| `Ctrl+F` | Full page down |
-| `Ctrl+B` | Full page up |
-| `Ctrl+D` | Half page down |
-| `Ctrl+U` | Half page up |
-| `Ctrl+Y` | Scroll viewport up (cursor stays) |
-| `Ctrl+E` | Scroll viewport down (cursor stays) |
-| `zz` | Center viewport on cursor |
-| `zt` | Cursor line at top |
-| `zb` | Cursor line at bottom |
-| `gj` | Move down by display line (wrapped) |
-| `gk` | Move up by display line (wrapped) |
-| `g0` | Go to start of display line |
-| `g$` | Go to end of display line |
-| `g^` | Go to first non-blank of display line |
-| `g_` | Go to last non-blank character of line |
-| `[{` | Jump to previous unmatched `{` |
-| `]}` | Jump to next unmatched `}` |
-| `[(` | Jump to previous unmatched `(` |
-| `])` | Jump to next unmatched `)` |
-| `[m` | Jump to previous method start |
-| `]m` | Jump to next method start |
-
-</details>
-
-<details>
-<summary>Search</summary>
-
-| Command | Description |
-|---------|-------------|
-| `/` | Search forward |
-| `?` | Search backward |
-| `*` | Search forward for word under cursor |
-| `#` | Search backward for word under cursor |
-| `n` | Repeat last search (same direction) |
-| `N` | Repeat last search (opposite direction) |
-| `f{char}` | Find character forward on line |
-| `F{char}` | Find character backward on line |
-| `t{char}` | Move to before character forward |
-| `T{char}` | Move to after character backward |
-| `;` | Repeat last f/F/t/T (same direction) |
-| `,` | Repeat last f/F/t/T (opposite direction) |
-| `gd` | Go to definition (requires LSP, see below) |
-| `gf` | Go to file under cursor |
-| `gx` | Open URL/path under cursor in browser |
-| `K` | Open Godot documentation (class, method, property, constant via LSP) |
-
-</details>
-
-<details>
-<summary>Editing</summary>
-
-| Command | Description |
-|---------|-------------|
-| `x` | Delete character under cursor |
-| `X` | Delete character before cursor |
-| `s` | Delete character and enter insert mode |
-| `r{char}` | Replace character under cursor |
-| `~` | Toggle case of character |
-| `dd` | Delete line |
-| `D` | Delete to end of line |
-| `yy` | Yank (copy) line |
-| `Y` | Yank to end of line |
-| `cc`, `S` | Change entire line |
-| `C` | Change to end of line |
-| `p` | Paste after cursor |
-| `P` | Paste before cursor |
-| `gp` | Paste after and move cursor after text |
-| `gP` | Paste before and move cursor after text |
-| `[p` | Paste before with indent adjustment |
-| `]p` | Paste after with indent adjustment |
-| `J` | Join current line with next |
-| `gJ` | Join lines without adding space |
-| `>>` | Indent line |
-| `<<` | Unindent line |
-| `.` | Repeat last change |
-| `gu{motion}` | Convert to lowercase |
-| `gU{motion}` | Convert to uppercase |
-| `g~{motion}` | Toggle case |
-| `Ctrl+/` | Toggle comment (uses Godot's native comment toggle) |
-| `ga` | Display ASCII/Unicode of char under cursor |
-| `gqq` | Format current line |
-
-</details>
-
-<details>
-<summary>Text Objects</summary>
-
-| Command | Description |
-|---------|-------------|
-| `iw`, `aw` | Inner/around word |
-| `i"`, `a"` | Inner/around double quotes |
-| `i'`, `a'` | Inner/around single quotes |
-| `i(`, `a(` | Inner/around parentheses |
-| `i[`, `a[` | Inner/around brackets |
-| `i{`, `a{` | Inner/around braces |
-| `i<`, `a<` | Inner/around angle brackets |
-| `ie`, `ae` | Inner/around entire buffer |
-
-</details>
-
-<details>
-<summary>Marks</summary>
-
-| Command | Description |
-|---------|-------------|
-| `m{a-z}` | Set mark at current position |
-| `'{a-z}` | Jump to mark line (first non-blank) |
-| `` `{a-z} `` | Jump to exact mark position |
-
-</details>
-
-<details>
-<summary>Macros</summary>
-
-| Command | Description |
-|---------|-------------|
-| `q{a-z}` | Start recording macro to register |
-| `q` | Stop recording macro (when recording) |
-| `@{a-z}` | Play macro from register |
-| `@@` | Replay last played macro |
-
-</details>
-
-<details>
-<summary>Named Registers</summary>
-
-| Command | Description |
-|---------|-------------|
-| `"{a-z}yy` | Yank line to named register |
-| `"{a-z}dd` | Delete line to named register |
-| `"{a-z}p` | Paste from named register (after) |
-| `"{a-z}P` | Paste from named register (before) |
-| `"+y`, `"*y` | Yank to system clipboard |
-| `"+p`, `"*p` | Paste from system clipboard |
-| `"_d` | Delete to black hole register (no save) |
-| `"0p` | Paste from yank register |
-
-</details>
-
-<details>
-<summary>Number Operations</summary>
-
-| Command | Description |
-|---------|-------------|
-| `Ctrl+A` | Increment number under/after cursor |
-| `Ctrl+X` | Decrement number under/after cursor |
-
-</details>
-
-<details>
-<summary>Jump List</summary>
-
-| Command | Description |
-|---------|-------------|
-| `Ctrl+O` | Jump back to previous position |
-| `Ctrl+I` | Jump forward to newer position |
-
-</details>
-
-<details>
-<summary>Mode Switching</summary>
-
-| Command | Description |
-|---------|-------------|
-| `i`, `a`, `o`, `O` | Enter insert mode |
-| `I` | Insert at first non-blank character |
-| `A` | Insert at end of line |
-| `gi` | Insert at last insert position |
-| `gI` | Insert at column 0 (ignore indent) |
-| `R` | Enter replace mode (overwrite) |
-| `v` | Enter visual mode |
-| `V` | Enter visual line mode |
-| `Ctrl+V`, `gv` | Enter visual block mode (`gv` as alternative since Godot intercepts Ctrl+V) |
-| `Ctrl+B` (visual) | Switch to visual block mode |
-| `o` (visual) | Toggle selection direction |
-| `Escape`, `Ctrl+[` | Return to normal mode |
-| `:` | Enter command-line mode |
-
-</details>
-
-<details>
-<summary>Folding</summary>
-
-| Command | Description |
-|---------|-------------|
-| `za` | Toggle fold under cursor |
-| `zo` | Open fold under cursor |
-| `zc` | Close fold under cursor |
-| `zM` | Close all folds |
-| `zR` | Open all folds |
-
-</details>
-
-<details>
-<summary>Command-Line Mode</summary>
-
-| Command | Description |
-|---------|-------------|
-| `:help`, `:h` | Open GodotNeovim help |
-| `:version`, `:ver` | Show version in status label |
-| `:e` | Open quick open dialog for scripts |
-| `:e {file}` | Open specified script file |
-| `:e!`, `:edit!` | Discard changes and reload |
-| `:w` | Save file |
-| `:wa`, `:wall` | Save all open files |
-| `:q` | Close current script tab |
-| `:qa`, `:qall` | Close all script tabs |
-| `:wq`, `:x` | Save and close |
-| `:wqa` | Save all and close all |
-| `ZZ` | Save and close (normal mode) |
-| `ZQ` | Close without saving (discard changes) |
-| `:%s/old/new/g` | Substitute all occurrences |
-| `:g/{pattern}/d` | Delete lines matching pattern |
-| `:sort` | Sort lines |
-| `:t {line}` | Copy current line to after {line} |
-| `:m {line}` | Move current line to after {line} |
-| `:bn` | Next buffer (script tab) |
-| `:bp` | Previous buffer (script tab) |
-| `:bd` | Close current buffer |
-| `:ls` | List open buffers |
-| `g&` | Repeat last `:s` on entire file |
-| `:{number}` | Jump to line number (e.g., `:123`) |
-| `:marks` | Show all marks (output to console) |
-| `:registers`, `:reg` | Show all registers (output to console) |
-| `:jumps`, `:ju` | Show jump list (output to console) |
-| `:changes` | Show change list (output to console) |
-| `@:` | Repeat last Ex command |
-| `Ctrl+G` | Show file info |
-| `Up`/`Down` | Browse command history |
-
-</details>
-
-<details>
-<summary><h2>Limitations</h2></summary>
-
-This plugin has architectural limitations due to using Godot's native CodeEdit for text editing.
-
-### Insert Mode
-
-Insert mode uses Godot's native input system for text editing (to keep auto-completion, IME, and undo working), while still forwarding Vim's insert-mode commands to Neovim. The plugin pushes the current Godot buffer to Neovim before each `Ctrl`/`Alt`-modified key so commands operate on the up-to-date text.
-
-**Supported Vim insert-mode commands**: `Ctrl+W`, `Ctrl+U`, `Ctrl+H`, `Ctrl+R{reg}`, `Ctrl+O`, `Ctrl+T`, `Ctrl+D`, `Ctrl+V`, `Ctrl+K`, `Ctrl+A`, `Ctrl+Y`, `Ctrl+E`.
-
-**Keys passed through to Godot's CodeEdit** (cannot be remapped to send to Neovim):
-
-| Key | Godot native action |
-|-----|---------------------|
-| `Ctrl+Backspace` / `Ctrl+Delete` | Delete word backward / forward |
-| `Ctrl+Left` / `Ctrl+Right` | Move by word |
-| `Ctrl+Up` / `Ctrl+Down` | Move/scroll by line |
-| `Ctrl+Home` / `Ctrl+End` | Jump to file start / end |
-| `Ctrl+PageUp` / `Ctrl+PageDown` | Jump by page |
-| `Alt`-modified variants of the above | Same as `Ctrl` variants where Godot supports them |
-
-**Known limitations within insert mode**:
-
-| Limitation | Detail |
-|-----------|--------|
-| `Ctrl+N` / `Ctrl+P` (Neovim completion) | Forwarded to Neovim, but Godot's native auto-completion popup is usually preferred. The two completion systems do not interact. |
-| `<C-r>=` (expression register) | Opens Neovim's expression command line, which Godot is not aware of — typed text goes to Godot instead of Neovim's prompt. |
-| `<C-r><C-r>{reg}` / `<C-r><C-o>{reg}` / `<C-r><C-p>{reg}` | Not supported. The `<C-r>` prefix pending state clears after one key, so the variant modifier becomes the register name. |
-| Dot repeat (`.`) of inserted text | Only structural commands (e.g., `cw`) are replayed; the inserted text itself is not re-typed because Neovim doesn't see individual keystrokes. |
-| Macro recording with IME | Only confirmed characters are recorded; intermediate composition states are not captured. |
-
-### Not Implemented
-
-| Feature | Description |
-|---------|-------------|
-| Neovim undo | Uses Godot's undo system |
-| Neovim config | `init.lua` and plugins are not loaded by default (`neovim_clean = true`). Can be enabled but may cause compatibility issues with some plugins (e.g., copilot.vim, lexima.vim). |
-| `K` for signals | Signal documentation lookup not supported (class/method/property/constant only) |
-| `[m`/`]m` for GDScript | Method jump commands require Neovim treesitter or language support. GDScript is not recognized by Neovim. |
-
-### Toggle Comment (`Ctrl+/`)
-
-`Ctrl+/` (`Cmd+/` on macOS) toggles comments using Godot's native CodeEdit feature. Since this is a Godot passthrough (not a Neovim command), the following limitations apply:
-
-- **Macro recording**: `Ctrl+/` is not recorded during macro recording (`q{a-z}`)
-- **Dot repeat**: `.` does not repeat `Ctrl+/`
-- **Undo**: Uses Godot's undo system, not Neovim's `u`
-
-### Alt Key Composition (Option / AltGr)
-
-When the OS produces a composed character via the Alt modifier (e.g. macOS Option+Q → `@`, Windows AltGr+Q → `@` on German layout), the plugin inserts the composed character as plain text instead of sending `<A-x>` / `<C-A-x>` to Neovim. This makes layouts that rely on Alt for character composition usable in Insert and Replace modes.
-
-As a side effect, the following Vim mappings are unreachable on those layouts:
-
-- **macOS**: Any `<A-letter>` mapping where Option+letter produces a character on the active layout. Configure macOS to "Use Option as Meta key" in your terminal/editor or switch to a layout that does not compose to use these mappings.
-- **Windows (AltGr layouts, e.g. German/French/Spanish)**: `<C-A-letter>` mappings on keys that AltGr composes. Windows reports AltGr as Ctrl+Alt simultaneously at the OS level, so AltGr+Q and Ctrl+Alt+Q are indistinguishable from any application. Use a different modifier combination or disable AltGr to use these mappings.
-
-### Known Issues
-
-| Issue | Workaround |
-|-------|------------|
-| Dirty flag not set after some operations (named register paste, macro playback) | Switch to another script tab and back (`gt` then `gT`) |
-| `(*)` marker remains after `:e!` reload | Switch tabs with `gt`/`gT` to clear the marker |
-| Macro recording with IME | Only confirmed characters are recorded; intermediate compositions are not captured |
-
-</details>
-
-<details>
-<summary><h2>Roadmap</h2></summary>
-
-### Implementation Candidates
-
-Features requiring plugin-side implementation:
-
-| Priority | Feature | Commands | Difficulty | Description |
-|----------|---------|----------|------------|-------------|
-| High | Confirm substitute | `:%s/old/new/gc` | ⭐⭐⭐ Hard | Confirm each replacement (requires UI) |
-| Medium | Auto-indent | `=`, `==`, `=G` | ⭐⭐⭐ Hard | Requires GDScript syntax parsing (keyword analysis for `func`, `if`, `for`, etc.) |
-| Medium | Change list | `g;`, `g,` | ⭐⭐ Medium | Navigate through change positions |
-| Medium | Sequential increment | `gCtrl+A`, `gCtrl+X` | ⭐⭐ Medium | Generate number sequence in visual block |
-| Medium | Indent text object | `ii`, `ai` | ⭐⭐ Medium | Select by indentation level |
-| Medium | Argument text object | `ia`, `aa` | ⭐⭐⭐ Hard | Select function argument (requires parsing) |
-| Low | Visual block insert | `I`/`A` (v-block) | ⭐⭐⭐ Hard | Insert/append on multiple lines |
-
-### Verified Working Through Neovim Backend
-
-These features work through the Neovim backend:
-
-| Category | Commands |
-|----------|----------|
-| Motions | `(`, `)` (sentence), `[[`, `]]`, `[]`, `][` (section) |
-| Text Objects | `is`, `as` (sentence), `ip`, `ap` (paragraph), `it`, `at` (tag) |
-| Line Range | `:1,10d`, `:.,$s/old/new/g`, `:'<,'>d` |
-
-</details>
-
-## Architecture
-
-```
-┌─────────────────────┐     RPC (msgpack)     ┌─────────────┐
-│   Godot Editor      │◄─────────────────────►│   Neovim    │
-│   (GDExtension)     │                       │  (--embed)  │
-│                     │                       │             │
-│ ┌─────────────────┐ │                       │             │
-│ │  CodeEdit       │ │  Buffer Sync          │             │
-│ │  (Script Editor)│◄├──────────────────────►│   Buffer    │
-│ └─────────────────┘ │                       │             │
-│                     │                       │             │
-│ ┌─────────────────┐ │  Mode Changes         │             │
-│ │  Mode Label     │◄├──────────────────────►│   Mode      │
-│ └─────────────────┘ │                       │             │
-│                     │                       └─────────────┘
-│ ┌─────────────────┐ │  TCP (JSON-RPC)       ┌─────────────┐
-│ │  LSP Client     │◄├──────────────────────►│ Godot LSP   │
-│ │  (gd command)   │ │                       │ (port 6005) │
-│ └─────────────────┘ │                       │             │
-└─────────────────────┘                       └─────────────┘
-```
-
-## Dependencies
-
-- [godot-rust/gdext](https://github.com/godot-rust/gdext) - Rust bindings for Godot 4
-- [nvim-rs](https://github.com/KillTheMule/nvim-rs) - Neovim msgpack-RPC client for Rust
-- [tokio](https://tokio.rs/) - Async runtime for Rust
-- [lsp-types](https://github.com/gluon-lang/lsp-types) - LSP protocol types for Godot LSP integration
-
-## Related Projects
-
-### Godot Vim Plugins
-- [hmdfrds/godot-vim](https://github.com/hmdfrds/godot-vim) - GDExtension/Rust, text objects, custom key mappings
-- [bernardo-bruning/godot-vim](https://github.com/bernardo-bruning/godot-vim) - GDScript, extensive Ex commands
-- [joshnajera/godot-vim](https://github.com/joshnajera/godot-vim) - GDScript, operator-motion architecture
-- [wovri-github/godot-vim-joshnajera](https://github.com/wovri-github/godot-vim-joshnajera) - GDScript, joshnajera fork with K (docs)
-
-### Other
-- [ComradeNeovim](https://github.com/beeender/ComradeNeovim) - IntelliJ/CLion plugin with Neovim backend
-- [vscode-neovim](https://github.com/vscode-neovim/vscode-neovim) - VSCode extension with Neovim backend
-- [neovide](https://github.com/neovide/neovide) - Neovim GUI client in Rust (architecture reference)
+Report issues or submit pull requests on [GitHub](https://github.com/shiena/godot-neovim). See the [development guide](docs/development.md) to build from source.
 
 ## Disclaimer
 
@@ -689,7 +126,3 @@ at your option.
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
 dual licensed as above, without any additional terms or conditions.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
