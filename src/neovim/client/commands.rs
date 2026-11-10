@@ -111,6 +111,9 @@ impl Drop for CommandQueue {
 
 impl NeovimClient {
     pub fn queue_command(&self, command: &str) -> Result<(), ClientError> {
+        if self.rpc_timed_out.load(Ordering::Acquire) {
+            return Err(ClientError::NotConnected);
+        }
         self.commands
             .as_ref()
             .ok_or(ClientError::NotConnected)?
@@ -134,7 +137,9 @@ impl NeovimClient {
     }
 
     pub(super) fn ensure_rpc_ready(&self) -> Result<(), ClientError> {
-        if self.commands_pending() {
+        if self.rpc_timed_out.load(Ordering::Acquire) {
+            Err(ClientError::NotConnected)
+        } else if self.commands_pending() {
             Err(ClientError::Busy)
         } else {
             Ok(())

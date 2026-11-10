@@ -17,6 +17,7 @@ mod execution;
 pub use error::ClientError;
 mod input;
 mod state;
+mod timeout;
 
 use crate::neovim::{NeovimHandler, NeovimState};
 use nvim_rs::Neovim;
@@ -163,6 +164,7 @@ pub struct IndentOptions {
 /// Manages connection to Neovim process
 pub struct NeovimClient {
     commands: Option<commands::CommandQueue>,
+    rpc_timed_out: AtomicBool,
     pending_resize: std::cell::Cell<Option<(i64, i64)>>,
     pub(super) runtime: Runtime,
     pub(super) child: Option<tokio::process::Child>,

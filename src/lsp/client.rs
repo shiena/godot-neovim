@@ -78,16 +78,17 @@ impl GodotLspClient {
 
     pub(super) fn from_stream(stream: TcpStream) -> Result<Self, String> {
         stream
-            .set_read_timeout(Some(Duration::from_secs(10)))
+            .set_read_timeout(Some(Duration::from_millis(100)))
             .map_err(|e| e.to_string())?;
         stream
-            .set_write_timeout(Some(Duration::from_secs(10)))
+            .set_write_timeout(Some(Duration::from_millis(100)))
             .map_err(|e| e.to_string())?;
         Ok(Self {
             connection: Mutex::new(Some(Connection {
                 stream: LspStream {
                     socket: stream,
                     startup: None,
+                    request_deadline: None,
                 },
                 initialized: false,
             })),
@@ -120,11 +121,11 @@ impl GodotLspClient {
         stream.startup = None;
         stream
             .socket
-            .set_read_timeout(Some(Duration::from_secs(10)))
+            .set_read_timeout(Some(Duration::from_millis(100)))
             .map_err(|e| e.to_string())?;
         stream
             .socket
-            .set_write_timeout(Some(Duration::from_secs(10)))
+            .set_write_timeout(Some(Duration::from_millis(100)))
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -277,7 +278,12 @@ impl GodotLspClient {
     ) -> Result<T, String> {
         let mut guard = self.connection.lock().map_err(|e| e.to_string())?;
         let connection = guard.as_mut().ok_or("Not connected to LSP server")?;
-        self.send_request_on(&mut connection.stream, method, params)
+        let result = self.send_request_on(&mut connection.stream, method, params);
+        // A timed-out response may still arrive. Never reuse a desynchronized stream.
+        if result.is_err() {
+            guard.take();
+        }
+        result
     }
 
     fn send_request_on<T: for<'de> Deserialize<'de>>(
@@ -286,6 +292,7 @@ impl GodotLspClient {
         method: &str,
         params: Option<Value>,
     ) -> Result<T, String> {
+        stream.begin_request();
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
 
         let request = JsonRpcRequest {
@@ -337,7 +344,11 @@ impl GodotLspClient {
     fn send_notification(&self, method: &str, params: Option<Value>) -> Result<(), String> {
         let mut guard = self.connection.lock().map_err(|e| e.to_string())?;
         let connection = guard.as_mut().ok_or("Not connected to LSP server")?;
-        Self::send_notification_on(&mut connection.stream, method, params)
+        let result = Self::send_notification_on(&mut connection.stream, method, params);
+        if result.is_err() {
+            guard.take();
+        }
+        result
     }
 
     fn send_notification_on(
@@ -345,6 +356,7 @@ impl GodotLspClient {
         method: &str,
         params: Option<Value>,
     ) -> Result<(), String> {
+        stream.begin_request();
         let notification = JsonRpcNotification {
             jsonrpc: "2.0",
             method: method.to_string(),
@@ -368,6 +380,10 @@ impl GodotLspClient {
         // Read headers
         let mut content_length: Option<usize> = None;
         loop {
+            reader
+                .get_ref()
+                .check_cancelled()
+                .map_err(|e| e.to_string())?;
             let mut line = String::new();
             reader
                 .read_line(&mut line)
@@ -433,9 +449,28 @@ impl Default for GodotLspClient {
 struct LspStream {
     socket: TcpStream,
     startup: Option<(Arc<AtomicBool>, Instant)>,
+    request_deadline: Option<Instant>,
 }
 impl LspStream {
+    fn begin_request(&mut self) {
+        // Initialization already has its own deadline and cancellation signal.
+        self.request_deadline = if self.startup.is_none() {
+            Some(Instant::now() + Duration::from_millis(500))
+        } else {
+            None
+        };
+    }
+
     fn check_cancelled(&self) -> std::io::Result<()> {
+        if self
+            .request_deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "LSP request timed out",
+            ));
+        }
         if let Some((flag, deadline)) = &self.startup {
             if flag.load(Ordering::Acquire) || Instant::now() >= *deadline {
                 return Err(std::io::Error::new(
@@ -447,7 +482,7 @@ impl LspStream {
         Ok(())
     }
     fn retry(&self, error: &std::io::Error) -> bool {
-        self.startup.is_some()
+        (self.startup.is_some() || self.request_deadline.is_some())
             && matches!(
                 error.kind(),
                 std::io::ErrorKind::TimedOut

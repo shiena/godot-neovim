@@ -7,6 +7,9 @@ impl NeovimClient {
     /// Take pending updates (clears the flag) and return current state
     /// Keep buffer coordinates across redraws that only update the screen grid.
     pub fn take_state(&self) -> Option<(String, (i64, i64))> {
+        if self.rpc_timed_out() {
+            return None;
+        }
         let state = self.state.try_lock().ok()?;
         if !self.has_updates.swap(false, Ordering::SeqCst) {
             return None;
@@ -16,6 +19,9 @@ impl NeovimClient {
     }
 
     pub fn take_viewport(&self) -> Option<(i64, i64, i64, i64)> {
+        if self.rpc_timed_out() {
+            return None;
+        }
         let mut state = self.state.try_lock().ok()?;
         if !state.viewport_changed {
             return None;
@@ -39,6 +45,9 @@ impl NeovimClient {
     /// Resize Neovim's UI to match Godot editor's visible area
     /// This is important for viewport commands (zz, zt, zb) to work correctly
     pub fn ui_try_resize(&self, width: i64, height: i64) {
+        if self.rpc_timed_out.load(Ordering::Acquire) {
+            return;
+        }
         if self.commands_pending() {
             self.pending_resize.set(Some((width, height)));
             return;
@@ -46,21 +55,19 @@ impl NeovimClient {
         self.pending_resize.set(None);
         let neovim_arc = self.neovim.clone();
 
-        self.runtime.block_on(async {
+        let result = self.wait_for_rpc("resizing UI", async {
             let nvim = neovim_arc.lock().await.as_ref().cloned();
-            if let Some(neovim) = nvim.as_ref() {
-                if let Err(e) = neovim.ui_try_resize(width, height).await {
-                    // Log error but don't fail - resize is best-effort
-                    crate::verbose_print!("[godot-neovim] Failed to resize UI: {}", e);
-                } else {
-                    crate::verbose_print!(
-                        "[godot-neovim] Resized Neovim UI to {}x{}",
-                        width,
-                        height
-                    );
-                }
-            }
+            let Some(neovim) = nvim else {
+                return Err(super::ClientError::NotConnected);
+            };
+            neovim
+                .ui_try_resize(width, height)
+                .await
+                .map_err(|e| super::ClientError::rpc("resize UI", e))
         });
+        if let Err(error) = result {
+            crate::verbose_print!("[godot-neovim] Failed to resize UI: {}", error);
+        }
     }
 
     /// Number of keys Neovim's main loop has confirmed processing since the
@@ -97,6 +104,7 @@ mod tests {
         let handler = NeovimHandler::new();
         NeovimClient {
             commands: None,
+            rpc_timed_out: std::sync::atomic::AtomicBool::new(false),
             pending_resize: std::cell::Cell::new(None),
             runtime: tokio::runtime::Builder::new_current_thread()
                 .build()

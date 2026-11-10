@@ -13,7 +13,7 @@ impl NeovimClient {
         self.ensure_rpc_ready()?;
         let neovim_arc = self.neovim.clone();
 
-        self.runtime.block_on(async {
+        self.wait_for_rpc("updating buffer", async {
             let nvim = neovim_arc.lock().await.as_ref().cloned();
             if let Some(neovim) = nvim.as_ref() {
                 // Convert lines to Lua array
@@ -199,7 +199,7 @@ impl NeovimClient {
         self.ensure_rpc_ready()?;
         let neovim_arc = self.neovim.clone();
 
-        self.runtime.block_on(async {
+        self.wait_for_rpc("setting indent options", async {
             let nvim = neovim_arc.lock().await.as_ref().cloned();
             if let Some(neovim) = nvim.as_ref() {
                 let args = vec![
@@ -322,6 +322,9 @@ impl NeovimClient {
 
     /// Check if there are pending buffer events
     pub fn has_buf_events(&self) -> bool {
+        if self.rpc_timed_out() {
+            return false;
+        }
         self.handler
             .get_buf_events_flag()
             .load(std::sync::atomic::Ordering::SeqCst)
