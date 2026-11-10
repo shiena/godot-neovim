@@ -1,4 +1,8 @@
-//! Neovim timeout recovery: automatic recovery when Neovim becomes unresponsive
+//! User-confirmed restart of an unresponsive Neovim session.
+//!
+//! Godot editors retain their text while the Neovim clients are replaced.
+//! The deferred script-change handler registers the current editor again;
+//! this does not recover content after Godot itself exits.
 
 use super::GodotNeovimPlugin;
 use crate::neovim::NeovimClient;
@@ -209,7 +213,7 @@ impl GodotNeovimPlugin {
             }
         }
 
-        // Reinitialize current buffer
+        // Rebuild from the live Godot editor, not from the failed Neovim session.
         self.script_changed_pending.set(true);
     }
 

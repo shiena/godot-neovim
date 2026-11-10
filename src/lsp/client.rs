@@ -11,6 +11,10 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+// Socket polling observes cancellation without extending the operation deadline.
+const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
+
 #[derive(Debug, Serialize)]
 struct JsonRpcRequest {
     jsonrpc: &'static str,
@@ -78,10 +82,10 @@ impl GodotLspClient {
 
     pub(super) fn from_stream(stream: TcpStream) -> Result<Self, String> {
         stream
-            .set_read_timeout(Some(Duration::from_millis(100)))
+            .set_read_timeout(Some(SOCKET_POLL_INTERVAL))
             .map_err(|e| e.to_string())?;
         stream
-            .set_write_timeout(Some(Duration::from_millis(100)))
+            .set_write_timeout(Some(SOCKET_POLL_INTERVAL))
             .map_err(|e| e.to_string())?;
         Ok(Self {
             connection: Mutex::new(Some(Connection {
@@ -107,11 +111,11 @@ impl GodotLspClient {
             let stream = &mut connection.as_mut().ok_or("Not connected")?.stream;
             stream
                 .socket
-                .set_read_timeout(Some(Duration::from_millis(100)))
+                .set_read_timeout(Some(SOCKET_POLL_INTERVAL))
                 .map_err(|e| e.to_string())?;
             stream
                 .socket
-                .set_write_timeout(Some(Duration::from_millis(100)))
+                .set_write_timeout(Some(SOCKET_POLL_INTERVAL))
                 .map_err(|e| e.to_string())?;
             stream.startup = Some((flag, deadline));
         }
@@ -121,11 +125,11 @@ impl GodotLspClient {
         stream.startup = None;
         stream
             .socket
-            .set_read_timeout(Some(Duration::from_millis(100)))
+            .set_read_timeout(Some(SOCKET_POLL_INTERVAL))
             .map_err(|e| e.to_string())?;
         stream
             .socket
-            .set_write_timeout(Some(Duration::from_millis(100)))
+            .set_write_timeout(Some(SOCKET_POLL_INTERVAL))
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -292,7 +296,7 @@ impl GodotLspClient {
         method: &str,
         params: Option<Value>,
     ) -> Result<T, String> {
-        stream.begin_request();
+        stream.begin_operation();
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
 
         let request = JsonRpcRequest {
@@ -356,7 +360,7 @@ impl GodotLspClient {
         method: &str,
         params: Option<Value>,
     ) -> Result<(), String> {
-        stream.begin_request();
+        stream.begin_operation();
         let notification = JsonRpcNotification {
             jsonrpc: "2.0",
             method: method.to_string(),
@@ -382,7 +386,7 @@ impl GodotLspClient {
         loop {
             reader
                 .get_ref()
-                .check_cancelled()
+                .check_deadline_or_cancellation()
                 .map_err(|e| e.to_string())?;
             let mut line = String::new();
             reader
@@ -452,16 +456,16 @@ struct LspStream {
     request_deadline: Option<Instant>,
 }
 impl LspStream {
-    fn begin_request(&mut self) {
+    fn begin_operation(&mut self) {
         // Initialization already has its own deadline and cancellation signal.
         self.request_deadline = if self.startup.is_none() {
-            Some(Instant::now() + Duration::from_millis(500))
+            Some(Instant::now() + REQUEST_TIMEOUT)
         } else {
             None
         };
     }
 
-    fn check_cancelled(&self) -> std::io::Result<()> {
+    fn check_deadline_or_cancellation(&self) -> std::io::Result<()> {
         if self
             .request_deadline
             .is_some_and(|deadline| Instant::now() >= deadline)
@@ -481,7 +485,7 @@ impl LspStream {
         }
         Ok(())
     }
-    fn retry(&self, error: &std::io::Error) -> bool {
+    fn should_retry_socket_wait(&self, error: &std::io::Error) -> bool {
         (self.startup.is_some() || self.request_deadline.is_some())
             && matches!(
                 error.kind(),
@@ -494,9 +498,9 @@ impl LspStream {
 impl Read for LspStream {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         loop {
-            self.check_cancelled()?;
+            self.check_deadline_or_cancellation()?;
             match self.socket.read(buffer) {
-                Err(error) if self.retry(&error) => continue,
+                Err(error) if self.should_retry_socket_wait(&error) => continue,
                 result => return result,
             }
         }
@@ -505,9 +509,9 @@ impl Read for LspStream {
 impl Write for LspStream {
     fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
         loop {
-            self.check_cancelled()?;
+            self.check_deadline_or_cancellation()?;
             match self.socket.write(buffer) {
-                Err(error) if self.retry(&error) => continue,
+                Err(error) if self.should_retry_socket_wait(&error) => continue,
                 result => return result,
             }
         }
