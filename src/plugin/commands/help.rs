@@ -69,6 +69,10 @@ impl GodotNeovimPlugin {
         }
 
         // Try LSP hover to get class/member information
+        if !self.ensure_lsp_ready(crate::plugin::lsp_startup::LspAction::Documentation) {
+            return;
+        }
+
         let Some(ref lsp) = self.godot_lsp else {
             crate::verbose_print!("[godot-neovim] K: LSP not available, skipping '{}'", word);
             return;
@@ -88,31 +92,6 @@ impl GodotNeovimPlugin {
         } else {
             format!("file:///{}", abs_path.replace('\\', "/"))
         };
-
-        // Get project root for LSP initialization
-        let project_root = ProjectSettings::singleton()
-            .globalize_path("res://")
-            .to_string();
-        let root_uri = if project_root.starts_with('/') {
-            format!("file://{}", project_root)
-        } else {
-            format!("file:///{}", project_root.replace('\\', "/"))
-        };
-
-        // Ensure LSP is connected and initialized
-        if !lsp.is_connected() {
-            if let Err(e) = lsp.connect(6005) {
-                crate::verbose_print!("[godot-neovim] K: LSP connect failed: {}", e);
-                return;
-            }
-        }
-
-        if !lsp.is_initialized() {
-            if let Err(e) = lsp.initialize(&root_uri) {
-                crate::verbose_print!("[godot-neovim] K: LSP init failed: {}", e);
-                return;
-            }
-        }
 
         // Request hover information
         let line = line_idx as u32;
@@ -138,6 +117,7 @@ impl GodotNeovimPlugin {
                 crate::verbose_print!("[godot-neovim] K: No hover info for '{}'", word);
             }
             Err(e) => {
+                lsp.disconnect();
                 crate::verbose_print!("[godot-neovim] K: LSP hover error: {}", e);
             }
         }

@@ -13,6 +13,7 @@ pub(crate) mod filetype;
 mod input;
 mod insert_escape;
 mod keys;
+mod lsp_startup;
 mod macros;
 mod marks;
 mod motions;
@@ -289,6 +290,8 @@ pub struct GodotNeovimPlugin {
     /// Direct LSP client for Godot LSP server
     #[init(val = None)]
     godot_lsp: Option<Arc<GodotLspClient>>,
+    #[init(val = None)]
+    pending_lsp: Option<lsp_startup::PendingLsp>,
     /// Temporary version display flag (cleared on next operation)
     #[init(val = false)]
     show_version: bool,
@@ -451,6 +454,7 @@ impl IEditorPlugin for GodotNeovimPlugin {
         {
             self.editor_has_focus();
         }
+        self.process_lsp_startup();
         self.process_command_results();
         self.retry_pending_neovim_switch();
 
@@ -2396,6 +2400,7 @@ impl GodotNeovimPlugin {
         // Clear current editor reference
         self.current_editor = None;
 
+        self.pending_lsp = None;
         // Disconnect and clear LSP client
         if let Some(ref lsp) = self.godot_lsp {
             lsp.disconnect();

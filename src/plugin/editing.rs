@@ -28,6 +28,10 @@ impl GodotNeovimPlugin {
     pub(super) fn go_to_definition_lsp(&mut self) {
         use godot::classes::ProjectSettings;
 
+        if !self.ensure_lsp_ready(crate::plugin::lsp_startup::LspAction::Definition) {
+            return;
+        }
+
         let Some(ref lsp) = self.godot_lsp else {
             self.show_status_message("gd: Enable 'Use Thread' in Editor Settings");
             return;
@@ -58,41 +62,6 @@ impl GodotNeovimPlugin {
             // Windows path: C:/... -> file:///C:/...
             format!("file:///{}", abs_path.replace('\\', "/"))
         };
-
-        // Get project root for LSP initialization
-        let project_root = ProjectSettings::singleton()
-            .globalize_path("res://")
-            .to_string();
-        let root_uri = if project_root.starts_with('/') {
-            format!("file://{}", project_root)
-        } else {
-            format!("file:///{}", project_root.replace('\\', "/"))
-        };
-
-        crate::verbose_print!(
-            "[godot-neovim] gd: Requesting definition at {}:{}:{}",
-            uri,
-            line,
-            col
-        );
-
-        // Ensure connected
-        if !lsp.is_connected() {
-            if let Err(e) = lsp.connect(6005) {
-                self.show_status_message(&format!("LSP connect failed: {}", e));
-                return;
-            }
-            crate::verbose_print!("[godot-neovim] gd: Connected to LSP");
-        }
-
-        // Ensure initialized
-        if !lsp.is_initialized() {
-            if let Err(e) = lsp.initialize(&root_uri) {
-                self.show_status_message(&format!("LSP init failed: {}", e));
-                return;
-            }
-            crate::verbose_print!("[godot-neovim] gd: LSP initialized");
-        }
 
         // Send didOpen to ensure LSP knows about the file
         if let Err(e) = lsp.did_open(&uri, &text) {
@@ -163,6 +132,7 @@ impl GodotNeovimPlugin {
             }
             Err(e) => {
                 crate::verbose_print!("[godot-neovim] gd: LSP error: {}", e);
+                lsp.disconnect();
                 self.show_status_message(&format!("LSP error: {}", e));
             }
         }
