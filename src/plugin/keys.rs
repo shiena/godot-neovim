@@ -26,10 +26,15 @@ impl GodotNeovimPlugin {
         let Some(uc) = char::from_u32(unicode) else {
             return false;
         };
-        let Some(kc) = char::from_u32(event.get_keycode().ord() as u32) else {
+        let label = if event.get_key_label() != Key::NONE {
+            event.get_key_label()
+        } else {
+            event.get_keycode()
+        };
+        let Some(kc) = char::from_u32(label.ord() as u32) else {
             return false;
         };
-        !kc.eq_ignore_ascii_case(&uc)
+        !kc.to_lowercase().eq(uc.to_lowercase())
     }
 
     /// Convert a Ctrl/Alt/Meta-modified key event to Neovim notation for
@@ -37,7 +42,7 @@ impl GodotNeovimPlugin {
     /// Ctrl+Shift+S → `<C-S-s>`. Modifiers are emitted in C-A-S-D order to
     /// match the keymap editor's accepted notation.
     ///
-    /// Letters and digits are resolved from the keycode rather than the
+    /// Printable keys use the layout-aware key label rather than the
     /// unicode value, because the OS may report no character (or a control
     /// character) while Ctrl/Cmd is held.
     /// Returns None for unmodified keys and modifier-only presses.
@@ -50,43 +55,20 @@ impl GodotNeovimPlugin {
             return None;
         }
 
-        let keycode = event.get_keycode();
-        let ord = keycode.ord();
-        let base = match keycode {
-            Key::ESCAPE => "Esc".to_string(),
-            Key::ENTER => "CR".to_string(),
-            Key::TAB => "Tab".to_string(),
-            Key::BACKSPACE => "BS".to_string(),
-            Key::DELETE => "Del".to_string(),
-            Key::UP => "Up".to_string(),
-            Key::DOWN => "Down".to_string(),
-            Key::LEFT => "Left".to_string(),
-            Key::RIGHT => "Right".to_string(),
-            Key::HOME => "Home".to_string(),
-            Key::END => "End".to_string(),
-            Key::PAGEUP => "PageUp".to_string(),
-            Key::PAGEDOWN => "PageDown".to_string(),
-            Key::SPACE => "Space".to_string(),
-            _ if (Key::A.ord()..=Key::Z.ord()).contains(&ord)
-                || (Key::KEY_0.ord()..=Key::KEY_9.ord()).contains(&ord) =>
-            {
-                let c = char::from_u32(ord as u32)?.to_ascii_lowercase();
-                c.to_string()
-            }
-            _ => {
-                // Punctuation: the unicode value already reflects Shift.
-                let c = char::from_u32(event.get_unicode()).filter(|c| !c.is_control())?;
-                return Some(Self::format_modified_key(
-                    ctrl,
-                    alt,
-                    false,
-                    meta,
-                    &c.to_string(),
-                ));
-            }
+        let code = if event.get_keycode() == Key::NONE {
+            event.get_physical_keycode()
+        } else {
+            event.get_keycode()
         };
-        // Shift is significant for letters/digits and special keys.
-        Some(Self::format_modified_key(ctrl, alt, shift, meta, &base))
+        let (base, keep_shift) =
+            modified_key_base(code, event.get_key_label(), event.get_unicode())?;
+        Some(Self::format_modified_key(
+            ctrl,
+            alt,
+            shift && keep_shift,
+            meta,
+            &base,
+        ))
     }
 
     fn format_modified_key(ctrl: bool, alt: bool, shift: bool, meta: bool, base: &str) -> String {
@@ -103,6 +85,15 @@ impl GodotNeovimPlugin {
 
     /// Convert Godot key event to Neovim key string
     pub(super) fn key_event_to_nvim_string(&self, event: &Gd<InputEventKey>) -> Option<String> {
+        if !self.is_alt_composed_unicode(event) {
+            if let Some(notation) = self.modified_key_notation(event) {
+                return Some(if notation == "<C-[>" {
+                    "<Esc>".into()
+                } else {
+                    notation
+                });
+            }
+        }
         let keycode = event.get_keycode();
         let ctrl = event.is_ctrl_pressed();
         let alt = event.is_alt_pressed();
@@ -176,6 +167,11 @@ impl GodotNeovimPlugin {
 
     /// Convert Godot key event to Neovim notation for insert mode (strict mode)
     pub(super) fn key_event_to_nvim_notation(&self, key_event: &Gd<InputEventKey>) -> String {
+        if !self.is_alt_composed_unicode(key_event) {
+            if let Some(notation) = self.modified_key_notation(key_event) {
+                return notation;
+            }
+        }
         let keycode = key_event.get_keycode();
         let unicode = key_event.get_unicode();
         let ctrl = key_event.is_ctrl_pressed();
@@ -254,5 +250,73 @@ impl GodotNeovimPlugin {
         let count = self.count_buffer.parse::<i32>().unwrap_or(1).max(1);
         self.count_buffer.clear();
         count
+    }
+}
+
+/// Resolve modified printable keys from the keyboard layout, not composed text.
+fn modified_key_base(code: Key, label: Key, unicode: u32) -> Option<(String, bool)> {
+    let special = match code {
+        Key::ESCAPE => Some("Esc"),
+        Key::ENTER | Key::KP_ENTER => Some("CR"),
+        Key::TAB => Some("Tab"),
+        Key::BACKSPACE => Some("BS"),
+        Key::DELETE => Some("Del"),
+        Key::INSERT => Some("Insert"),
+        Key::UP => Some("Up"),
+        Key::DOWN => Some("Down"),
+        Key::LEFT => Some("Left"),
+        Key::RIGHT => Some("Right"),
+        Key::HOME => Some("Home"),
+        Key::END => Some("End"),
+        Key::PAGEUP => Some("PageUp"),
+        Key::PAGEDOWN => Some("PageDown"),
+        Key::SPACE => Some("Space"),
+        _ => None,
+    };
+    if let Some(name) = special {
+        return Some((name.into(), true));
+    }
+    let key = if label != Key::NONE { label } else { code };
+    let mut ch = char::from_u32(key.ord() as u32).filter(|c| !c.is_control())?;
+    let mut keep_shift = true;
+    // Preserve existing shifted punctuation when older/synthetic events have no label.
+    if label == Key::NONE && !ch.is_ascii_alphanumeric() {
+        if let Some(c) = char::from_u32(unicode).filter(|c| !c.is_control()) {
+            ch = c;
+            keep_shift = false;
+        }
+    }
+    let base = match ch {
+        '<' => "lt".into(),
+        '>' => "gt".into(),
+        '\\' => "Bslash".into(),
+        '|' => "Bar".into(),
+        _ => ch.to_lowercase().collect(),
+    };
+    Some((base, keep_shift))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn modified_keys_follow_labels_and_handle_missing_unicode() {
+        assert_eq!(
+            modified_key_base(Key::Q, Key::A, 0),
+            Some(("a".into(), true))
+        );
+        assert_eq!(
+            modified_key_base(Key::BACKSLASH, Key::NONE, 0),
+            Some(("Bslash".into(), true))
+        );
+        assert_eq!(
+            modified_key_base(Key::X, Key::X, '≈' as u32),
+            Some(("x".into(), true))
+        );
+        assert_eq!(
+            modified_key_base(Key::SEMICOLON, Key::NONE, ':' as u32),
+            Some((":".into(), false))
+        );
+        assert_eq!(modified_key_base(Key::SHIFT, Key::NONE, 0), None);
     }
 }

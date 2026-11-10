@@ -288,6 +288,8 @@ func _inject_key_event(step: Dictionary) -> void:
 		_log("[color=yellow]Unknown keycode: %s[/color]" % keycode_name)
 		return
 	event.physical_keycode = event.keycode
+	if step.has("key_label"):
+		event.key_label = OS.find_keycode_from_string(String(step.key_label))
 	event.ctrl_pressed = step.get("ctrl", false)
 	event.alt_pressed = step.get("alt", false)
 	event.shift_pressed = step.get("shift", false)
