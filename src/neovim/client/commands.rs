@@ -252,7 +252,7 @@ mod tests {
                 .unwrap();
             let state = handler.get_state();
             let locked = state.blocking_lock();
-            queue.send(format!("lua vim.rpcnotify({channel}, 'godot_cursor_moved', 1, 2); vim.g.barrier_done = 1")).unwrap();
+            queue.send(format!("lua vim.rpcnotify({channel}, 'godot_cursor_moved', 1, 2, 'n'); vim.g.barrier_done = 1")).unwrap();
             runtime.block_on(async {
                 tokio::time::timeout(Duration::from_secs(2), async {
                     while nvim.eval("exists('g:barrier_done')").await.unwrap() != Value::from(1) {

@@ -208,5 +208,33 @@
         "event": "Enter"
       }
     ]
+  },
+  {
+    "id": 708,
+    "name": "Ctrl shortcut follows the key label with missing Unicode",
+    "text": "extends Node\nvar layout_save = 1",
+    "cursor": [
+      1,
+      0
+    ],
+    "keymap": {
+      "n": {
+        "<C-s>": "action_save"
+      }
+    },
+    "steps": [
+      {
+        "event": "Q",
+        "key_label": "S",
+        "ctrl": true,
+        "unicode": 0
+      },
+      {
+        "wait": 0.3
+      }
+    ],
+    "expect_saved": true,
+    "expect_text": "extends Node\nvar layout_save = 1",
+    "expect_mode": "n"
   }
 ]

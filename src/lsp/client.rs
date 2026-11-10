@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Serialize)]
 struct JsonRpcRequest {
@@ -44,7 +44,7 @@ struct JsonRpcError {
 }
 
 struct Connection {
-    stream: TcpStream,
+    stream: LspStream,
     initialized: bool,
 }
 
@@ -61,23 +61,71 @@ impl GodotLspClient {
         }
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub fn connect(&self, port: u16) -> Result<(), String> {
         let addr = format!("127.0.0.1:{}", port);
         let stream = TcpStream::connect(&addr)
             .map_err(|e| format!("Failed to connect to LSP server at {}: {}", addr, e))?;
 
-        // Set read timeout - longer for initialization
+        Self::from_stream(stream).map(|client| {
+            *self
+                .connection
+                .lock()
+                .expect("LSP connection lock poisoned") = client.connection.into_inner().unwrap();
+        })
+    }
+
+    pub(super) fn from_stream(stream: TcpStream) -> Result<Self, String> {
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
-            .map_err(|e| format!("Failed to set timeout: {}", e))?;
+            .map_err(|e| e.to_string())?;
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .map_err(|e| e.to_string())?;
+        Ok(Self {
+            connection: Mutex::new(Some(Connection {
+                stream: LspStream {
+                    socket: stream,
+                    startup: None,
+                },
+                initialized: false,
+            })),
+            request_id: AtomicI64::new(1),
+        })
+    }
 
-        *self
-            .connection
-            .lock()
-            .map_err(|e| format!("Failed to acquire lock: {}", e))? = Some(Connection {
-            stream,
-            initialized: false,
-        });
+    pub(super) fn initialize_cancellable(
+        &self,
+        root: &str,
+        flag: Arc<AtomicBool>,
+        deadline: Instant,
+    ) -> Result<(), String> {
+        {
+            let mut connection = self.connection.lock().map_err(|e| e.to_string())?;
+            let stream = &mut connection.as_mut().ok_or("Not connected")?.stream;
+            stream
+                .socket
+                .set_read_timeout(Some(Duration::from_millis(100)))
+                .map_err(|e| e.to_string())?;
+            stream
+                .socket
+                .set_write_timeout(Some(Duration::from_millis(100)))
+                .map_err(|e| e.to_string())?;
+            stream.startup = Some((flag, deadline));
+        }
+        self.initialize(root)?;
+        let mut connection = self.connection.lock().map_err(|e| e.to_string())?;
+        let stream = &mut connection.as_mut().ok_or("Not connected")?.stream;
+        stream.startup = None;
+        stream
+            .socket
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .map_err(|e| e.to_string())?;
+        stream
+            .socket
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -85,10 +133,9 @@ impl GodotLspClient {
     pub fn disconnect(&self) {
         if let Ok(mut guard) = self.connection.lock() {
             if let Some(connection) = guard.take() {
-                let _ = connection.stream.shutdown(std::net::Shutdown::Both);
+                let _ = connection.stream.socket.shutdown(std::net::Shutdown::Both);
             }
         }
-        crate::verbose_print!("[godot-neovim] LSP disconnected");
     }
 
     pub fn initialize(&self, root_uri: &str) -> Result<(), String> {
@@ -117,21 +164,16 @@ impl GodotLspClient {
             ..Default::default()
         };
 
-        crate::verbose_print!("[godot-neovim] LSP: Sending initialize request...");
-
         let _result: InitializeResult = self.send_request_on(
             &mut connection.stream,
             "initialize",
             Some(serde_json::to_value(params).map_err(|e| format!("Failed to serialize: {}", e))?),
         )?;
 
-        crate::verbose_print!("[godot-neovim] LSP: Initialize response received");
-
         // Send initialized notification
         Self::send_notification_on(&mut connection.stream, "initialized", Some(json!({})))?;
 
         connection.initialized = true;
-        crate::verbose_print!("[godot-neovim] LSP: Initialization complete");
         Ok(())
     }
 
@@ -240,7 +282,7 @@ impl GodotLspClient {
 
     fn send_request_on<T: for<'de> Deserialize<'de>>(
         &self,
-        stream: &mut TcpStream,
+        stream: &mut LspStream,
         method: &str,
         params: Option<Value>,
     ) -> Result<T, String> {
@@ -256,8 +298,6 @@ impl GodotLspClient {
         let body = serde_json::to_string(&request).map_err(|e| e.to_string())?;
         let message = format!("Content-Length: {}\r\n\r\n{}", body.len(), body);
 
-        crate::verbose_print!("[godot-neovim] LSP request: {} (id={})", method, id);
-
         // Write request
         stream
             .write_all(message.as_bytes())
@@ -266,15 +306,8 @@ impl GodotLspClient {
             .flush()
             .map_err(|e| format!("Failed to flush: {}", e))?;
 
-        crate::verbose_print!("[godot-neovim] LSP: Request sent, waiting for response...");
-
         // Read response
         let response = Self::read_response(stream)?;
-
-        crate::verbose_print!(
-            "[godot-neovim] LSP: Response received for id={:?}",
-            response.id
-        );
 
         if let Some(id_resp) = response.id {
             if id_resp != id {
@@ -308,7 +341,7 @@ impl GodotLspClient {
     }
 
     fn send_notification_on(
-        stream: &mut TcpStream,
+        stream: &mut LspStream,
         method: &str,
         params: Option<Value>,
     ) -> Result<(), String> {
@@ -331,7 +364,7 @@ impl GodotLspClient {
         Ok(())
     }
 
-    fn read_message(reader: &mut BufReader<&mut TcpStream>) -> Result<String, String> {
+    fn read_message(reader: &mut BufReader<&mut LspStream>) -> Result<String, String> {
         // Read headers
         let mut content_length: Option<usize> = None;
         loop {
@@ -366,7 +399,7 @@ impl GodotLspClient {
         String::from_utf8(body).map_err(|e| format!("Invalid UTF-8 in response: {}", e))
     }
 
-    fn read_response(stream: &mut TcpStream) -> Result<JsonRpcResponse, String> {
+    fn read_response(stream: &mut LspStream) -> Result<JsonRpcResponse, String> {
         let mut reader = BufReader::new(stream);
 
         // Loop to skip notifications (messages without id)
@@ -393,5 +426,58 @@ impl GodotLspClient {
 impl Default for GodotLspClient {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// Preserve partial headers/bodies across short socket waits while allowing cancellation.
+struct LspStream {
+    socket: TcpStream,
+    startup: Option<(Arc<AtomicBool>, Instant)>,
+}
+impl LspStream {
+    fn check_cancelled(&self) -> std::io::Result<()> {
+        if let Some((flag, deadline)) = &self.startup {
+            if flag.load(Ordering::Acquire) || Instant::now() >= *deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "LSP startup cancelled or timed out",
+                ));
+            }
+        }
+        Ok(())
+    }
+    fn retry(&self, error: &std::io::Error) -> bool {
+        self.startup.is_some()
+            && matches!(
+                error.kind(),
+                std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::WouldBlock
+                    | std::io::ErrorKind::Interrupted
+            )
+    }
+}
+impl Read for LspStream {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            self.check_cancelled()?;
+            match self.socket.read(buffer) {
+                Err(error) if self.retry(&error) => continue,
+                result => return result,
+            }
+        }
+    }
+}
+impl Write for LspStream {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        loop {
+            self.check_cancelled()?;
+            match self.socket.write(buffer) {
+                Err(error) if self.retry(&error) => continue,
+                result => return result,
+            }
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.socket.flush()
     }
 }
