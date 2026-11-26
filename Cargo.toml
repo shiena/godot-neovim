@@ -12,7 +12,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 godot = { version = "0.5", features = ["api-4-4"] }
-nvim-rs = { version = "0.10.0", features = ["use_tokio"] }
+nvim-rs = { git = "https://github.com/KillTheMule/nvim-rs", rev = "30bad2a91ad69e690c6fffe357d7423f2ebddded", features = ["use_tokio"] }
 tokio = { version = "1.54.1", features = ["full"] }
 futures = "0.3"
 rmpv = "1.3"
