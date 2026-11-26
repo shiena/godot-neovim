@@ -123,7 +123,7 @@ impl HelpQuery {
 #[derive(GodotClass)]
 #[class(tool, init, base=EditorPlugin)]
 pub struct GodotNeovimPlugin {
-    base: Base<EditorPlugin>,
+    editor_plugin: Base<EditorPlugin>,
     pending_neovim_switch: bool,
     pending_cursor_sync: bool,
     pending_switch_path: String,
