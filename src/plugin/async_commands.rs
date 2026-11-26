@@ -38,7 +38,9 @@ impl GodotNeovimPlugin {
                         godot_print!("[godot-neovim] {}: {}", completed.command, value)
                     }
                     Ok(None) => {}
-                    Err(error) => godot_warn!("[godot-neovim] {}: {}", completed.command, error),
+                    Err(error) => {
+                        godot_warn!("[godot-neovim] {}: {}", completed.command, error);
+                    }
                 }
             }
         }
